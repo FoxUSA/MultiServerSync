@@ -19,6 +19,13 @@
 
 </div>
 
+<p align="center">
+<a href="images/multiserversync-copy.png"><img src="images/multiserversync-copy.png" height="140" alt="Копирование"></a>
+<a href="images/multiserversync-command.png"><img src="images/multiserversync-command.png" height="140" alt="Команда"></a>
+<a href="images/multiserversync-servers.png"><img src="images/multiserversync-servers.png" height="140" alt="Серверы"></a>
+<a href="images/multiserversync-tabs.png"><img src="images/multiserversync-tabs.png" height="140" alt="Все вкладки"></a>
+</p>
+
 Серверы заводятся один раз. Дальше — отметили нужные, выбрали файлы или набрали команду и нажали **Выполнить**.
 
 - **Копирование на все серверы** — файлы и папки уходят на отмеченные серверы параллельно. Обрыв связи не оставит обрезка — файл подменяется целиком. Упавшие серверы повторяются одной кнопкой.
