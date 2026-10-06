@@ -21,7 +21,9 @@ Check the servers — and push files or run a command on all of them with one cl
 
 <p align="center">
 <a href="images/multiserversync-copy.png"><img src="images/multiserversync-copy.png" height="140" alt="Copying"></a>
+<a href="images/multiserversync-copy-output.png"><img src="images/multiserversync-copy-output.png" height="140" alt="Copy output"></a>
 <a href="images/multiserversync-command.png"><img src="images/multiserversync-command.png" height="140" alt="Command"></a>
+<a href="images/multiserversync-command-output.png"><img src="images/multiserversync-command-output.png" height="140" alt="Command output"></a>
 <a href="images/multiserversync-servers.png"><img src="images/multiserversync-servers.png" height="140" alt="Servers"></a>
 <a href="images/multiserversync-tabs.png"><img src="images/multiserversync-tabs.png" height="140" alt="All tabs"></a>
 </p>
