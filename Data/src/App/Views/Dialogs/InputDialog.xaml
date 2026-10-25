@@ -1,0 +1,54 @@
+<ui:FluentWindow
+  x:Class="MultiServerSync.Views.Dialogs.InputDialog"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+  Title="Ввод"
+  Width="440"
+  MinHeight="0"
+  ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
+  ExtendsContentIntoTitleBar="True"
+  Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  ResizeMode="NoResize"
+  SizeToContent="Height"
+  WindowBackdropType="Mica"
+  WindowCornerPreference="Round"
+  WindowStartupLocation="CenterOwner">
+
+  <!--  высота окна = высота содержимого: пустого поля внизу быть не должно  -->
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <ui:TitleBar
+      Grid.Row="0"
+      Title="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
+      ShowMaximize="False"
+      ShowMinimize="False" />
+
+    <StackPanel Grid.Row="1" Margin="20,8,20,20">
+      <TextBlock
+        x:Name="PromptText"
+        Margin="0,0,0,8"
+        Text="Введите значение" />
+      <ui:TextBox x:Name="ValueBox" />
+      <StackPanel
+        Margin="0,16,0,0"
+        HorizontalAlignment="Right"
+        Orientation="Horizontal">
+        <ui:Button
+          Margin="0,0,8,0"
+          Appearance="Primary"
+          Click="OnOk"
+          Content="ОК"
+          IsDefault="True" />
+        <ui:Button
+          Click="OnCancel"
+          Content="Отмена"
+          IsCancel="True" />
+      </StackPanel>
+    </StackPanel>
+  </Grid>
+</ui:FluentWindow>

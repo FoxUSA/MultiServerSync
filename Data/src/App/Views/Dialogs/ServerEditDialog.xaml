@@ -1,0 +1,178 @@
+<ui:FluentWindow
+  x:Class="MultiServerSync.Views.Dialogs.ServerEditDialog"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+  Title="Сервер"
+  Width="560"
+  MinHeight="0"
+  ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
+  ExtendsContentIntoTitleBar="True"
+  Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  ResizeMode="NoResize"
+  SizeToContent="Height"
+  WindowBackdropType="Mica"
+  WindowCornerPreference="Round"
+  WindowStartupLocation="CenterOwner">
+
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <ui:TitleBar
+      Grid.Row="0"
+      Title="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
+      ShowMaximize="False"
+      ShowMinimize="False" />
+
+    <StackPanel Grid.Row="1" Margin="24,8,24,0">
+      <TextBlock
+        Margin="0,0,0,4"
+        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+        Text="Отображаемое имя" />
+      <ui:TextBox x:Name="NameBox" PlaceholderText="например: веб-сервер 1" />
+
+      <Grid Margin="0,12,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="12" />
+          <ColumnDefinition Width="110" />
+        </Grid.ColumnDefinitions>
+
+        <StackPanel Grid.Column="0">
+          <TextBlock
+            Margin="0,0,0,4"
+            Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+            Text="IP-адрес" />
+          <!--  только цифры и точки, точка после третьей цифры ставится сама  -->
+          <ui:TextBox
+            x:Name="HostBox"
+            InputMethod.IsInputMethodEnabled="False"
+            MaxLength="15"
+            PlaceholderText="например: 203.0.113.10"
+            PreviewKeyDown="OnHostPreviewKeyDown"
+            PreviewTextInput="OnHostPreviewTextInput" />
+        </StackPanel>
+
+        <StackPanel Grid.Column="2">
+          <TextBlock
+            Margin="0,0,0,4"
+            Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+            Text="Порт" />
+          <ui:NumberBox
+            x:Name="PortBox"
+            ClearButtonEnabled="False"
+            Maximum="65535"
+            Minimum="1"
+            SpinButtonPlacementMode="Hidden" />
+        </StackPanel>
+      </Grid>
+
+      <TextBlock
+        Margin="0,12,0,4"
+        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+        Text="Пользователь" />
+      <ui:TextBox x:Name="UserBox" PlaceholderText="root" />
+
+      <TextBlock
+        Margin="0,12,0,4"
+        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+        Text="Пароль" />
+      <ui:PasswordBox
+        x:Name="PasswordBox"
+        PlaceholderText="при входе по ключу нужен только для sudo"
+        RevealButtonEnabled="True" />
+
+      <!--  ключ и пароль к нему — одной строкой, чтобы окно не вырастало на 150 %  -->
+      <TextBlock
+        Margin="0,12,0,4"
+        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+        Text="Ключ SSH" />
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="170" />
+        </Grid.ColumnDefinitions>
+        <ui:TextBox
+          x:Name="KeyBox"
+          Grid.Column="0"
+          PlaceholderText="не указан — вход по паролю" />
+        <ui:Button
+          Grid.Column="1"
+          Margin="6,0"
+          VerticalAlignment="Stretch"
+          Click="OnPickKey"
+          Content="Выбрать…"
+          ToolTip="Закрытый ключ: OpenSSH (id_ed25519, id_rsa), PEM или PuTTY .ppk" />
+        <ui:PasswordBox
+          x:Name="KeyPassBox"
+          Grid.Column="2"
+          PlaceholderText="пароль ключа"
+          RevealButtonEnabled="True"
+          ToolTip="Только если ключ защищён паролем" />
+      </Grid>
+
+      <TextBlock
+        Margin="0,12,0,4"
+        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+        Text="Заметки" />
+      <ui:TextBox
+        x:Name="NotesBox"
+        Height="78"
+        AcceptsReturn="True"
+        PlaceholderText="в свободной форме: что за сервер, что на нём, у кого доступ"
+        TextWrapping="Wrap"
+        VerticalContentAlignment="Top"
+        VerticalScrollBarVisibility="Auto" />
+      <CheckBox
+        x:Name="ShowNotesBox"
+        Margin="0,6,0,0"
+        Content="Показывать заметку под именем сервера в панели слева" />
+
+      <StackPanel Margin="0,16,0,0" Orientation="Horizontal">
+        <ui:Button
+          x:Name="TestButton"
+          Click="OnTest"
+          Content="Проверить подключение"
+          Icon="{ui:SymbolIcon PlugConnected24}" />
+        <ui:ProgressRing
+          x:Name="TestSpinner"
+          Width="20"
+          Height="20"
+          Margin="12,0,0,0"
+          VerticalAlignment="Center"
+          IsIndeterminate="True"
+          Visibility="Collapsed" />
+      </StackPanel>
+
+      <ui:InfoBar
+        x:Name="TestResult"
+        Margin="0,12,0,0"
+        IsClosable="False"
+        IsOpen="False" />
+    </StackPanel>
+
+    <StackPanel
+      Grid.Row="2"
+      Margin="24,16,24,20"
+      HorizontalAlignment="Right"
+      Orientation="Horizontal">
+      <ui:Button
+        Margin="0,0,8,0"
+        Appearance="Primary"
+        Click="OnSave"
+        Content="Сохранить"
+        Icon="{ui:SymbolIcon Save24}"
+        IsDefault="True" />
+      <ui:Button
+        Click="OnCancel"
+        Content="Отмена"
+        Icon="{ui:SymbolIcon Dismiss24}"
+        IsCancel="True" />
+    </StackPanel>
+  </Grid>
+</ui:FluentWindow>

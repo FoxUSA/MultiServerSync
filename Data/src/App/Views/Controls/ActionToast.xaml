@@ -1,0 +1,56 @@
+<UserControl
+  x:Class="MultiServerSync.Views.Controls.ActionToast"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  IsHitTestVisible="False"
+  Opacity="0"
+  Visibility="Collapsed">
+
+  <!--  плашка ничего не перекрывает для мыши: щелчки проходят сквозь неё  -->
+  <Grid x:Name="Card" MaxWidth="460">
+    <!--  тень — отдельным слоем под плашкой: эффект на рамке с текстом рисует текст
+          картинкой, и он выходит размытым  -->
+    <Border
+      Background="{DynamicResource SolidBackgroundFillColorTertiaryBrush}"
+      CornerRadius="6">
+      <Border.Effect>
+        <DropShadowEffect
+          BlurRadius="12"
+          Opacity="0.25"
+          ShadowDepth="2" />
+      </Border.Effect>
+    </Border>
+
+    <Border
+      x:Name="Body"
+      Padding="12,8"
+      Background="{DynamicResource SolidBackgroundFillColorTertiaryBrush}"
+      BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+      BorderThickness="1"
+      CornerRadius="6">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!--  цвет — только точкой: сама надпись спокойная  -->
+        <Ellipse
+          x:Name="Dot"
+          Grid.Column="0"
+          Width="7"
+          Height="7"
+          Margin="0,5,9,0"
+          VerticalAlignment="Top" />
+
+        <TextBlock
+          x:Name="Message"
+          Grid.Column="1"
+          FontSize="12"
+          Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+          TextOptions.TextFormattingMode="Display"
+          TextWrapping="Wrap" />
+      </Grid>
+    </Border>
+  </Grid>
+</UserControl>

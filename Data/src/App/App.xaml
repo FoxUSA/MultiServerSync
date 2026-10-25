@@ -1,0 +1,148 @@
+<Application
+  x:Class="MultiServerSync.App"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:core="clr-namespace:MultiServerSync.Core"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ui:ThemesDictionary Theme="Dark" />
+        <ui:ControlsDictionary />
+        <ResourceDictionary Source="/Themes/DataGridStyles.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+
+      <!--  длинные и многострочные команды в выпадающих списках показываются одной короткой строкой  -->
+      <core:ShortLineConverter x:Key="ShortLine" />
+
+      <!--
+        Выделение строки: полупрозрачный акцент вместо системного «Highlight».
+        Системный красит строку сплошным цветом и заодно меняет цвет текста на белый —
+        в тёмной теме строка становится нечитаемой. Полупрозрачный работает в обеих темах:
+        текст остаётся своего цвета.
+      -->
+      <SolidColorBrush x:Key="AppRowSelectedBrush" Color="#554CA6FF" />
+      <SolidColorBrush x:Key="AppRowHoverBrush" Color="#224CA6FF" />
+
+      <!--  WPF UI не оформляет шапку GridView — по умолчанию она светлая в любой теме  -->
+      <Style TargetType="GridViewColumnHeader">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Padding" Value="10,7" />
+        <Setter Property="HorizontalContentAlignment" Value="Left" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="GridViewColumnHeader">
+              <Border
+                x:Name="Bd"
+                Padding="{TemplateBinding Padding}"
+                Background="{TemplateBinding Background}"
+                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                BorderThickness="0,0,1,1">
+                <ContentPresenter
+                  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                  VerticalAlignment="Center" />
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                  <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                </Trigger>
+                <Trigger Property="Role" Value="Padding">
+                  <Setter TargetName="Bd" Property="BorderThickness" Value="0,0,0,1" />
+                </Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
+
+      <!--  крестик «убрать эту строку из истории» внутри выпадающего списка  -->
+      <Style x:Key="HistoryRemoveButtonStyle" TargetType="Button">
+        <Setter Property="Width" Value="20" />
+        <Setter Property="Height" Value="20" />
+        <Setter Property="Margin" Value="10,0,0,0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        <Setter Property="ToolTip" Value="Удалить из истории" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="Button">
+              <Border
+                x:Name="Bd"
+                Background="{TemplateBinding Background}"
+                CornerRadius="4">
+                <TextBlock
+                  x:Name="Glyph"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  FontSize="11"
+                  Foreground="{TemplateBinding Foreground}"
+                  Text="&#x2715;" />
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                  <Setter TargetName="Bd" Property="Background" Value="#C42B1C" />
+                  <Setter TargetName="Glyph" Property="Foreground" Value="White" />
+                </Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
+
+      <!--  карандаш «изменить эту запись» — рядом с крестиком в выпадающем списке  -->
+      <Style x:Key="RowEditButtonStyle" TargetType="Button">
+        <Setter Property="Width" Value="20" />
+        <Setter Property="Height" Value="20" />
+        <Setter Property="Margin" Value="10,0,0,0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        <Setter Property="ToolTip" Value="Изменить название и код" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="Button">
+              <Border
+                x:Name="Bd"
+                Background="{TemplateBinding Background}"
+                CornerRadius="4">
+                <TextBlock
+                  x:Name="Glyph"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  FontSize="11"
+                  Foreground="{TemplateBinding Foreground}"
+                  Text="&#x270E;" />
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                  <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                  <Setter TargetName="Glyph" Property="Foreground" Value="White" />
+                </Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
+
+      <Style TargetType="ListView">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+      </Style>
+
+      <Style TargetType="TreeView">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+      </Style>
+
+    </ResourceDictionary>
+  </Application.Resources>
+</Application>

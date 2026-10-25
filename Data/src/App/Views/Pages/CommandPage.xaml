@@ -1,0 +1,323 @@
+﻿<Page
+  x:Class="MultiServerSync.Views.Pages.CommandPage"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+  xmlns:controls="clr-namespace:MultiServerSync.Views.Controls"
+  Title="Команда"
+  ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
+  ui:Design.Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  ScrollViewer.CanContentScroll="False">
+
+  <Page.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+    <!--  строка истории и избранного: невысокие, чтобы поле ввода было больше  -->
+    <Style
+      x:Key="SlimComboStyle"
+      BasedOn="{StaticResource {x:Type ComboBox}}"
+      TargetType="ComboBox">
+      <Setter Property="Height" Value="28" />
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="Padding" Value="8,0" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+
+    <!--
+      Значки поверх поля ввода, в его правом верхнем углу: места на странице не занимают,
+      а действие относится ровно к тому полю, над которым висят.
+    -->
+    <Style x:Key="EditorIconStyle" TargetType="Button">
+      <Setter Property="Width" Value="40" />
+      <Setter Property="Height" Value="40" />
+      <Setter Property="Margin" Value="2,0,0,0" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Bd"
+              Background="{TemplateBinding Background}"
+              CornerRadius="4"
+              TextElement.Foreground="{TemplateBinding Foreground}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+              </Trigger>
+              <!--  пока команда идёт, запуск погашен — видно, что второй раз не нажать  -->
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.35" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Page.Resources>
+
+  <Grid Margin="20,12,20,12">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" MinHeight="120" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="Auto" />
+      <ColumnDefinition Width="*" />
+    </Grid.ColumnDefinitions>
+
+    <TextBlock
+      Grid.Row="0"
+      Grid.Column="0"
+      Margin="0,0,10,0"
+      VerticalAlignment="Center"
+      FontSize="12"
+      Text="История:" />
+    <ComboBox
+      x:Name="HistoryBox"
+      Grid.Row="0"
+      Grid.Column="1"
+      SelectionChanged="OnHistoryPicked"
+      Style="{StaticResource SlimComboStyle}"
+      ToolTip="Ранее выполнявшиеся команды — общие для всех вкладок. Крестик убирает строку из истории.">
+      <ComboBox.ItemTemplate>
+        <DataTemplate>
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <!--
+              HorizontalAlignment обязателен: элемент с Stretch, упёршийся в MaxWidth,
+              WPF центрует в оставшемся месте — в закрытом списке команда отъезжала
+              от левого края поля на половину лишней ширины.
+            -->
+            <TextBlock
+              Grid.Column="0"
+              MinWidth="320"
+              MaxWidth="760"
+              HorizontalAlignment="Left"
+              VerticalAlignment="Center"
+              FontFamily="Consolas"
+              Text="{Binding Converter={StaticResource ShortLine}}"
+              TextTrimming="CharacterEllipsis" />
+            <Button
+              x:Name="Remove"
+              Grid.Column="1"
+              Click="OnRemoveHistoryItem"
+              Style="{StaticResource HistoryRemoveButtonStyle}" />
+          </Grid>
+          <DataTemplate.Triggers>
+            <!--  в закрытом списке шаблон рисует выбранную строку — там крестик не нужен  -->
+            <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}}" Value="{x:Null}">
+              <Setter TargetName="Remove" Property="Visibility" Value="Collapsed" />
+            </DataTrigger>
+          </DataTemplate.Triggers>
+        </DataTemplate>
+      </ComboBox.ItemTemplate>
+    </ComboBox>
+    <!--  избранное: своя шпаргалка команд с описаниями, общая для всех вкладок  -->
+    <TextBlock
+      Grid.Row="1"
+      Grid.Column="0"
+      Margin="0,6,10,0"
+      VerticalAlignment="Center"
+      FontSize="12"
+      Text="Избранное:" />
+    <ComboBox
+      x:Name="BookBox"
+      Grid.Row="1"
+      Grid.Column="1"
+      Margin="0,6,0,0"
+      SelectionChanged="OnSnippetPicked"
+      Style="{StaticResource SlimComboStyle}"
+      ToolTip="Сохранённые команды с описанием — общие для всех вкладок. Выбор подставляет команду в поле ввода, карандаш правит название и код, крестик удаляет запись.">
+      <ComboBox.ItemTemplate>
+        <DataTemplate>
+          <Grid ToolTip="{Binding Preview}">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel
+              Grid.Column="0"
+              MinWidth="320"
+              MaxWidth="760"
+              HorizontalAlignment="Left">
+              <TextBlock
+                FontWeight="SemiBold"
+                Text="{Binding Comment}"
+                TextTrimming="CharacterEllipsis" />
+              <TextBlock
+                x:Name="Line"
+                FontFamily="Consolas"
+                FontSize="11"
+                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                Text="{Binding Preview}"
+                TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+
+            <Button
+              x:Name="Edit"
+              Grid.Column="1"
+              VerticalAlignment="Center"
+              Click="OnEditSnippet"
+              Style="{StaticResource RowEditButtonStyle}" />
+
+            <Button
+              x:Name="Remove"
+              Grid.Column="2"
+              VerticalAlignment="Center"
+              Click="OnRemoveSnippet"
+              Style="{StaticResource HistoryRemoveButtonStyle}" />
+          </Grid>
+          <DataTemplate.Triggers>
+            <!--  в закрытом списке остаётся только описание — строка не должна расти в высоту  -->
+            <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}}" Value="{x:Null}">
+              <Setter TargetName="Edit" Property="Visibility" Value="Collapsed" />
+              <Setter TargetName="Remove" Property="Visibility" Value="Collapsed" />
+              <Setter TargetName="Line" Property="Visibility" Value="Collapsed" />
+            </DataTrigger>
+          </DataTemplate.Triggers>
+        </DataTemplate>
+      </ComboBox.ItemTemplate>
+    </ComboBox>
+
+    <!--  поле ввода занимает всё оставшееся место  -->
+    <Grid
+      Grid.Row="2"
+      Grid.Column="0"
+      Grid.ColumnSpan="2"
+      Margin="0,10,0,0">
+      <ui:TextBox
+        x:Name="CommandBox"
+        AcceptsReturn="True"
+        AcceptsTab="True"
+        ClearButtonEnabled="False"
+        FontFamily="Consolas"
+        HorizontalScrollBarVisibility="Auto"
+        PreviewKeyDown="OnCommandKeyDown"
+        Padding="10,8,250,8"
+        PlaceholderText="Например: systemctl restart nginx&#x0a;Можно вставлять многострочные скрипты любой длины — они уходят на сервер целиком."
+        Text="{Binding CommandText, UpdateSourceTrigger=PropertyChanged}"
+        TextWrapping="NoWrap"
+        VerticalContentAlignment="Top"
+        VerticalScrollBarVisibility="Auto" />
+
+      <!--  значки поверх поля, в его правом верхнем углу  -->
+      <StackPanel
+        Margin="0,6,10,0"
+        HorizontalAlignment="Right"
+        VerticalAlignment="Top"
+        Orientation="Horizontal">
+        <!--  по ходу работы: вставить → выполнить → забрать вывод; дальше избранное и очистка  -->
+        <Button
+          Click="OnPasteCommand"
+          Style="{StaticResource EditorIconStyle}"
+          ToolTip="Вставить из буфера обмена — заменяет всё содержимое поля, чтобы вставка не приклеилась к прошлой команде">
+          <ui:SymbolIcon FontSize="22" Symbol="ClipboardPaste24" />
+        </Button>
+        <!--  на одном месте запуск и остановка: пока команда идёт, ▶ становится ■  -->
+        <Button
+          Click="OnRun"
+          Style="{StaticResource EditorIconStyle}"
+          ToolTip="Выполнить (Ctrl+Enter)"
+          Visibility="{Binding CommandBatch.IsIdle, Converter={StaticResource BoolToVis}}">
+          <ui:SymbolIcon
+            FontSize="22"
+            Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
+            Symbol="Play24" />
+        </Button>
+        <Button
+          Click="OnInterrupt"
+          Style="{StaticResource EditorIconStyle}"
+          ToolTip="Прервать — Ctrl+C командам на всех серверах (Ctrl+Enter или Esc)"
+          Visibility="{Binding CommandBatch.IsRunning, Converter={StaticResource BoolToVis}}">
+          <ui:SymbolIcon
+            FontSize="22"
+            Foreground="#E0574A"
+            Symbol="Stop24" />
+        </Button>
+        <Button
+          Click="OnCopyOutput"
+          Style="{StaticResource EditorIconStyle}"
+          ToolTip="Копировать вывод (Ctrl+Shift+C) — то же, что «Копировать. Текущее окно» в терминале: вывод сервера, выбранного в таблице слева">
+          <ui:SymbolIcon FontSize="22" Symbol="Copy24" />
+        </Button>
+        <Border
+          Width="1"
+          Height="22"
+          Margin="6,0,4,0"
+          VerticalAlignment="Center"
+          Background="{DynamicResource ControlStrokeColorDefaultBrush}" />
+        <Button
+          Click="OnAddSnippet"
+          Style="{StaticResource EditorIconStyle}"
+          ToolTip="В избранное — записать команду из поля ввода с названием. Существующее название перезапишет свою запись.">
+          <ui:SymbolIcon FontSize="22" Symbol="Heart24" />
+        </Button>
+        <Button
+          Click="OnClearCommand"
+          Style="{StaticResource EditorIconStyle}"
+          ToolTip="Очистить поле ввода команды">
+          <ui:SymbolIcon FontSize="22" Symbol="Delete24" />
+        </Button>
+      </StackPanel>
+
+      <!--  «не вставлено» — посреди поля, крупно: в углу окна такую плашку не замечали  -->
+      <controls:ActionToast
+        x:Name="PasteToast"
+        Margin="20"
+        HorizontalAlignment="Center"
+        VerticalAlignment="Center" />
+    </Grid>
+
+    <Grid
+      Grid.Row="3"
+      Grid.Column="0"
+      Grid.ColumnSpan="2"
+      Margin="0,10,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
+
+      <StackPanel Grid.Column="0" Orientation="Horizontal">
+        <ui:Button
+          Margin="0,0,18,0"
+          Appearance="Primary"
+          Click="OnRun"
+          Content="Выполнить"
+          Icon="{ui:SymbolIcon Play24}"
+          IsEnabled="{Binding CommandBatch.IsIdle}"
+          ToolTip="Команда на отмеченных серверах (Ctrl+Enter в поле ввода)" />
+
+        <CheckBox
+          VerticalAlignment="Center"
+          Content="через sudo -S"
+          IsChecked="{Binding UseSudo, Mode=TwoWay}"
+          ToolTip="Команда выполняется как sudo -S -p '' bash -s, пароль сервера подаётся на stdin" />
+      </StackPanel>
+
+      <TextBlock
+        Grid.Column="1"
+        HorizontalAlignment="Right"
+        VerticalAlignment="Center"
+        FontSize="11"
+        Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+        Text="{Binding CommandSizeInfo}" />
+    </Grid>
+  </Grid>
+</Page>

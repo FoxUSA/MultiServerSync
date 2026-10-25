@@ -14,6 +14,7 @@
 ![Windows 10 / 11](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6?logo=windows)
 ![SSH / SFTP](https://img.shields.io/badge/SSH%20%2F%20SFTP-Linux--серверы-444)
 ![Бесплатно](https://img.shields.io/badge/цена-бесплатно-2ea44f)
+[![Лицензия: GPL-3.0](https://img.shields.io/badge/лицензия-GPL--3.0-blue)](LICENSE)
 
 [English](README.md) · **Русский**
 
@@ -36,6 +37,9 @@
 - **Команды и скрипты** — команда или многострочный скрипт любой длины на всех серверах сразу, при желании через sudo. Избранные команды и история под рукой.
 - **Вывод каждого сервера** — вживую и по каждому серверу отдельно, с подсветкой. Зависшую команду прерывают Ctrl+C или снимают прямо из программы.
 - **Вкладки под задачи** — у каждой вкладки свои серверы, файлы, путь и команда. **Выполнить везде** запускает все вкладки разом, итог виден на ярлыках.
+- **Ключ SSH или пароль** — ключи OpenSSH, PEM и PuTTY `.ppk`, с паролем ключа или без. Если не указано ничего, пробуются стандартные ключи из `%USERPROFILE%\.ssh`, как у `ssh`.
+- **Пароли зашифрованы** — по умолчанию под учётной записью Windows, или мастер-паролем, который подходит на любом компьютере.
+- **Умный режим** — помнит, где обычно выполняется каждая команда и копирование с каждой вкладки, и спрашивает перед запуском на непривычном сервере. Безопасные команды не проверяются.
 
 ## Как начать
 
@@ -43,7 +47,23 @@
 2. Запустить `MultiServerSync.exe`
 3. Добавить серверы — и отметить, куда отправлять
 
-Windows 10 / 11 (x64), нужен [.NET 9 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/9.0). Бесплатно, без телеметрии. В репозитории — только страница и ссылки на загрузку.
+Windows 10 / 11 (x64), нужен [.NET 9 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/9.0). Бесплатно, открытый код, без телеметрии.
+
+## Сборка из исходников
+
+Нужен [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0).
+
+```powershell
+git clone https://github.com/FoxUSA/MultiServerSync.git
+cd MultiServerSync
+powershell -ExecutionPolicy Bypass -File .\Data\build.ps1
+```
+
+Лаунчер `MultiServerSync.exe` появится в корне репозитория, программа — в `Data`, настройки — в `UserData`. Исходники: `Data/src/App` (программа, WPF + [WPF UI](https://github.com/lepoco/wpfui), [SSH.NET](https://github.com/sshnet/SSH.NET)) и `Data/src/Launcher`. Заметки для разработчика: [Data/README.md](Data/README.md).
+
+## Лицензия
+
+[GPL-3.0](LICENSE) — можно пользоваться, менять и распространять; программы на основе этого кода тоже должны оставаться открытыми.
 
 ---
 

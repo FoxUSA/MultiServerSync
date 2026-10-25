@@ -1,0 +1,99 @@
+<ui:FluentWindow
+  x:Class="MultiServerSync.Launcher.InstallWindow"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+  Title="Обновление MultiServerSync"
+  Width="520"
+  MinHeight="0"
+  ExtendsContentIntoTitleBar="True"
+  Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  Icon="pack://application:,,,/Assets/app.ico"
+  ResizeMode="NoResize"
+  SizeToContent="Height"
+  WindowBackdropType="Mica"
+  WindowCornerPreference="Round"
+  WindowStartupLocation="CenterScreen">
+
+  <!--  то же окно, что в программе: там шаги 1–3, здесь программа уже закрыта и идут 4–8  -->
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <ui:TitleBar
+      Grid.Row="0"
+      Title="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
+      CanMaximize="False"
+      Icon="{ui:ImageIcon 'pack://application:,,,/Assets/app.ico'}"
+      ShowClose="False"
+      ShowMaximize="False"
+      ShowMinimize="False" />
+
+    <StackPanel Grid.Row="1" Margin="20,4,20,20">
+      <TextBlock
+        FontSize="18"
+        FontWeight="SemiBold"
+        Text="Установка обновления" />
+      <TextBlock
+        Margin="0,2,0,0"
+        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+        Text="Серверы, вкладки и настройки в UserData остаются как были."
+        TextWrapping="Wrap" />
+
+      <Border
+        Margin="0,14,0,0"
+        Padding="12,8"
+        Background="{DynamicResource ControlFillColorDefaultBrush}"
+        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+        BorderThickness="1"
+        CornerRadius="6">
+        <ItemsControl x:Name="StepList">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Grid Margin="0,2" Opacity="{Binding Opacity}">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="22" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock
+                  Grid.Column="0"
+                  FontWeight="Bold"
+                  Foreground="{Binding GlyphBrush}"
+                  Text="{Binding Glyph}" />
+                <TextBlock
+                  Grid.Column="1"
+                  FontWeight="{Binding Weight}"
+                  Text="{Binding Text}"
+                  TextWrapping="Wrap" />
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </Border>
+
+      <TextBlock
+        x:Name="StageText"
+        Margin="0,12,0,0"
+        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+        TextWrapping="Wrap" />
+      <ProgressBar
+        x:Name="Bar"
+        Height="6"
+        Margin="0,6,0,0"
+        Maximum="100" />
+
+      <!--  нужна только при сбое: прочитать причину и запустить прежнюю версию  -->
+      <ui:Button
+        x:Name="RunButton"
+        Margin="0,16,0,0"
+        HorizontalAlignment="Right"
+        Appearance="Primary"
+        Click="OnRun"
+        Content="Запустить программу"
+        Icon="{ui:SymbolIcon Play24}"
+        Visibility="Collapsed" />
+    </StackPanel>
+  </Grid>
+</ui:FluentWindow>

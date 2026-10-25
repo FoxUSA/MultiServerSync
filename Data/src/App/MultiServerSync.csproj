@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <!--  только ради значка в трее (NotifyIcon): в WPF своего нет  -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>MultiServerSync</RootNamespace>
+    <AssemblyName>MultiServerSync.App</AssemblyName>
+    <Product>MultiServerSync</Product>
+    <!--  номер версии задаёт build.ps1 (-p:Version), источник правды — Data\manifest.json  -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--  иконки папок: ресурсом в сборке (эталон для восстановления) и файлами в Data  -->
+    <Resource Include="Assets\app.ico" />
+    <Resource Include="Assets\data.ico" />
+    <Resource Include="Assets\user_data.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--  щелчок об окончании операции: MediaPlayer играет только файл с диска, не ресурс  -->
+    <Content Include="Assets\send.mp3">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!--  WinForms подключён не целиком: его Application, Button, MessageBox спорили бы с WPF  -->
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+    <PackageReference Include="SSH.NET" Version="2025.1.0" />
+  </ItemGroup>
+
+</Project>

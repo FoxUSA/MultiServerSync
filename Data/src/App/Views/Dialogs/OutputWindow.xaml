@@ -1,0 +1,213 @@
+<ui:FluentWindow
+  x:Class="MultiServerSync.Views.Dialogs.OutputWindow"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:core="clr-namespace:MultiServerSync.Core"
+  xmlns:controls="clr-namespace:MultiServerSync.Views.Controls"
+  xmlns:services="clr-namespace:MultiServerSync.Services"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+  Title="Вывод сервера"
+  Icon="pack://application:,,,/Assets/app.ico"
+  Width="900"
+  Height="620"
+  MinWidth="380"
+  MinHeight="240"
+  ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
+  ui:Design.Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  ExtendsContentIntoTitleBar="True"
+  Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  ShowInTaskbar="True"
+  WindowBackdropType="Mica"
+  WindowCornerPreference="Round"
+  WindowStartupLocation="CenterOwner">
+
+  <ui:FluentWindow.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolToVis" />
+  </ui:FluentWindow.Resources>
+
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <ui:TitleBar
+      Grid.Row="0"
+      Title="Вывод сервера"
+      Icon="{core:AppIcon}" />
+
+    <!--  строка над выводом: чей это вывод, галочка лога и копирование  -->
+    <Grid Grid.Row="1" Margin="12,2,12,6">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <TextBlock
+        Grid.Column="0"
+        VerticalAlignment="Center"
+        FontSize="12"
+        FontWeight="SemiBold"
+        Text="{Binding FullTitle, FallbackValue='Выберите сервер в таблице главного окна', TargetNullValue='Выберите сервер в таблице главного окна'}"
+        TextTrimming="CharacterEllipsis" />
+
+      <!--  сколько уже идёт команда, а по окончании — за сколько выполнена  -->
+      <TextBlock
+        Grid.Column="1"
+        Margin="10,0,0,0"
+        VerticalAlignment="Center"
+        FontSize="15"
+        FontWeight="SemiBold"
+        Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+        Text="{Binding ElapsedText}"
+        ToolTip="Сколько выполняется команда на этом сервере" />
+
+      <CheckBox
+        Grid.Column="2"
+        Margin="10,0,10,0"
+        VerticalAlignment="Center"
+        Content="Сохранять лог"
+        FontSize="11"
+        IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=KeepOutputLog, Mode=TwoWay}"
+        ToolTip="Отмечено — следующий прогон дописывается к этому выводу через отбивку. Снято — вывод каждый раз начинается заново." />
+
+      <ui:Button
+        Grid.Column="3"
+        Margin="0,0,6,0"
+        Padding="9,2"
+        Click="OnCopy"
+        Content="Копировать"
+        FontSize="11"
+        ToolTip="Вывод этого сервера — в буфер обмена">
+        <ui:Button.Icon>
+          <ui:SymbolIcon FontSize="17" Symbol="Copy24" />
+        </ui:Button.Icon>
+      </ui:Button>
+
+      <ui:Button
+        Grid.Column="4"
+        Padding="9,2"
+        Click="OnClear"
+        Content="Очистить"
+        FontSize="11"
+        ToolTip="Убрать накопленный вывод этого сервера">
+        <ui:Button.Icon>
+          <ui:SymbolIcon FontSize="17" Symbol="Delete24" />
+        </ui:Button.Icon>
+      </ui:Button>
+    </Grid>
+
+    <Border
+      Grid.Row="2"
+      Margin="12,0,12,0"
+      BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+      BorderThickness="1">
+      <RichTextBox
+        x:Name="OutputBox"
+        Padding="6,2"
+        Background="Transparent"
+        BorderThickness="0"
+        FontFamily="Consolas"
+        FontSize="12"
+        HorizontalScrollBarVisibility="Disabled"
+        IsReadOnly="True"
+        controls:OutputColoring.Text="{Binding Output, Mode=OneWay}"
+        VerticalScrollBarVisibility="Auto">
+        <!--
+          Тема подменяет фон поля под мышью и в фокусе — на выводе это выглядит как мигание.
+          Ключи состояний переопределены у самого поля: соседних элементов это не касается.
+        -->
+        <RichTextBox.Resources>
+          <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+          <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+          <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+          <SolidColorBrush x:Key="TextControlFocusedBorderBrush" Color="Transparent" />
+        </RichTextBox.Resources>
+      </RichTextBox>
+    </Border>
+
+    <!--  строка ответа команде этого сервера — та же, что под выводом в главном окне  -->
+    <controls:AnswerBar
+      x:Name="Answer"
+      Grid.Row="3"
+      Margin="12,0,12,12" />
+
+    <!--  строка состояния: слева — выбранный сервер, справа — весь прогон  -->
+    <Border
+      x:Name="StatusHost"
+      Grid.Row="4"
+      Padding="12,4"
+      Background="{DynamicResource ControlFillColorDefaultBrush}"
+      BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+      BorderThickness="0,1,0,0">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!--  вывод и статус — про один сервер, он в DataContext окна; строка снизу — про весь прогон  -->
+        <StackPanel
+          Grid.Column="0"
+          DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"
+          Orientation="Horizontal">
+          <ui:SymbolIcon
+            VerticalAlignment="Center"
+            FontSize="14"
+            Foreground="{Binding StatusBrush}"
+            Symbol="{Binding StatusSymbol}" />
+          <TextBlock
+            Margin="6,0,0,0"
+            VerticalAlignment="Center"
+            FontSize="11"
+            Text="{Binding StatusText}" />
+        </StackPanel>
+
+        <!--
+          Оборвать команду на сервере можно только сигналом её процессам: стандартный ввод
+          закрыт сразу после передачи скрипта, и без терминала Ctrl+C туда не передать.
+        -->
+        <StackPanel
+          Grid.Column="1"
+          Margin="12,0,0,0"
+          Orientation="Horizontal"
+          Visibility="{Binding IsRunning, Converter={StaticResource BoolToVis}}">
+          <ui:Button
+            Margin="0,0,6,0"
+            Padding="8,2"
+            Click="OnInterrupt"
+            Content="Ctrl+C"
+            FontSize="11"
+            Icon="{ui:SymbolIcon Keyboard24}"
+            ToolTip="Послать команде Ctrl+C (сигнал INT) — то же, что нажать Ctrl+C в терминале: команда получает прерывание и сворачивается сама вместе со своими потомками" />
+          <ui:Button
+            Padding="8,2"
+            Click="OnKill"
+            Content="Снять"
+            FontSize="11"
+            Icon="{ui:SymbolIcon Prohibited24}"
+            ToolTip="Снять команду принудительно (сигнал KILL) — для того, что после Ctrl+C не отпускает. Сохранить свою работу команда уже не успеет" />
+        </StackPanel>
+
+        <!--  итог по всему прогону: по нему видно, что команда уже закончилась  -->
+        <TextBlock
+          x:Name="RunStatus"
+          Grid.Column="2"
+          Margin="12,0,0,0"
+          HorizontalAlignment="Right"
+          VerticalAlignment="Center"
+          FontSize="11"
+          FontWeight="SemiBold"
+          Text="{Binding SummaryText}"
+          TextTrimming="CharacterEllipsis" />
+      </Grid>
+    </Border>
+  </Grid>
+</ui:FluentWindow>

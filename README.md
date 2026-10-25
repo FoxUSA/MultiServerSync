@@ -14,6 +14,7 @@ Check the servers — and push files or run a command on all of them with one cl
 ![Windows 10 / 11](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6?logo=windows)
 ![SSH / SFTP](https://img.shields.io/badge/SSH%20%2F%20SFTP-Linux%20servers-444)
 ![Free](https://img.shields.io/badge/price-free-2ea44f)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 
 **English** · [Русский](README.ru.md)
 
@@ -36,6 +37,9 @@ Add your servers once. After that: check the ones you need, pick files or type a
 - **Commands and scripts** — a command or a multi‑line script of any length on every server at once, via sudo if you like. Favourite commands and history at hand.
 - **Each server's output** — live, per server, with highlighting. A stuck command is interrupted with Ctrl+C or killed right from the app.
 - **Tabs for different jobs** — each tab has its own servers, files, path and command. **Run everywhere** starts all tabs at once; the result shows on the tab labels.
+- **SSH key or password** — OpenSSH, PEM and PuTTY `.ppk` keys, with or without a passphrase. With nothing set, the standard keys from `%USERPROFILE%\.ssh` are tried, like `ssh` does.
+- **Passwords encrypted** — under your Windows account by default, or with a master password that works on any computer.
+- **Smart mode** — remembers where each command and each copy tab usually runs, and asks before running it on a server it doesn't normally go to. Read‑only commands are not checked.
 
 ## Get started
 
@@ -43,7 +47,23 @@ Add your servers once. After that: check the ones you need, pick files or type a
 2. Run `MultiServerSync.exe`
 3. Add your servers — and check where to send
 
-Windows 10 / 11 (x64), requires [.NET 9 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/9.0). Freeware, no telemetry. This repository hosts the page and download links only.
+Windows 10 / 11 (x64), requires [.NET 9 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/9.0). Free, open source, no telemetry.
+
+## Build from source
+
+Requires the [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0).
+
+```powershell
+git clone https://github.com/FoxUSA/MultiServerSync.git
+cd MultiServerSync
+powershell -ExecutionPolicy Bypass -File .\Data\build.ps1
+```
+
+The launcher `MultiServerSync.exe` appears in the repository root, the program in `Data`, your settings in `UserData`. Sources: `Data/src/App` (the program, WPF + [WPF UI](https://github.com/lepoco/wpfui), [SSH.NET](https://github.com/sshnet/SSH.NET)) and `Data/src/Launcher`. Developer notes (in Russian): [Data/README.md](Data/README.md).
+
+## License
+
+[GPL-3.0](LICENSE) — use, change and share freely; programs built on this code must stay open source too.
 
 ---
 

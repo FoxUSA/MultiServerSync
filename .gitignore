@@ -1,0 +1,15 @@
+# build.ps1 builds next to the sources: launcher in the root, program in Data
+/MultiServerSync.exe
+/UserData/
+/Update/
+/desktop.ini
+/Data/*
+!/Data/src/
+!/Data/build.ps1
+!/Data/README.md
+
+bin/
+obj/
+.vs/
+.vscode/
+*.user

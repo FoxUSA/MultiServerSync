@@ -1,0 +1,146 @@
+<Page
+  x:Class="MultiServerSync.Views.Pages.ServersPage"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+  Title="Серверы"
+  ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
+  ui:Design.Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  ScrollViewer.CanContentScroll="False">
+
+  <Grid Margin="24,16,24,16">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" MinHeight="150" />
+    </Grid.RowDefinitions>
+
+    <TextBlock
+      Grid.Row="0"
+      Margin="0,0,0,4"
+      FontSize="24"
+      FontWeight="SemiBold"
+      Text="Серверы" />
+
+    <TextBlock
+      Grid.Row="1"
+      Margin="0,0,0,10"
+      Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+      Text="У каждой вкладки свой набор серверов. Выбранный набор целиком стоит в панели «Целевые сервера» слева. Галочки здесь — чтобы удалить, дублировать, скопировать в другой набор или проверить связь."
+      TextWrapping="Wrap" />
+
+    <WrapPanel Grid.Row="2" Margin="0,0,0,10">
+      <ui:Button
+        Margin="0,0,6,6"
+        Appearance="Primary"
+        Click="OnAdd"
+        Content="Добавить"
+        Icon="{ui:SymbolIcon Add24}" />
+      <ui:Button
+        Margin="0,0,6,6"
+        Click="OnEdit"
+        Content="Изменить"
+        Icon="{ui:SymbolIcon Edit24}" />
+      <ui:Button
+        Margin="0,0,6,6"
+        Click="OnDuplicate"
+        Content="Дублировать"
+        Icon="{ui:SymbolIcon Copy24}" />
+      <ui:Button
+        Margin="0,0,6,6"
+        Click="OnCopyToSets"
+        Content="Скопировать в…"
+        Icon="{ui:SymbolIcon CopyArrowRight24}"
+        ToolTip="Скопировать отмеченные серверы в другие наборы (вкладки)" />
+      <ui:Button
+        Margin="0,0,6,6"
+        Click="OnDelete"
+        Content="Удалить"
+        Icon="{ui:SymbolIcon Delete24}" />
+      <Separator Margin="6,0,12,6" />
+      <ui:Button
+        Margin="0,0,6,6"
+        Click="OnTest"
+        Content="Проверить связь"
+        Icon="{ui:SymbolIcon PlugConnected24}" />
+      <TextBlock
+        Margin="12,0,0,6"
+        VerticalAlignment="Center"
+        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+        Text="{Binding State.ActiveServerSet.SelectionInfo}" />
+    </WrapPanel>
+
+    <DataGrid
+      x:Name="ServersGrid"
+      Grid.Row="3"
+      CellStyle="{StaticResource AppDataGridCellStyle}"
+      ColumnHeaderStyle="{StaticResource AppColumnHeaderStyle}"
+      ItemsSource="{Binding State.ActiveServerSet.Rows}"
+      MouseDoubleClick="OnGridDoubleClick"
+      RowStyle="{StaticResource AppDataGridRowStyle}"
+      Style="{StaticResource AppDataGridStyle}">
+      <DataGrid.Columns>
+        <DataGridTemplateColumn
+          Width="44"
+          CellStyle="{StaticResource FirstColumnCellStyle}"
+          HeaderStyle="{StaticResource FirstColumnHeaderStyle}">
+          <DataGridTemplateColumn.Header>
+            <CheckBox
+              MinWidth="0"
+              MinHeight="0"
+              Margin="0"
+              Padding="0"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Center"
+              Click="OnToggleAll"
+              IsChecked="{Binding DataContext.State.ActiveServerSet.AllSelected, RelativeSource={RelativeSource AncestorType=DataGrid}, Mode=OneWay}"
+              IsThreeState="True"
+              ToolTip="Отметить или снять все серверы набора" />
+          </DataGridTemplateColumn.Header>
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate>
+              <CheckBox
+                MinWidth="0"
+                MinHeight="0"
+                Margin="0"
+                Padding="0"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
+
+        <DataGridTextColumn
+          Width="Auto"
+          Binding="{Binding Server.Name}"
+          Header="Имя" />
+        <DataGridTextColumn
+          Width="Auto"
+          Binding="{Binding Server.Host}"
+          Header="IP / хост" />
+        <DataGridTextColumn
+          Width="Auto"
+          Binding="{Binding Server.Port}"
+          Header="Порт" />
+        <DataGridTextColumn
+          Width="Auto"
+          Binding="{Binding Server.User}"
+          Header="Пользователь" />
+        <DataGridTextColumn
+          Width="Auto"
+          Binding="{Binding Server.LastStatus}"
+          Header="Последняя проверка" />
+        <!--  заметки забирают всё оставшееся место; правятся в окне сервера  -->
+        <DataGridTextColumn
+          Width="*"
+          MinWidth="160"
+          Binding="{Binding Server.NotesLine}"
+          Header="Заметки" />
+      </DataGrid.Columns>
+    </DataGrid>
+
+  </Grid>
+</Page>

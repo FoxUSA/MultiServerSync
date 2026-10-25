@@ -1,0 +1,1216 @@
+<ui:FluentWindow
+  x:Class="MultiServerSync.Views.MainWindow"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:core="clr-namespace:MultiServerSync.Core"
+  xmlns:controls="clr-namespace:MultiServerSync.Views.Controls"
+  xmlns:pages="clr-namespace:MultiServerSync.Views.Pages"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+  Title="MultiServerSync"
+  Icon="pack://application:,,,/Assets/app.ico"
+  Width="1280"
+  Height="820"
+  MinWidth="900"
+  MinHeight="600"
+  ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
+  ui:Design.Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  ExtendsContentIntoTitleBar="True"
+  Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  WindowBackdropType="Mica"
+  WindowCornerPreference="Round"
+  WindowStartupLocation="CenterScreen">
+
+  <ui:FluentWindow.Resources>
+    <!--  ярлык рабочего стола: размер фиксирован, чтобы вкладки не скакали от статусов  -->
+    <Style x:Key="WorkspaceTabStyle" TargetType="ListBoxItem">
+      <Setter Property="Margin" Value="0,0,6,0" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+      <!--  на «Команде» всё, кроме основной, потушено и не принимает щелчок  -->
+      <Setter Property="Opacity" Value="{Binding TabOpacity}" />
+      <Setter Property="IsHitTestVisible" Value="{Binding IsTabPickable}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ListBoxItem">
+            <Border
+              x:Name="Bd"
+              Background="{DynamicResource ControlFillColorDefaultBrush}"
+              BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+              BorderThickness="1"
+              CornerRadius="5,5,0,0">
+              <ContentPresenter />
+            </Border>
+            <ControlTemplate.Triggers>
+              <!--  краткий кирпичик не стоит на линии ленты — скруглён со всех сторон  -->
+              <DataTrigger Binding="{Binding DataContext.State.CompactTabs, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                <Setter TargetName="Bd" Property="CornerRadius" Value="4" />
+              </DataTrigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+              </Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding DataContext.State.CompactTabs, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+          <Setter Property="Margin" Value="0,2,6,2" />
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+
+    <!--  ярлык набора серверов: тот же вид, но никогда не тушится  -->
+    <Style
+      x:Key="ServerSetTabStyle"
+      BasedOn="{StaticResource WorkspaceTabStyle}"
+      TargetType="ListBoxItem">
+      <Setter Property="Opacity" Value="1" />
+      <Setter Property="IsHitTestVisible" Value="True" />
+    </Style>
+
+    <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    <core:PaneAddressConverter x:Key="PaneAddress" />
+
+    <!--  галочка сервера в боковой панели: мелкая и спокойная, строки идут плотно  -->
+    <Style x:Key="PaneCheckStyle" TargetType="CheckBox">
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="MinWidth" Value="0" />
+      <Setter Property="Margin" Value="0" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="CheckBox">
+            <Border
+              x:Name="Row"
+              Padding="2,3"
+              Background="Transparent"
+              CornerRadius="3">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <!--  квадратик держится первой строки, когда под именем есть заметка  -->
+                <Border
+                  x:Name="Box"
+                  Grid.Column="0"
+                  Width="13"
+                  Height="13"
+                  Margin="0,3,0,0"
+                  VerticalAlignment="Top"
+                  Background="Transparent"
+                  BorderBrush="{DynamicResource TextFillColorTertiaryBrush}"
+                  BorderThickness="1"
+                  CornerRadius="3">
+                  <TextBlock
+                    x:Name="Mark"
+                    Margin="0,-1,0,0"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    FontSize="10"
+                    FontWeight="Bold"
+                    Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
+                    Text="&#x2713;"
+                    Visibility="Collapsed" />
+                </Border>
+                <ContentPresenter
+                  Grid.Column="1"
+                  Margin="8,0,0,0"
+                  VerticalAlignment="Center"
+                  TextBlock.Foreground="{TemplateBinding Foreground}" />
+              </Grid>
+            </Border>
+            <ControlTemplate.Triggers>
+              <!--  одиночный выбор на «Команде»: квадратик становится кружком, галочка — точкой  -->
+              <DataTrigger Binding="{Binding DataContext.State.PaneSingleSelect, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                <Setter TargetName="Box" Property="CornerRadius" Value="7" />
+                <Setter TargetName="Mark" Property="Text" Value="&#x25CF;" />
+                <Setter TargetName="Mark" Property="FontSize" Value="8" />
+                <Setter TargetName="Mark" Property="Margin" Value="0" />
+              </DataTrigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Mark" Property="Visibility" Value="Visible" />
+                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+              </Trigger>
+              <!--  «Отметить все», когда отмечена часть: черта вместо галочки  -->
+              <Trigger Property="IsChecked" Value="{x:Null}">
+                <Setter TargetName="Mark" Property="Visibility" Value="Visible" />
+                <Setter TargetName="Mark" Property="Text" Value="&#x2212;" />
+                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+              </Trigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Row" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!--  набор серверов в боковой панели: строка того же кегля, что галочки; выбранный — с полоской и жирным  -->
+    <Style x:Key="PaneSetButtonStyle" TargetType="Button">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Row"
+              Padding="2,3"
+              Background="Transparent"
+              CornerRadius="3">
+              <StackPanel Orientation="Horizontal">
+                <Border
+                  x:Name="Bar"
+                  Width="3"
+                  Height="13"
+                  VerticalAlignment="Center"
+                  Background="Transparent"
+                  CornerRadius="1.5" />
+                <TextBlock
+                  x:Name="Label"
+                  Margin="18,0,0,0"
+                  VerticalAlignment="Center"
+                  Foreground="{TemplateBinding Foreground}"
+                  Text="{TemplateBinding Content}"
+                  TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="Tag" Value="Active">
+                <Setter TargetName="Bar" Property="Background" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                <Setter TargetName="Label" Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+              </Trigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Row" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!--  мелкие кнопки в углах ярлыка вкладки  -->
+    <Style x:Key="TabIconButtonStyle" TargetType="Button">
+      <Setter Property="Width" Value="18" />
+      <Setter Property="Height" Value="18" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" />
+      <Setter Property="Opacity" Value="0.75" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Bd"
+              Background="{TemplateBinding Background}"
+              CornerRadius="4">
+              <TextBlock
+                x:Name="Glyph"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                FontSize="10"
+                Foreground="{TemplateBinding Foreground}"
+                Text="{TemplateBinding Content}" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Opacity" Value="1" />
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style
+      x:Key="TabCloseButtonStyle"
+      BasedOn="{StaticResource TabIconButtonStyle}"
+      TargetType="Button">
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Bd"
+              Background="{TemplateBinding Background}"
+              CornerRadius="4">
+              <TextBlock
+                x:Name="Glyph"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                FontSize="10"
+                Foreground="{TemplateBinding Foreground}"
+                Text="&#x2715;" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Opacity" Value="1" />
+                <Setter TargetName="Bd" Property="Background" Value="#C42B1C" />
+                <Setter TargetName="Glyph" Property="Foreground" Value="White" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!--  вкладки нижней панели: Терминал и Журнал  -->
+    <Style x:Key="PanelTabStyle" TargetType="RadioButton">
+      <Setter Property="Margin" Value="0,0,2,0" />
+      <Setter Property="Padding" Value="14,4" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="RadioButton">
+            <Border
+              x:Name="Bd"
+              Padding="{TemplateBinding Padding}"
+              Background="Transparent"
+              BorderBrush="Transparent"
+              BorderThickness="0,0,0,2">
+              <ContentPresenter VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!--  Краткие ярлыки: кирпичики в два ряда. Раскладка по столбцам — первый сверху, второй
+          под ним, — и лента так же листается вбок. Ряд — 38 точек: 32 самого ярлыка, рамка и отступы.
+          Высота ряда задана жёстко: при масштабе экрана 150% рамка округляется до пикселя, кирпичик
+          выходит на долю точки выше, и по своему размеру второй ряд уже не влезал.  -->
+    <ItemsPanelTemplate x:Key="CompactTabsPanel">
+      <WrapPanel
+        Height="76"
+        ItemHeight="38"
+        Orientation="Vertical" />
+    </ItemsPanelTemplate>
+
+    <!--  краткий ярлык вкладки: название, под ним статус, если есть. Счётчиков нет — они в подсказке.
+          Карандаша нет — места мало, переименование двойным щелчком  -->
+    <DataTemplate x:Key="CompactTabTemplate">
+      <Grid
+        Width="140"
+        Height="32"
+        ToolTip="{Binding TabTooltip}">
+        <StackPanel Margin="20,0,20,0" VerticalAlignment="Center">
+          <TextBlock
+            HorizontalAlignment="Center"
+            FontSize="12"
+            Text="{Binding Title}"
+            TextTrimming="CharacterEllipsis" />
+          <!--  одна строка статуса: если есть ошибки — «Ошибок N», иначе итог  -->
+          <TextBlock
+            x:Name="BadgeText"
+            HorizontalAlignment="Center"
+            FontSize="10"
+            FontWeight="Bold"
+            Text="{Binding StatusBadge}"
+            TextTrimming="CharacterEllipsis"
+            Visibility="Collapsed" />
+          <TextBlock
+            x:Name="CaptionText"
+            HorizontalAlignment="Center"
+            FontSize="10"
+            FontWeight="Bold"
+            Text="{Binding StatusCaption}"
+            TextTrimming="CharacterEllipsis"
+            Visibility="Collapsed" />
+        </StackPanel>
+
+        <Ellipse
+          x:Name="BusyDot"
+          Width="7"
+          Height="7"
+          Margin="7,0,0,0"
+          HorizontalAlignment="Left"
+          VerticalAlignment="Center"
+          Fill="#3FB950"
+          IsHitTestVisible="False"
+          Visibility="Collapsed" />
+
+        <Button
+          x:Name="Close"
+          Margin="0,0,2,0"
+          HorizontalAlignment="Right"
+          VerticalAlignment="Center"
+          Click="OnCloseTab"
+          Style="{StaticResource TabCloseButtonStyle}"
+          ToolTip="Закрыть вкладку (Ctrl+W)" />
+      </Grid>
+
+      <DataTemplate.Triggers>
+        <DataTrigger Binding="{Binding HasStatus}" Value="True">
+          <Setter TargetName="BadgeText" Property="Visibility" Value="Visible" />
+        </DataTrigger>
+        <DataTrigger Binding="{Binding StatusCaptionVisibility}" Value="Visible">
+          <Setter TargetName="BadgeText" Property="Visibility" Value="Collapsed" />
+          <Setter TargetName="CaptionText" Property="Visibility" Value="Visible" />
+        </DataTrigger>
+        <DataTrigger Binding="{Binding Status}" Value="Running">
+          <Setter TargetName="BusyDot" Property="Visibility" Value="Visible" />
+          <DataTrigger.EnterActions>
+            <BeginStoryboard x:Name="BusyPulse">
+              <Storyboard>
+                <DoubleAnimation
+                  AutoReverse="True"
+                  RepeatBehavior="Forever"
+                  Storyboard.TargetName="BusyDot"
+                  Storyboard.TargetProperty="Opacity"
+                  From="1"
+                  To="0.25"
+                  Duration="0:0:0.7" />
+              </Storyboard>
+            </BeginStoryboard>
+          </DataTrigger.EnterActions>
+          <DataTrigger.ExitActions>
+            <StopStoryboard BeginStoryboardName="BusyPulse" />
+          </DataTrigger.ExitActions>
+        </DataTrigger>
+        <DataTrigger Binding="{Binding CanClose}" Value="False">
+          <Setter TargetName="Close" Property="Visibility" Value="Collapsed" />
+        </DataTrigger>
+      </DataTemplate.Triggers>
+    </DataTemplate>
+
+    <!--  краткий ярлык набора серверов: только название  -->
+    <DataTemplate x:Key="CompactSetTemplate">
+      <Grid
+        Width="140"
+        Height="32"
+        ToolTip="{Binding TabTooltip}">
+        <TextBlock
+          Margin="20,0,20,0"
+          HorizontalAlignment="Center"
+          VerticalAlignment="Center"
+          FontSize="12"
+          Text="{Binding Title}"
+          TextTrimming="CharacterEllipsis" />
+
+        <Button
+          x:Name="Close"
+          Margin="0,0,2,0"
+          HorizontalAlignment="Right"
+          VerticalAlignment="Center"
+          Click="OnCloseTab"
+          Style="{StaticResource TabCloseButtonStyle}"
+          ToolTip="Закрыть набор вместе с его серверами (Ctrl+W)" />
+      </Grid>
+
+      <DataTemplate.Triggers>
+        <DataTrigger Binding="{Binding CanClose}" Value="False">
+          <Setter TargetName="Close" Property="Visibility" Value="Collapsed" />
+        </DataTrigger>
+      </DataTemplate.Triggers>
+    </DataTemplate>
+  </ui:FluentWindow.Resources>
+
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" MinHeight="200" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition x:Name="BottomRow" Height="280" MinHeight="0" />
+    </Grid.RowDefinitions>
+
+    <!--  название и версия слева в шапке; справа перед кнопками окна — обновление и страница утилиты  -->
+    <ui:TitleBar
+      x:Name="Bar"
+      Grid.Row="0"
+      Title="MultiServerSync"
+      Icon="{core:AppIcon}">
+      <ui:TitleBar.TrailingContent>
+        <StackPanel
+          Margin="0,0,8,0"
+          VerticalAlignment="Center"
+          Orientation="Horizontal">
+          <!--  появляется только когда на byfox.dev версия свежее установленной  -->
+          <ui:Button
+            x:Name="UpdateAvailableButton"
+            Height="28"
+            Margin="0,0,8,0"
+            Padding="10,0"
+            Appearance="Primary"
+            Click="OnUpdateAvailableClick"
+            Icon="{ui:SymbolIcon ArrowDownload24}"
+            Visibility="Collapsed" />
+          <ui:Button
+            Height="28"
+            Padding="10,0"
+            Appearance="Transparent"
+            Click="OnOpenProductPage"
+            Content="byfox.dev/multiserversync"
+            Icon="{ui:SymbolIcon Globe24}"
+            ToolTip="https://byfox.dev/multiserversync/ — страница утилиты" />
+
+          <!--  крестик окна прячет программу в трей, выход — только здесь и в меню значка  -->
+          <Button
+            Height="28"
+            Margin="8,0,0,0"
+            Padding="10,0"
+            Click="OnExitClick"
+            Cursor="Hand"
+            Focusable="False"
+            Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+            ToolTip="Выйти из программы. Крестик окна только прячет её в трей">
+            <Button.Template>
+              <ControlTemplate TargetType="Button">
+                <Border
+                  x:Name="Bd"
+                  Padding="{TemplateBinding Padding}"
+                  Background="Transparent"
+                  CornerRadius="4">
+                  <StackPanel VerticalAlignment="Center" Orientation="Horizontal">
+                    <ui:SymbolIcon
+                      x:Name="Glyph"
+                      Margin="0,0,6,0"
+                      FontSize="16"
+                      Foreground="{TemplateBinding Foreground}"
+                      Symbol="Power24" />
+                    <TextBlock
+                      x:Name="Caption"
+                      VerticalAlignment="Center"
+                      Foreground="{TemplateBinding Foreground}"
+                      Text="Выход" />
+                  </StackPanel>
+                </Border>
+                <ControlTemplate.Triggers>
+                  <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Bd" Property="Background" Value="#C42B1C" />
+                    <Setter TargetName="Glyph" Property="Foreground" Value="White" />
+                    <Setter TargetName="Caption" Property="Foreground" Value="White" />
+                  </Trigger>
+                  <Trigger Property="IsPressed" Value="True">
+                    <Setter TargetName="Bd" Property="Background" Value="#A32417" />
+                  </Trigger>
+                </ControlTemplate.Triggers>
+              </ControlTemplate>
+            </Button.Template>
+          </Button>
+        </StackPanel>
+      </ui:TitleBar.TrailingContent>
+    </ui:TitleBar>
+
+    <!--  У каждого раздела свои вкладки: на «Серверах» — наборы серверов, на «Копировании» —
+          рабочие столы копирования. На «Команде» и в «Настройках» ряда нет совсем.  -->
+    <Border
+      x:Name="TabStripArea"
+      Grid.Row="1"
+      Padding="12,2,12,0"
+      BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+      BorderThickness="0,0,0,1"
+      Visibility="{Binding State.ShowsTabStrip, Converter={StaticResource BoolToVis}}">
+      <!--  правый щелчок по ряду: краткие ярлыки — то же, что кнопка слева; у каждого раздела свой выбор  -->
+      <Border.ContextMenu>
+        <ContextMenu>
+          <MenuItem
+            Header="Краткие ярлыки (в два ряда)"
+            IsCheckable="True"
+            IsChecked="{Binding State.CompactTabs, Mode=TwoWay}" />
+        </ContextMenu>
+      </Border.ContextMenu>
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <!--  столбиком: доска вкладок, краткий вид, плюс. Три кнопки по высоте ровно с полный ярлык  -->
+        <StackPanel
+          Grid.Column="0"
+          Margin="0,0,8,6"
+          VerticalAlignment="Bottom">
+          <ui:Button
+            Width="44"
+            Height="24"
+            Margin="0,0,0,2"
+            Padding="0"
+            HorizontalContentAlignment="Center"
+            Click="OnOpenBoard"
+            ToolTip="Все вкладки кирпичами в отдельном окне (Ctrl+D)"
+            Visibility="{Binding State.ShowsWorkspaceTabs, Converter={StaticResource BoolToVis}}">
+            <ui:Button.Icon>
+              <ui:SymbolIcon FontSize="16" Symbol="Grid24" />
+            </ui:Button.Icon>
+          </ui:Button>
+
+          <!--  включённый краткий вид — кнопка подсвечена  -->
+          <ui:Button
+            x:Name="CompactButton"
+            Width="44"
+            Height="24"
+            Margin="0,0,0,2"
+            Padding="0"
+            HorizontalContentAlignment="Center"
+            Click="OnToggleCompactTabs">
+            <!--  значок нарисован: два ряда кирпичиков, как ярлыки в кратком виде  -->
+            <Canvas
+              Width="16"
+              Height="12"
+              SnapsToDevicePixels="True">
+              <Canvas.Resources>
+                <Style TargetType="Rectangle">
+                  <Setter Property="Width" Value="7" />
+                  <Setter Property="Height" Value="5" />
+                  <Setter Property="RadiusX" Value="1" />
+                  <Setter Property="RadiusY" Value="1" />
+                  <Setter Property="StrokeThickness" Value="1.2" />
+                  <Setter Property="Stroke" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ui:Button}}" />
+                </Style>
+              </Canvas.Resources>
+              <Rectangle Canvas.Left="0" Canvas.Top="0" />
+              <Rectangle Canvas.Left="9" Canvas.Top="0" />
+              <Rectangle Canvas.Left="0" Canvas.Top="7" />
+              <Rectangle Canvas.Left="9" Canvas.Top="7" />
+            </Canvas>
+          </ui:Button>
+
+          <ui:Button
+            Width="44"
+            Height="24"
+            Padding="0"
+            HorizontalContentAlignment="Center"
+            Click="OnAddTab"
+            ToolTip="Новая вкладка (Ctrl+T)">
+            <ui:Button.Icon>
+              <ui:SymbolIcon FontSize="16" Symbol="Add24" />
+            </ui:Button.Icon>
+          </ui:Button>
+        </StackPanel>
+
+        <!--  наборы серверов: новый — пустой, закрытие уносит его серверы  -->
+        <ScrollViewer
+          x:Name="SetScroller"
+          Grid.Column="1"
+          HorizontalScrollBarVisibility="Hidden"
+          IsVisibleChanged="OnTabScrollerVisibleChanged"
+          ScrollChanged="OnTabStripScrolled"
+          VerticalScrollBarVisibility="Disabled"
+          Visibility="{Binding State.ShowsServerSetTabs, Converter={StaticResource BoolToVis}}">
+          <ListBox
+            x:Name="SetStrip"
+            Background="Transparent"
+            BorderThickness="0"
+            ItemContainerStyle="{StaticResource ServerSetTabStyle}"
+            ItemsSource="{Binding State.ServerSets}"
+            MouseDoubleClick="OnRenameTab"
+            PreviewMouseRightButtonDown="OnTabStripRightDown"
+            RequestBringIntoView="OnTabStripBringIntoView"
+            SelectionChanged="OnSetSelected">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" />
+              </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <Grid
+                  Width="164"
+                  Height="76"
+                  ToolTip="{Binding TabTooltip}">
+                  <StackPanel Margin="20,0,20,0" VerticalAlignment="Center">
+                    <TextBlock
+                      HorizontalAlignment="Center"
+                      Text="{Binding Title}"
+                      TextAlignment="Center"
+                      TextTrimming="CharacterEllipsis" />
+                    <TextBlock
+                      Margin="-10,2,-10,0"
+                      HorizontalAlignment="Center"
+                      FontSize="11"
+                      Opacity="0.75"
+                      Text="{Binding TabCounts}"
+                      TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+
+                  <Button
+                    x:Name="Close"
+                    Margin="0,2,2,0"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Top"
+                    Click="OnCloseTab"
+                    Style="{StaticResource TabCloseButtonStyle}"
+                    ToolTip="Закрыть набор вместе с его серверами (Ctrl+W)" />
+
+                  <Button
+                    Margin="0,0,2,2"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Bottom"
+                    Click="OnRenameTabClick"
+                    Content="&#x270E;"
+                    Style="{StaticResource TabIconButtonStyle}"
+                    ToolTip="Переименовать набор (или двойной щелчок по ярлыку)" />
+                </Grid>
+
+                <DataTemplate.Triggers>
+                  <DataTrigger Binding="{Binding CanClose}" Value="False">
+                    <Setter TargetName="Close" Property="Visibility" Value="Collapsed" />
+                  </DataTrigger>
+                </DataTemplate.Triggers>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </ScrollViewer>
+
+        <ScrollViewer
+          x:Name="TabScroller"
+          Grid.Column="1"
+          HorizontalScrollBarVisibility="Hidden"
+          IsVisibleChanged="OnTabScrollerVisibleChanged"
+          ScrollChanged="OnTabStripScrolled"
+          VerticalScrollBarVisibility="Disabled"
+          Visibility="{Binding State.ShowsWorkspaceTabs, Converter={StaticResource BoolToVis}}">
+          <ListBox
+            x:Name="TabStrip"
+            Background="Transparent"
+            BorderThickness="0"
+            ItemContainerStyle="{StaticResource WorkspaceTabStyle}"
+            ItemsSource="{Binding State.Tabs}"
+            MouseDoubleClick="OnRenameTab"
+            PreviewMouseRightButtonDown="OnTabStripRightDown"
+            RequestBringIntoView="OnTabStripBringIntoView"
+            SelectionChanged="OnTabSelected">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" />
+              </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <!--  размер жёстко задан: ни статус, ни длинное имя не двигают соседей  -->
+                <Grid
+                  x:Name="Root"
+                  Width="164"
+                  Height="76"
+                  ToolTip="{Binding TabTooltip}">
+                  <StackPanel Margin="20,0,20,0" VerticalAlignment="Center">
+                    <TextBlock
+                      x:Name="TitleText"
+                      HorizontalAlignment="Center"
+                      Text="{Binding Title}"
+                      TextAlignment="Center"
+                      TextTrimming="CharacterEllipsis" />
+
+                    <!--  Итог висит до следующей операции, поэтому название остаётся на месте:
+                          цветной плашки нет, статус выделен только жирным.
+                          Отрицательный отступ — строке нужно больше места, чем названию,
+                          но не настолько, чтобы залезть под крестик в углу.  -->
+                    <StackPanel
+                      x:Name="StatusPanel"
+                      Margin="-8,1,-8,0"
+                      Visibility="Collapsed">
+                      <TextBlock
+                        HorizontalAlignment="Center"
+                        FontSize="11"
+                        FontWeight="Bold"
+                        Text="{Binding StatusBadge}"
+                        TextAlignment="Center"
+                        TextTrimming="CharacterEllipsis" />
+                      <TextBlock
+                        HorizontalAlignment="Center"
+                        FontSize="11"
+                        FontWeight="Bold"
+                        Text="{Binding StatusCaption}"
+                        TextTrimming="CharacterEllipsis"
+                        Visibility="{Binding StatusCaptionVisibility}" />
+                    </StackPanel>
+
+                    <!--  что на вкладке отмечено — зависит от открытого раздела.
+                          Отступ отрицательный по той же причине, что и у статуса:
+                          строке нужно больше места, чем названию, иначе она обрезается  -->
+                    <TextBlock
+                      Margin="-10,2,-10,0"
+                      HorizontalAlignment="Center"
+                      FontSize="11"
+                      Opacity="0.75"
+                      Text="{Binding TabCounts}"
+                      TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+
+                  <!--  огонёк «идёт работа»: виден, пока на вкладке копирование или команда, потом гаснет  -->
+                  <Ellipse
+                    x:Name="BusyDot"
+                    Width="7"
+                    Height="7"
+                    Margin="7,7,0,0"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    Fill="#3FB950"
+                    IsHitTestVisible="False"
+                    Visibility="Collapsed" />
+
+                  <Button
+                    x:Name="Close"
+                    Margin="0,2,2,0"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Top"
+                    Click="OnCloseTab"
+                    Style="{StaticResource TabCloseButtonStyle}"
+                    ToolTip="Закрыть вкладку (Ctrl+W)" />
+
+                  <Button
+                    Margin="0,0,2,2"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Bottom"
+                    Click="OnRenameTabClick"
+                    Content="&#x270E;"
+                    Style="{StaticResource TabIconButtonStyle}"
+                    ToolTip="Переименовать вкладку (или двойной щелчок по ярлыку)" />
+                </Grid>
+
+                <DataTemplate.Triggers>
+                  <DataTrigger Binding="{Binding HasStatus}" Value="True">
+                    <Setter TargetName="StatusPanel" Property="Visibility" Value="Visible" />
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding Status}" Value="Running">
+                    <Setter TargetName="BusyDot" Property="Visibility" Value="Visible" />
+                    <DataTrigger.EnterActions>
+                      <BeginStoryboard x:Name="BusyPulse">
+                        <Storyboard>
+                          <DoubleAnimation
+                            AutoReverse="True"
+                            RepeatBehavior="Forever"
+                            Storyboard.TargetName="BusyDot"
+                            Storyboard.TargetProperty="Opacity"
+                            From="1"
+                            To="0.25"
+                            Duration="0:0:0.7" />
+                        </Storyboard>
+                      </BeginStoryboard>
+                    </DataTrigger.EnterActions>
+                    <DataTrigger.ExitActions>
+                      <StopStoryboard BeginStoryboardName="BusyPulse" />
+                    </DataTrigger.ExitActions>
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding CanClose}" Value="False">
+                    <Setter TargetName="Close" Property="Visibility" Value="Collapsed" />
+                  </DataTrigger>
+                </DataTemplate.Triggers>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </ScrollViewer>
+
+        <!--  Своя полоса прокрутки поверх нижнего края ярлыков: высоту ряда не меняет, поэтому окно
+              не скачет, когда ярлыков становится больше, чем влезает. Пока мышь не над рядом — еле видна,
+              над рядом — проявляется. Мышь ловит только ползунок: щелчки по ярлыкам под дорожкой проходят.  -->
+        <Slider
+          x:Name="TabScrollBar"
+          PreviewMouseWheel="OnTabStripWheel"
+          Grid.Column="1"
+          VerticalAlignment="Bottom"
+          Focusable="False"
+          Minimum="0"
+          ValueChanged="OnTabScrollBarChanged"
+          Visibility="Collapsed">
+          <Slider.Style>
+            <Style TargetType="Slider">
+              <Setter Property="Opacity" Value="0.3" />
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding IsMouseOver, ElementName=TabStripArea}" Value="True">
+                  <Setter Property="Opacity" Value="1" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </Slider.Style>
+          <Slider.Template>
+            <ControlTemplate TargetType="Slider">
+              <Grid Height="8">
+                <Border
+                  Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                  CornerRadius="4"
+                  IsHitTestVisible="False" />
+                <Track x:Name="PART_Track">
+                  <Track.DecreaseRepeatButton>
+                    <RepeatButton
+                      Command="Slider.DecreaseLarge"
+                      Focusable="False"
+                      IsHitTestVisible="False">
+                      <RepeatButton.Template>
+                        <ControlTemplate TargetType="RepeatButton">
+                          <Border Background="Transparent" />
+                        </ControlTemplate>
+                      </RepeatButton.Template>
+                    </RepeatButton>
+                  </Track.DecreaseRepeatButton>
+                  <Track.IncreaseRepeatButton>
+                    <RepeatButton
+                      Command="Slider.IncreaseLarge"
+                      Focusable="False"
+                      IsHitTestVisible="False">
+                      <RepeatButton.Template>
+                        <ControlTemplate TargetType="RepeatButton">
+                          <Border Background="Transparent" />
+                        </ControlTemplate>
+                      </RepeatButton.Template>
+                    </RepeatButton>
+                  </Track.IncreaseRepeatButton>
+                  <Track.Thumb>
+                    <Thumb
+                      Width="140"
+                      Height="8"
+                      Cursor="Hand">
+                      <Thumb.Template>
+                        <ControlTemplate TargetType="Thumb">
+                          <Border
+                            x:Name="Bd"
+                            Background="{DynamicResource TextFillColorSecondaryBrush}"
+                            CornerRadius="4" />
+                          <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                              <Setter TargetName="Bd" Property="Background" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsDragging" Value="True">
+                              <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                            </Trigger>
+                          </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                      </Thumb.Template>
+                    </Thumb>
+                  </Track.Thumb>
+                </Track>
+              </Grid>
+            </ControlTemplate>
+          </Slider.Template>
+        </Slider>
+      </Grid>
+    </Border>
+
+    <ui:NavigationView
+      x:Name="RootNavigation"
+      Grid.Row="2"
+      IsBackButtonVisible="Collapsed"
+      IsFooterSeparatorVisible="False"
+      IsPaneToggleVisible="False"
+      OpenPaneLength="200"
+      PaneDisplayMode="Left">
+      <ui:NavigationView.MenuItems>
+        <ui:NavigationViewItem
+          Content="Серверы"
+          NavigationCacheMode="Enabled"
+          TargetPageType="{x:Type pages:ServersPage}">
+          <ui:NavigationViewItem.Icon>
+            <ui:SymbolIcon Symbol="Server24" />
+          </ui:NavigationViewItem.Icon>
+        </ui:NavigationViewItem>
+        <!--  двойной щелчок по пункту меню возвращает на первую вкладку; подсказка не нужна  -->
+        <ui:NavigationViewItem
+          Content="Команда"
+          NavigationCacheMode="Enabled"
+          PreviewMouseLeftButtonDown="OnNavItemMouseDown"
+          TargetPageType="{x:Type pages:CommandPage}">
+          <ui:NavigationViewItem.Icon>
+            <ui:SymbolIcon Symbol="WindowConsole20" />
+          </ui:NavigationViewItem.Icon>
+        </ui:NavigationViewItem>
+        <ui:NavigationViewItem
+          Content="Копирование"
+          NavigationCacheMode="Enabled"
+          PreviewMouseLeftButtonDown="OnNavItemMouseDown"
+          TargetPageType="{x:Type pages:FilesPage}">
+          <ui:NavigationViewItem.Icon>
+            <ui:SymbolIcon Symbol="ArrowUpload24" />
+          </ui:NavigationViewItem.Icon>
+        </ui:NavigationViewItem>
+        <!--  список серверов сразу под основными пунктами: галочки текущей вкладки, не уходя со страницы  -->
+        <Border
+          Margin="0,10,0,0"
+          Padding="10,8,4,4"
+          BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+          BorderThickness="0,1,0,0"
+          DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
+          <StackPanel>
+            <Grid Margin="0,0,0,4">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+
+              <!--  надпись того же кегля, что пункты меню выше  -->
+              <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                <TextBlock
+                  FontSize="14"
+                  Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                  Text="{Binding State.ActiveWorkspace.PaneTitle}"
+                  TextTrimming="CharacterEllipsis" />
+                <!--  из какого набора эти серверы  -->
+                <TextBlock
+                  Margin="0,1,0,0"
+                  FontSize="15"
+                  FontWeight="SemiBold"
+                  Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                  Text="{Binding State.PaneSetTitle}"
+                  TextTrimming="CharacterEllipsis"
+                  ToolTip="Набор серверов этой вкладки — у каждой вкладки свой" />
+              </StackPanel>
+
+            </Grid>
+
+            <!--  на «Команде» и «Копировании»: один сервер за раз, чтобы случайно не запустить
+                  на нескольких. Свой у каждого набора серверов и у каждого из двух разделов  -->
+            <ui:ToggleSwitch
+              Margin="2,4,0,0"
+              Content="Одиночный выбор"
+              FontSize="13"
+              IsChecked="{Binding State.SingleSelectHere, Mode=TwoWay}"
+              ToolTip="Включено — отметить можно только один сервер: выбор другого снимает прежний. У команд и у копирования свой, запоминается для каждого набора серверов и отдельно для «Всех»"
+              Visibility="{Binding State.ShowsSingleSelectSwitch, Converter={StaticResource BoolToVis}}" />
+
+            <!--  что подписать под каждым сервером: адрес и пользователь. У каждого раздела свои  -->
+            <StackPanel Margin="2,6,0,8" Orientation="Horizontal">
+              <CheckBox
+                MinWidth="0"
+                Margin="0,0,16,0"
+                Content="IP"
+                FontSize="13"
+                IsChecked="{Binding State.PaneShowIp, Mode=TwoWay}"
+                ToolTip="Под каждым сервером — его адрес" />
+              <CheckBox
+                MinWidth="0"
+                Content="User"
+                FontSize="13"
+                IsChecked="{Binding State.PaneShowUser, Mode=TwoWay}"
+                ToolTip="Под каждым сервером — имя пользователя, под которым идёт подключение" />
+            </StackPanel>
+
+            <!--  «Отметить все» — первой строкой списка, в колонке галочек серверов, как галочка
+                  в шапке таблицы на «Серверах». В одиночном выборе её нет  -->
+            <Border
+              Margin="0,0,0,2"
+              Padding="0,0,0,2"
+              BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+              BorderThickness="0,0,0,1"
+              Visibility="{Binding State.ShowsToggleAllServers, Converter={StaticResource BoolToVis}}">
+              <CheckBox
+                Content="Отметить все"
+                IsChecked="{Binding State.ActiveWorkspace.PaneAllChecked, Mode=TwoWay}"
+                Style="{StaticResource PaneCheckStyle}"
+                ToolTip="Отметить или снять все серверы в списке этой вкладки. Если отмечена часть — отмечает все" />
+            </Border>
+
+            <!--  строки плотные: в панель влезает больше серверов  -->
+            <ScrollViewer MaxHeight="520" VerticalScrollBarVisibility="Auto">
+              <ItemsControl ItemsSource="{Binding State.ActiveWorkspace.Servers}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <CheckBox
+                      IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                      Style="{StaticResource PaneCheckStyle}"
+                      ToolTip="{Binding Server.Display}">
+                      <StackPanel>
+                        <TextBlock Text="{Binding Server.PaneLabel}" TextTrimming="CharacterEllipsis" />
+                        <!--  адрес и пользователь — по галочкам «IP» и «User» над списком; мелко и тускло,
+                              как заметка, но от края названия: это подпись к нему, а не отдельная строка  -->
+                        <TextBlock
+                          FontSize="11"
+                          Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                          TextTrimming="CharacterEllipsis">
+                          <TextBlock.Text>
+                            <MultiBinding Converter="{StaticResource PaneAddress}">
+                              <Binding Path="Server.User" />
+                              <Binding Path="Server.Host" />
+                              <Binding Path="DataContext.State.PaneShowUser" RelativeSource="{RelativeSource AncestorType=Window}" />
+                              <Binding Path="DataContext.State.PaneShowIp" RelativeSource="{RelativeSource AncestorType=Window}" />
+                            </MultiBinding>
+                          </TextBlock.Text>
+                          <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                              <Style.Triggers>
+                                <Trigger Property="Text" Value="">
+                                  <Setter Property="Visibility" Value="Collapsed" />
+                                </Trigger>
+                              </Style.Triggers>
+                            </Style>
+                          </TextBlock.Style>
+                        </TextBlock>
+                        <!--  заметка — одной строкой, мелко и тускло; длинная обрезается троеточием  -->
+                        <!--  отступ влево на квадратик с зазором: заметка начинается от края галочки  -->
+                        <TextBlock
+                          Margin="-21,1,0,0"
+                          FontSize="11"
+                          Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                          Text="{Binding Server.NotesLine}"
+                          TextTrimming="CharacterEllipsis"
+                          Visibility="{Binding Server.PaneNotesVisible, Converter={StaticResource BoolToVis}}" />
+                      </StackPanel>
+                    </CheckBox>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+
+            <TextBlock
+              Margin="6,4,0,0"
+              FontSize="11"
+              Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+              Text="серверов нет — добавьте на вкладке «Серверы»"
+              TextWrapping="Wrap"
+              Visibility="{Binding State.ActiveWorkspace.PaneEmptyHintVisibility}" />
+          </StackPanel>
+        </Border>
+      </ui:NavigationView.MenuItems>
+
+      <ui:NavigationView.FooterMenuItems>
+        <!--  умный режим — над наборами и над чертой панели. Её собственная черта над нижним
+              блоком выключена (была бы над переключателем), вместо неё такая же стоит ниже;
+              виден всегда, даже когда набор один  -->
+        <Border Padding="10,4,4,2">
+          <ui:ToggleSwitch
+            x:Name="SmartSwitch"
+            Click="OnSmartModeChanged"
+            Content="Умный режим"
+            FontSize="13"
+            Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+            ToolTipService.ShowDuration="30000">
+            <ui:ToggleSwitch.ToolTip>
+              <TextBlock MaxWidth="340" TextWrapping="Wrap">
+                Спросит перед запуском, если команду или копирование с этой вкладки
+                вы обычно делаете на другом сервере. Безопасные команды не проверяются.
+              </TextBlock>
+            </ui:ToggleSwitch.ToolTip>
+          </ui:ToggleSwitch>
+        </Border>
+        <ui:NavigationViewItemSeparator />
+        <!--  наборы серверов закреплены внизу панели: смена набора меняет длину списка выше,
+              а сами наборы остаются на месте и не прыгают под мышью  -->
+        <Border
+          Margin="0,0,0,6"
+          Padding="10,0,4,6"
+          DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"
+          Visibility="{Binding State.ShowsSetSwitcher, Converter={StaticResource BoolToVis}}">
+          <StackPanel>
+            <!--  надпись того же кегля, что «Целевые сервера»  -->
+            <TextBlock
+              Margin="0,0,0,4"
+              FontSize="14"
+              Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+              Text="Наборы серверов" />
+            <!--  «Все»: в панели серверы всех наборов разом  -->
+            <Button
+              Click="OnPickAllSets"
+              Content="Все"
+              ToolTip="Серверы всех наборов разом: отмечать и запускать можно на любых">
+              <Button.Style>
+                <Style BasedOn="{StaticResource PaneSetButtonStyle}" TargetType="Button">
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding State.PaneAllSets}" Value="True">
+                      <Setter Property="Tag" Value="Active" />
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </Button.Style>
+            </Button>
+            <ItemsControl ItemsSource="{Binding State.ServerSets}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Button
+                    x:Name="Pick"
+                    Click="OnPickServerSet"
+                    Content="{Binding Title}"
+                    Style="{StaticResource PaneSetButtonStyle}"
+                    ToolTip="{Binding TabTooltip}" />
+                  <DataTemplate.Triggers>
+                    <DataTrigger Binding="{Binding IsPanePick}" Value="True">
+                      <Setter TargetName="Pick" Property="Tag" Value="Active" />
+                    </DataTrigger>
+                  </DataTemplate.Triggers>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+        <ui:NavigationViewItem
+          Content="Настройки"
+          NavigationCacheMode="Enabled"
+          TargetPageType="{x:Type pages:SettingsPage}">
+          <ui:NavigationViewItem.Icon>
+            <ui:SymbolIcon Symbol="Settings24" />
+          </ui:NavigationViewItem.Icon>
+        </ui:NavigationViewItem>
+      </ui:NavigationView.FooterMenuItems>
+    </ui:NavigationView>
+
+    <!--  что сделано по последнему нажатию — тихо в правом нижнем углу, гаснет само  -->
+    <controls:ActionToast
+      x:Name="Toast"
+      Grid.Row="2"
+      Margin="0,0,24,14"
+      HorizontalAlignment="Right"
+      VerticalAlignment="Bottom" />
+
+    <GridSplitter
+      x:Name="BottomSplitter"
+      Grid.Row="3"
+      Height="4"
+      HorizontalAlignment="Stretch"
+      Background="Transparent"
+      ResizeBehavior="PreviousAndNext"
+      ResizeDirection="Rows" />
+
+    <!--  нижняя панель: слева таблица серверов, справа вывод; вторая вкладка — журнал  -->
+    <Border
+      x:Name="BottomPanel"
+      Grid.Row="4"
+      Background="{DynamicResource ControlFillColorDefaultBrush}"
+      BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+      BorderThickness="0,1,0,0">
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel
+          Grid.Row="0"
+          Margin="10,4,10,0"
+          Orientation="Horizontal">
+          <RadioButton
+            x:Name="TerminalTab"
+            Checked="OnBottomTabChanged"
+            Content="Терминал"
+            IsChecked="True"
+            Style="{StaticResource PanelTabStyle}" />
+          <RadioButton
+            x:Name="JournalTab"
+            Checked="OnBottomTabChanged"
+            Content="Журнал"
+            Style="{StaticResource PanelTabStyle}" />
+        </StackPanel>
+
+        <Grid Grid.Row="1" Margin="10,4,10,8">
+          <controls:ResultsView x:Name="Terminal" DataContext="{Binding State.ActiveWorkspace.ResultsBatch}" />
+          <controls:LogPanel x:Name="Log" Visibility="Collapsed" />
+        </Grid>
+      </Grid>
+    </Border>
+  </Grid>
+</ui:FluentWindow>
