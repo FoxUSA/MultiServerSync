@@ -38,11 +38,13 @@ Check the servers — and push files or run a command on all of them with one cl
 
 Add your servers once. After that: check the ones you need, pick files or type a command, press **Run**.
 
-- **Copy to every server** — files and folders go to the checked servers in parallel. A dropped connection never leaves a truncated file: each file is swapped in whole. Failed servers are retried in one click.
-- **Only what changed** — compare by modification time or by SHA‑256: matching files aren't sent. Checksums can be verified again after copying.
+- **Copy to every server** — files and folders go to the checked servers in parallel. A dropped connection never leaves a truncated file: each file is swapped in whole, so a site never breaks mid‑deploy. Failed servers are retried in one click.
+- **Thousands of small files, fast** — the app picks the transport per file: small files travel as one compressed tar stream, large compressible ones compressed, large media over several SFTP connections at once. No rsync needed on the server.
+- **Only what changed** — compare by modification time or by SHA‑256: matching files aren't sent. The server side is listed in a single command, hashes run on all cores on both ends. Checksums can be verified again after copying.
 - **Permissions, owner and date stay put** — a replaced file keeps its permissions and owner, a new one takes them from the folder it lands in. Modification time is carried over from the local file.
-- **Commands and scripts** — a command or a multi‑line script of any length on every server at once, via sudo if you like. Favourite commands and history at hand.
-- **Each server's output** — live, per server, with highlighting. A stuck command is interrupted with Ctrl+C or killed right from the app.
+- **Commands and scripts** — a script of any length goes to every server whole, through stdin — not typed into a terminal. Answer `[Y/n]` prompts from the app; the sudo password is supplied for you. Favourite commands and history at hand.
+- **Each server's output** — live, per server, with highlighting. Ctrl+C stops the whole process group of a stuck command.
+- **Errors in plain words** — e.g. "the connection is eaten by a VPN/proxy in TUN mode"; on a rejected login it asks the server which login methods are allowed.
 - **Tabs for different jobs** — each tab has its own servers, files, path and command. **Run everywhere** starts all tabs at once; the result shows on the tab labels.
 - **SSH key or password** — OpenSSH, PEM and PuTTY `.ppk` keys, with or without a passphrase. With nothing set, the standard keys from `%USERPROFILE%\.ssh` are tried, like `ssh` does.
 - **Passwords encrypted** — under your Windows account by default, or with a master password that works on any computer.
