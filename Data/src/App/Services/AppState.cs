@@ -754,6 +754,7 @@ public sealed class AppState : ObservableObject
             OverwriteFiles = source?.OverwriteFiles ?? Settings.OverwriteFiles,
             PreserveTimestamps = source?.PreserveTimestamps ?? Settings.PreserveTimestamps,
             VerifyChecksums = source?.VerifyChecksums ?? Settings.VerifyChecksums,
+            ExcludeMasks = source?.ExcludeMasks ?? string.Empty,
             MatchByDate = source?.MatchByDate ?? false,
             MatchByHash = source?.MatchByHash ?? false,
         });

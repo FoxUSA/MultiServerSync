@@ -87,6 +87,20 @@ public partial class FilesPage : Page
         }
     }
 
+    private void OnExcludes(object sender, RoutedEventArgs e)
+    {
+        if (Workspace is not { } workspace
+            || ExcludeDialog.Ask(Window.GetWindow(this), workspace.ExcludeMasks) is not { } masks
+            || masks == workspace.ExcludeMasks)
+        {
+            return;
+        }
+
+        workspace.ExcludeMasks = masks;
+        var count = Core.ExcludeRules.Count(masks);
+        AppLog.Info(count > 0 ? $"Исключения при копировании: {count}." : "Исключения при копировании сняты.", workspace.Title);
+    }
+
     private void OnRemoveSelected(object sender, RoutedEventArgs e) =>
         Workspace?.RemoveItems(ItemsGrid.SelectedItems.OfType<TransferItem>());
 

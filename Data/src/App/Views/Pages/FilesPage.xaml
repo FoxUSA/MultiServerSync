@@ -73,6 +73,12 @@
         Style="{StaticResource ToolButtonStyle}"
         ToolTip="Открывает проводник. Выделяйте что угодно — файлы, папки, вперемешку, хоть Ctrl+A — и нажимайте «Добавить»" />
       <ui:Button
+        Click="OnExcludes"
+        Content="{Binding ExcludeCaption}"
+        Icon="{ui:SymbolIcon Filter24}"
+        Style="{StaticResource ToolButtonStyle}"
+        ToolTip="Что не копировать: маски вроде *.log, node_modules, .git" />
+      <ui:Button
         Click="OnRemoveSelected"
         Content="Убрать строки"
         Icon="{ui:SymbolIcon Subtract24}"

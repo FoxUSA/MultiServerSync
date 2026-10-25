@@ -10,9 +10,6 @@ public partial class ServerEditDialog : FluentWindow
 {
     private readonly ServerEntry _target;
 
-    // адрес, с которым запись пришла: старые записи могли быть с именем хоста вместо IP
-    private readonly string _originalHost;
-
     public ServerEditDialog(ServerEntry entry, bool isNew)
     {
         InitializeComponent();
@@ -22,7 +19,6 @@ public partial class ServerEditDialog : FluentWindow
 
         NameBox.Text = entry.Name;
         HostBox.Text = entry.Host;
-        _originalHost = entry.Host.Trim();
         DataObject.AddPastingHandler(HostBox, OnHostPaste);
         PortBox.Value = entry.Port <= 0 ? 22 : entry.Port;
         UserBox.Text = string.IsNullOrWhiteSpace(entry.User) ? "root" : entry.User;
@@ -34,6 +30,7 @@ public partial class ServerEditDialog : FluentWindow
 
         Loaded += (_, _) =>
         {
+            ShowHostKey();
             NameBox.Focus();
             NameBox.SelectAll();
         };
@@ -60,9 +57,9 @@ public partial class ServerEditDialog : FluentWindow
 
         var host = HostBox.Text.Trim();
 
-        if (host != _originalHost && !IsIpv4(host))
+        if (Uri.CheckHostName(host) == UriHostNameType.Unknown)
         {
-            error = "IP-адрес — четыре числа от 0 до 255 через точку, например 203.0.113.10.";
+            error = "Адрес — IPv4 (203.0.113.10), IPv6 (2001:db8::10) или имя (web1.example.com).";
             return false;
         }
 
@@ -132,136 +129,103 @@ public partial class ServerEditDialog : FluentWindow
         }
     }
 
-    // ── ввод IP ──────────────────────────────────────────────────────────────
-
-    private static bool IsIpv4(string text)
-    {
-        var parts = text.Split('.');
-
-        return parts.Length == 4
-            && parts.All(p => p.Length is > 0 and <= 3 && p.All(char.IsAsciiDigit) && int.Parse(p) <= 255);
-    }
-
-    /// <summary>Пробел не доходит до PreviewTextInput — глушим его здесь.</summary>
-    private void OnHostPreviewKeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Space)
-        {
-            e.Handled = true;
-        }
-    }
-
-    private void OnHostPreviewTextInput(object sender, TextCompositionEventArgs e)
-    {
-        e.Handled = true;
-
-        foreach (var c in e.Text)
-        {
-            TypeHostChar(c);
-        }
-    }
+    // ── адрес ────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Набор адреса: пропускаются только цифры и точки. Когда число дописано
-    /// (три цифры, ноль или следующая цифра дала бы больше 255), точка ставится сама,
-    /// а набранная следом точка поглощается — работает и с привычкой ставить её руками.
-    /// </summary>
-    private void TypeHostChar(char c)
-    {
-        if (!char.IsAsciiDigit(c) && c != '.')
-        {
-            return;
-        }
-
-        var text = HostBox.Text;
-        var start = HostBox.SelectionStart;
-        var head = text[..start];
-        var tail = text[(start + HostBox.SelectionLength)..];
-
-        if (tail.Length > 0)
-        {
-            // правка в середине адреса: без подстановок, просто символ
-            Put(head + c, tail);
-            return;
-        }
-
-        var octets = head.Split('.');
-        var current = octets[^1];
-
-        if (c == '.')
-        {
-            if (current.Length > 0 && octets.Length < 4)
-            {
-                Put(head + '.', tail);
-            }
-
-            return;
-        }
-
-        if (current.Length > 0 && !CanGrow(current, c))
-        {
-            // число уже полное — цифра начинает следующее
-            if (octets.Length >= 4)
-            {
-                return;
-            }
-
-            head += '.';
-            octets = head.Split('.');
-        }
-
-        head += c;
-        current = head.Split('.')[^1];
-
-        if (octets.Length < 4 && IsComplete(current))
-        {
-            head += '.';
-        }
-
-        Put(head, tail);
-
-        static bool CanGrow(string octet, char digit) =>
-            octet.Length < 3 && octet != "0" && int.Parse(octet + digit) <= 255;
-
-        // дальше дописать нечего: любая следующая цифра выведет за 255
-        static bool IsComplete(string octet) =>
-            octet.Length == 3 || octet == "0" || int.Parse(octet) * 10 > 255;
-    }
-
-    private void Put(string head, string tail)
-    {
-        HostBox.Text = head + tail;
-        HostBox.SelectionStart = head.Length;
-        HostBox.SelectionLength = 0;
-    }
-
-    /// <summary>
-    /// Вставка: из «203.0.113.10:2222» адрес уходит в поле, а порт — в своё поле.
-    /// Всё, кроме цифр и точек, выкидывается.
+    /// Вставка: «203.0.113.10:2222», «web1:2222» и «[2001:db8::10]:2222» раскладываются
+    /// на адрес и порт. Голый IPv6 (двоеточий больше одного) идёт в поле целиком.
+    /// Пробелы и «user@» спереди отбрасываются.
     /// </summary>
     private void OnHostPaste(object sender, DataObjectPastingEventArgs e)
     {
-        e.CancelCommand();
-
         if (e.DataObject.GetData(DataFormats.UnicodeText) is not string pasted)
         {
             return;
         }
 
-        pasted = pasted.Trim();
-        var colon = pasted.LastIndexOf(':');
+        e.CancelCommand();
 
-        if (colon > 0 && int.TryParse(pasted[(colon + 1)..], out var port) && port is >= 1 and <= 65535)
+        var text = new string(pasted.Where(c => !char.IsWhiteSpace(c)).ToArray());
+        text = text[(text.LastIndexOf('@') + 1)..];
+
+        string host;
+        string? port = null;
+
+        if (text.StartsWith('['))
         {
-            PortBox.Value = port;
-            pasted = pasted[..colon];
+            var close = text.IndexOf(']');
+            host = close > 0 ? text[1..close] : text.Trim('[', ']');
+            port = close > 0 && close + 1 < text.Length && text[close + 1] == ':' ? text[(close + 2)..] : null;
+        }
+        else if (text.Count(c => c == ':') == 1)
+        {
+            host = text[..text.IndexOf(':')];
+            port = text[(text.IndexOf(':') + 1)..];
+        }
+        else
+        {
+            host = text;
         }
 
-        var clean = new string(pasted.Where(c => char.IsAsciiDigit(c) || c == '.').ToArray());
+        if (int.TryParse(port, out var number) && number is >= 1 and <= 65535)
+        {
+            PortBox.Value = number;
+        }
 
-        var start = HostBox.SelectionStart;
-        var text = HostBox.Text;
-        Put(text[..start] + clean, text[(start + HostBox.SelectionLength)..]);
+        HostBox.SelectedText = host;
+        HostBox.SelectionStart += host.Length;
+        HostBox.SelectionLength = 0;
+    }
+
+    /// <summary>Строка с ключом сервера: запомненный отпечаток или «сервер показал другой».</summary>
+    private void ShowHostKey()
+    {
+        var probe = Snapshot();
+
+        if (string.IsNullOrWhiteSpace(probe.Host))
+        {
+            HostKeyPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var known = HostKeys.Get(probe);
+        var fresh = HostKeys.Mismatch(probe);
+
+        if (fresh is not null)
+        {
+            HostKeyText.Text = $"Ключ сервера изменился: запомнен {known?.Fingerprint}, сейчас {fresh.Fingerprint}.";
+            HostKeyButton.Content = "Принять новый";
+            HostKeyButton.ToolTip = "Если сервер переустанавливали. Иначе кто-то подменяет сервер — не принимайте.";
+        }
+        else if (known is not null)
+        {
+            HostKeyText.Text = $"Ключ сервера: {known.Algorithm} {known.Fingerprint}";
+            HostKeyButton.Content = "Забыть";
+            HostKeyButton.ToolTip = "Следующее подключение запомнит ключ, который покажет сервер.";
+        }
+        else
+        {
+            HostKeyPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        HostKeyPanel.Visibility = Visibility.Visible;
+    }
+
+    private void OnHostKeyAction(object sender, RoutedEventArgs e)
+    {
+        var probe = Snapshot();
+
+        if (HostKeys.Mismatch(probe) is not null)
+        {
+            HostKeys.AcceptNew(probe);
+        }
+        else
+        {
+            HostKeys.Forget(probe);
+        }
+
+        ShowHostKey();
     }
 
     private void Show(InfoBarSeverity severity, string title, string message)
@@ -326,6 +290,7 @@ public partial class ServerEditDialog : FluentWindow
         {
             TestButton.IsEnabled = true;
             TestSpinner.Visibility = Visibility.Collapsed;
+            ShowHostKey();
         }
     }
 

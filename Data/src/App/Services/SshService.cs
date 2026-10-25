@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
+using MultiServerSync.Core;
 using MultiServerSync.Models;
 using Renci.SshNet;
 using Renci.SshNet.Common;
@@ -35,7 +36,8 @@ public sealed record UploadOptions(
     bool Overwrite,
     bool PreserveTimestamps,
     bool MatchByDate,
-    bool MatchByHash)
+    bool MatchByHash,
+    string ExcludeMasks = "")
 {
     /// <summary>Надо ли вообще решать, отправлять файл: иначе он отправляется всегда.</summary>
     public bool Matching => MatchByDate || MatchByHash;
@@ -102,6 +104,14 @@ public sealed class SshKeyException(string message) : Exception(message);
 /// <summary>Работа с сервером по SSH и SFTP. Все вызовы синхронной библиотеки уводятся в пул потоков.</summary>
 public static class SshService
 {
+    /// <summary>Клиент SSH с проверкой ключа сервера — все подключения создаются так.</summary>
+    public static SshClient NewSsh(ServerEntry server, AppSettings settings) =>
+        HostKeys.Watch(new SshClient(BuildConnectionInfo(server, settings)), server);
+
+    /// <summary>Клиент SFTP с проверкой ключа сервера.</summary>
+    public static SftpClient NewSftp(ServerEntry server, AppSettings settings) =>
+        HostKeys.Watch(new SftpClient(BuildConnectionInfo(server, settings)), server);
+
     public static ConnectionInfo BuildConnectionInfo(ServerEntry server, AppSettings settings)
     {
         var user = string.IsNullOrWhiteSpace(server.User) ? "root" : server.User.Trim();
@@ -266,7 +276,7 @@ public static class SshService
         return Task.Run(
             () =>
             {
-                using var client = new SshClient(BuildConnectionInfo(server, settings));
+                using var client = NewSsh(server, settings);
                 client.Connect();
 
                 // Скрипт идёт через stdin, но сервер забирает ровно его байты во временный файл
@@ -510,12 +520,17 @@ public static class SshService
                 step?.Invoke(UploadStep.Connecting);
 
                 var root = NormalizeRemote(remoteRoot);
-                var plan = BuildPlan(items, root);
+                var plan = BuildPlan(items, root, ExcludeRules.Parse(options.ExcludeMasks));
 
-                using var ssh = new SshClient(BuildConnectionInfo(server, settings));
+                if (plan.Excluded > 0)
+                {
+                    report($"исключено по маскам: {plan.Excluded}");
+                }
+
+                using var ssh = NewSsh(server, settings);
                 ssh.Connect();
 
-                using var sftp = new SftpClient(BuildConnectionInfo(server, settings));
+                using var sftp = NewSftp(server, settings);
                 sftp.Connect();
 
                 if (options.MatchByDate && !options.MatchByHash)
@@ -716,7 +731,7 @@ public static class SshService
         return Task.Run(
             () =>
             {
-                using var sftp = new SftpClient(BuildConnectionInfo(server, settings));
+                using var sftp = NewSftp(server, settings);
                 sftp.Connect();
                 EnsureDirectory(sftp, NormalizeRemote(path), new Counters(), _ => { });
                 sftp.Disconnect();
@@ -744,7 +759,7 @@ public static class SshService
                     Timeout = TimeSpan.FromSeconds(Math.Max(5, settings.ConnectTimeoutSeconds)),
                 };
 
-                using var client = new SshClient(info);
+                using var client = HostKeys.Watch(new SshClient(info), server);
 
                 try
                 {
@@ -777,6 +792,14 @@ public static class SshService
     /// <summary>Человеческое объяснение сбоя вместо сухого текста библиотеки.</summary>
     public static string Describe(Exception ex, ServerEntry server)
     {
+        // подключение оборвали мы сами: сервер показал не тот ключ, что запомнен
+        if (ex is SshException && HostKeys.Mismatch(server) is { } fresh)
+        {
+            return $"Ключ сервера изменился: запомнен {HostKeys.Get(server)?.Fingerprint}, сейчас {fresh.Fingerprint}. "
+                + "Вход не выполнялся. Если сервер переустанавливали — примите новый ключ в окне сервера, "
+                + "иначе кто-то подменяет сервер.";
+        }
+
         switch (ex)
         {
             case SshKeyException:
@@ -885,12 +908,18 @@ public static class SshService
     }
 
     /// <summary>Что отправить: все файлы и папки выбранного, с путями на сервере.</summary>
-    private static Plan BuildPlan(IReadOnlyList<TransferItem> items, string root)
+    private static Plan BuildPlan(IReadOnlyList<TransferItem> items, string root, ExcludeRules exclude)
     {
         var plan = new Plan();
 
         foreach (var item in items)
         {
+            if (exclude.Matches(item.Name, item.IsDirectory))
+            {
+                plan.Excluded++;
+                continue;
+            }
+
             // папка едет целиком, вместе со своим именем — как при копировании
             // в проводнике: перетащил папку в каталог, там появилась папка
             var target = CombineRemote(root, item.Name);
@@ -898,7 +927,7 @@ public static class SshService
 
             if (item.IsDirectory)
             {
-                AddDirectory(plan, item.FullPath, target);
+                AddDirectory(plan, item.FullPath, target, item.Name, exclude);
             }
             else
             {
@@ -909,18 +938,36 @@ public static class SshService
         return plan;
     }
 
-    private static void AddDirectory(Plan plan, string localDir, string remoteDir)
+    /// <param name="relative">Путь от копируемого объекта включительно — по нему сверяются маски.</param>
+    private static void AddDirectory(Plan plan, string localDir, string remoteDir, string relative, ExcludeRules exclude)
     {
         plan.Dirs.Add(new DirJob(localDir, remoteDir));
 
         foreach (var file in Directory.EnumerateFiles(localDir))
         {
-            plan.Files.Add(new FileJob(file, CombineRemote(remoteDir, Path.GetFileName(file))));
+            var name = Path.GetFileName(file);
+
+            if (exclude.Matches(relative + "/" + name, isDirectory: false))
+            {
+                plan.Excluded++;
+                continue;
+            }
+
+            plan.Files.Add(new FileJob(file, CombineRemote(remoteDir, name)));
         }
 
         foreach (var dir in Directory.EnumerateDirectories(localDir))
         {
-            AddDirectory(plan, dir, CombineRemote(remoteDir, Path.GetFileName(dir)));
+            var name = Path.GetFileName(dir);
+
+            // исключённая папка не обходится вовсе: в node_modules десятки тысяч файлов
+            if (exclude.Matches(relative + "/" + name, isDirectory: true))
+            {
+                plan.Excluded++;
+                continue;
+            }
+
+            AddDirectory(plan, dir, CombineRemote(remoteDir, name), relative + "/" + name, exclude);
         }
     }
 
@@ -1273,7 +1320,7 @@ public static class SshService
 
         Parallel.For(0, Math.Min(BigFileConnections, big.Count) - 1, _ =>
         {
-            var client = new SftpClient(BuildConnectionInfo(server, settings));
+            var client = NewSftp(server, settings);
 
             try
             {
@@ -2061,7 +2108,7 @@ public static class SshService
                         f => LocalSha256(localHashes, f.LocalPath)),
                     ct);
 
-                using var client = new SshClient(BuildConnectionInfo(server, settings));
+                using var client = NewSsh(server, settings);
                 client.Connect();
 
                 var remote = RemoteSums(client, files.Select(f => f.RemotePath).ToList(), ct, out var complaint);
@@ -2361,6 +2408,9 @@ public static class SshService
         public List<DirJob> Dirs { get; } = [];
 
         public List<FileJob> Files { get; } = [];
+
+        /// <summary>Сколько файлов и папок отсеяно масками (папка — одна, со всем содержимым).</summary>
+        public int Excluded { get; set; }
     }
 
     /// <summary>Опись мест назначения, снятая одной командой find.</summary>

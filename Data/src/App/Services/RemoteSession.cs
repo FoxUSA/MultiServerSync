@@ -136,11 +136,10 @@ public sealed class RemoteSession : IDisposable
 
         Drop();
 
-        var sftp = new SftpClient(SshService.BuildConnectionInfo(Server, _settings))
-        {
-            // без этого сервер рвёт простаивающую сессию, пока человек думает над папкой
-            KeepAliveInterval = TimeSpan.FromSeconds(30),
-        };
+        var sftp = SshService.NewSftp(Server, _settings);
+
+        // без этого сервер рвёт простаивающую сессию, пока человек думает над папкой
+        sftp.KeepAliveInterval = TimeSpan.FromSeconds(30);
 
         sftp.Connect();
         Home ??= SshService.NormalizeRemote(sftp.WorkingDirectory);

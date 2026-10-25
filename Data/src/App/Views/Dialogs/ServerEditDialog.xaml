@@ -46,15 +46,12 @@
           <TextBlock
             Margin="0,0,0,4"
             Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-            Text="IP-адрес" />
-          <!--  только цифры и точки, точка после третьей цифры ставится сама  -->
+            Text="Адрес" />
+          <!--  IPv4, IPv6 или имя; вставка «адрес:порт» раскладывается по двум полям  -->
           <ui:TextBox
             x:Name="HostBox"
-            InputMethod.IsInputMethodEnabled="False"
-            MaxLength="15"
-            PlaceholderText="например: 203.0.113.10"
-            PreviewKeyDown="OnHostPreviewKeyDown"
-            PreviewTextInput="OnHostPreviewTextInput" />
+            MaxLength="253"
+            PlaceholderText="203.0.113.10 или web1.example.com" />
         </StackPanel>
 
         <StackPanel Grid.Column="2">
@@ -132,6 +129,29 @@
         x:Name="ShowNotesBox"
         Margin="0,6,0,0"
         Content="Показывать заметку под именем сервера в панели слева" />
+
+      <!--  запомненный ключ сервера: забыть или принять новый, если сервер переустановили  -->
+      <Grid
+        x:Name="HostKeyPanel"
+        Margin="0,12,0,0"
+        Visibility="Collapsed">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBlock
+          x:Name="HostKeyText"
+          VerticalAlignment="Center"
+          FontSize="12"
+          Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+          TextWrapping="Wrap" />
+        <ui:Button
+          x:Name="HostKeyButton"
+          Grid.Column="1"
+          Margin="8,0,0,0"
+          VerticalAlignment="Center"
+          Click="OnHostKeyAction" />
+      </Grid>
 
       <StackPanel Margin="0,16,0,0" Orientation="Horizontal">
         <ui:Button

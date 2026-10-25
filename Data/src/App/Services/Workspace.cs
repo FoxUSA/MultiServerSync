@@ -36,6 +36,7 @@ public sealed class Workspace : ObservableObject
     private bool _overwrite = true;
     private bool _preserveTimestamps = true;
     private bool _verifyChecksums;
+    private string _excludeMasks = string.Empty;
     private bool _matchByDate;
     private bool _matchByHash;
     private string _commandText = string.Empty;
@@ -389,6 +390,18 @@ public sealed class Workspace : ObservableObject
         get => _verifyChecksums;
         set { if (Set(ref _verifyChecksums, value)) { Save(); } }
     }
+
+    /// <summary>Исключения при копировании: маски по одной в строке.</summary>
+    public string ExcludeMasks
+    {
+        get => _excludeMasks;
+        set { if (Set(ref _excludeMasks, value ?? string.Empty)) { Raise(nameof(ExcludeCaption)); Save(); } }
+    }
+
+    /// <summary>Подпись кнопки: сразу видно, что на вкладке что-то исключается.</summary>
+    public string ExcludeCaption => ExcludeRules.Count(_excludeMasks) is var n and > 0
+        ? $"Исключения · {n}"
+        : "Исключения";
 
     /// <summary>Заменять файлы с другой датой изменения — в любую сторону, а не только старее.</summary>
     public bool MatchByDate
@@ -896,7 +909,7 @@ public sealed class Workspace : ObservableObject
         }
 
         var settings = AppState.Current.Settings;
-        var options = new UploadOptions(OverwriteFiles, PreserveTimestamps, MatchByDate, MatchByHash);
+        var options = new UploadOptions(OverwriteFiles, PreserveTimestamps, MatchByDate, MatchByHash, ExcludeMasks);
         var verify = VerifyChecksums;
 
         // без переноса даты у файла на сервере стоит время заливки, а не оригинала, — тогда
@@ -1325,6 +1338,7 @@ public sealed class Workspace : ObservableObject
         OverwriteFiles = OverwriteFiles,
         PreserveTimestamps = PreserveTimestamps,
         VerifyChecksums = VerifyChecksums,
+        ExcludeMasks = ExcludeMasks,
         MatchByDate = MatchByDate,
         MatchByHash = MatchByHash,
         CommandText = CommandText,
@@ -1344,6 +1358,7 @@ public sealed class Workspace : ObservableObject
         _overwrite = state.OverwriteFiles;
         _preserveTimestamps = state.PreserveTimestamps;
         _verifyChecksums = state.VerifyChecksums;
+        _excludeMasks = state.ExcludeMasks ?? string.Empty;
         _matchByDate = state.MatchByDate;
         _matchByHash = state.MatchByHash;
         _commandText = state.CommandText ?? string.Empty;
@@ -1398,6 +1413,8 @@ public sealed class Workspace : ObservableObject
             nameof(OverwriteFiles),
             nameof(PreserveTimestamps),
             nameof(VerifyChecksums),
+            nameof(ExcludeMasks),
+            nameof(ExcludeCaption),
             nameof(MatchByDate),
             nameof(MatchByHash),
             nameof(SendEverything),
