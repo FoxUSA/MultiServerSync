@@ -25,6 +25,15 @@ public partial class ServerEditDialog : FluentWindow
         PasswordBox.Password = entry.Password;
         KeyBox.Text = entry.KeyPath;
         KeyPassBox.Password = entry.KeyPassphrase;
+
+        // промежуточный — любой другой сервер; сам себе он не промежуточный
+        var jumps = new List<JumpOption> { new(string.Empty, "— напрямую —") };
+        jumps.AddRange(AppState.Current.Servers
+            .Where(s => s.Id != entry.Id)
+            .OrderBy(s => s.PaneLabel, StringComparer.OrdinalIgnoreCase)
+            .Select(s => new JumpOption(s.Id, s.Display)));
+        JumpBox.ItemsSource = jumps;
+        JumpBox.SelectedItem = jumps.FirstOrDefault(j => j.Id == entry.JumpServerId) ?? jumps[0];
         NotesBox.Text = entry.Notes;
         ShowNotesBox.IsChecked = entry.ShowNotesInPane;
 
@@ -45,7 +54,11 @@ public partial class ServerEditDialog : FluentWindow
         Password = PasswordBox.Password,
         KeyPath = KeyBox.Text.Trim(),
         KeyPassphrase = KeyPassBox.Password,
+        JumpServerId = (JumpBox.SelectedItem as JumpOption)?.Id ?? string.Empty,
     };
+
+    /// <summary>Строка списка «Через сервер».</summary>
+    private sealed record JumpOption(string Id, string Label);
 
     private bool Validate(out string error)
     {
@@ -309,6 +322,7 @@ public partial class ServerEditDialog : FluentWindow
         _target.Password = PasswordBox.Password;
         _target.KeyPath = KeyBox.Text.Trim();
         _target.KeyPassphrase = KeyPassBox.Password;
+        _target.JumpServerId = (JumpBox.SelectedItem as JumpOption)?.Id ?? string.Empty;
         _target.Notes = NotesBox.Text.Trim();
         _target.ShowNotesInPane = ShowNotesBox.IsChecked == true;
 

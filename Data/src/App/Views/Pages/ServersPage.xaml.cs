@@ -88,6 +88,39 @@ public partial class ServersPage : Page
         AppLog.Success($"Добавлен сервер в набор «{Set.Title}»: {entry.Display}");
     }
 
+    /// <summary>Импорт из ~/.ssh/config, PuTTY и WinSCP — в открытый набор, без отметок.</summary>
+    private void OnImport(object sender, RoutedEventArgs e)
+    {
+        var found = ServerImport.FindAll();
+
+        if (found.Count == 0)
+        {
+            AppLog.Warn("Импортировать нечего: в ~/.ssh/config, PuTTY и WinSCP серверов не найдено.");
+            return;
+        }
+
+        if (ImportServersDialog.Ask(Window.GetWindow(this), found, Set.Title) is not { Count: > 0 } picked)
+        {
+            return;
+        }
+
+        foreach (var c in picked)
+        {
+            AppState.Current.Servers.Add(new ServerEntry
+            {
+                Name = c.Name,
+                Host = c.Host,
+                Port = c.Port,
+                User = c.User,
+                KeyPath = c.KeyPath,
+                SetId = Set.Id,
+            });
+        }
+
+        AppState.Current.SaveServers();
+        AppLog.Success($"Импортировано серверов в набор «{Set.Title}»: {picked.Count} ({string.Join(", ", picked.Select(c => c.Source).Distinct())}).");
+    }
+
     private void OnEdit(object sender, RoutedEventArgs e) => EditSelected();
 
     private void OnGridDoubleClick(object sender, MouseButtonEventArgs e) => EditSelected();
@@ -235,6 +268,23 @@ public partial class ServersPage : Page
 
         AppState.Current.SaveServers();
         AppLog.Warn($"Удалено записей: {picked.Count}.");
+    }
+
+    /// <summary>Проводник на выделенном (или первом отмеченном) сервере — своя вкладка или уже открытая.</summary>
+    private void OnExplorer(object sender, RoutedEventArgs e)
+    {
+        var server = (ServersGrid.SelectedItem as ServerCheck)?.Server ?? Picked.FirstOrDefault();
+
+        if (server is null)
+        {
+            AppLog.Warn("Выделите сервер в таблице — его папки откроются в «Проводнике».");
+            AppState.Current.RequestLog();
+            return;
+        }
+
+        var tab = AppState.Current.ExplorerFor(server);
+        AppLog.Info($"Проводник: {server.PaneLabel}.", tab.Title);
+        AppState.Current.ShowTab(tab);
     }
 
     private async void OnTest(object sender, RoutedEventArgs e)

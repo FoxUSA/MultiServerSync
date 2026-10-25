@@ -1,0 +1,53 @@
+<UserControl
+  x:Class="MultiServerSync.Views.Controls.OutputZoom"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+
+  <!--  лупа: шрифт вывода мельче и крупнее — один на панель под выводом и отдельное окно  -->
+  <UserControl.Resources>
+    <Style x:Key="ZoomButtonStyle" TargetType="Button">
+      <Setter Property="Width" Value="28" />
+      <Setter Property="Height" Value="28" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Bd"
+              Background="{TemplateBinding Background}"
+              CornerRadius="4"
+              TextElement.Foreground="{TemplateBinding Foreground}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </UserControl.Resources>
+
+  <StackPanel Orientation="Horizontal">
+    <Button
+      Click="OnSmaller"
+      Style="{StaticResource ZoomButtonStyle}"
+      ToolTip="Шрифт вывода мельче (Ctrl + колесо вниз)">
+      <ui:SymbolIcon FontSize="18" Symbol="ZoomOut24" />
+    </Button>
+    <Button
+      Click="OnBigger"
+      Style="{StaticResource ZoomButtonStyle}"
+      ToolTip="Шрифт вывода крупнее (Ctrl + колесо вверх)">
+      <ui:SymbolIcon FontSize="18" Symbol="ZoomIn24" />
+    </Button>
+  </StackPanel>
+</UserControl>

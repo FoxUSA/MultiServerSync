@@ -89,7 +89,6 @@
         <ui:Button
           x:Name="UpdateButton"
           Margin="0,0,8,0"
-          Appearance="Primary"
           Click="OnUpdate"
           Content="Обновить"
           Icon="{ui:SymbolIcon ArrowDownload24}" />

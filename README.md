@@ -32,23 +32,27 @@ Check the servers — and push files or run a command on all of them with one cl
 ## What it's for
 
 - **Hundreds of routes, one click.** A tab is a scenario: "this folder → there, on these servers", "that file → elsewhere". **Run everywhere** fires every tab at once.
+- **Copy, then run commands.** A switch on a copy tab: after a successful upload its commands run — only on the servers where the copy went through.
 - **Commands in parallel.** Command tabs run side by side — even different commands on the same server: logs in one, restart in another.
-- **Fast copy, verified twice.** SHA‑256 before sending — identical files stay put; after — proof everything arrived intact.
+- **Fast copy, verified twice.** SHA-256 before sending — identical files stay put; after — proof everything arrived intact.
 - **No wrong server.** Smart mode remembers where each command and tab usually goes and asks before an unusual target.
 
 Add your servers once. After that: check the ones you need, pick files or type a command, press **Run**.
 
-- **Copy to every server** — files and folders go to the checked servers in parallel. A dropped connection never leaves a truncated file: each file is swapped in whole, so a site never breaks mid‑deploy. Failed servers are retried in one click.
-- **Thousands of small files, fast** — the app picks the transport per file: small files travel as one compressed tar stream, large compressible ones compressed, large media over several SFTP connections at once. No rsync needed on the server.
-- **Only what changed** — compare by modification time or by SHA‑256: matching files aren't sent. The server side is listed in a single command, hashes run on all cores on both ends. Checksums can be verified again after copying.
-- **Permissions, owner and date stay put** — a replaced file keeps its permissions and owner, a new one takes them from the folder it lands in. Modification time is carried over from the local file.
-- **Commands and scripts** — a script of any length goes to every server whole, through stdin — not typed into a terminal. Answer `[Y/n]` prompts from the app; the sudo password is supplied for you. Favourite commands and history at hand.
-- **Each server's output** — live, per server, with highlighting. Ctrl+C stops the whole process group of a stuck command.
-- **Errors in plain words** — e.g. "the connection is eaten by a VPN/proxy in TUN mode"; on a rejected login it asks the server which login methods are allowed.
+- **Copy to every server** — files and folders go to the checked servers in parallel. A dropped connection never leaves a truncated file: each file is swapped in whole. Failed servers are retried in one click.
+- **Many streams** — small files travel as compressed tar batches over three streams, large files in chunks over four connections. No rsync needed on the server.
+- **Only what changed** — compare by modification time or by SHA-256: matching files aren't sent. Checksums can be verified again after copying.
+- **Permissions, owner and date stay put** — a replaced file keeps its permissions and owner, a new one takes them from the folder it lands in.
+- **Download** — from servers to your PC the same way: only what changed, checksum check; from several servers — each into its own subfolder.
+- **Explorer** — two panes, your PC and a server, with Windows look and keys; as many tabs as you like. Permissions and owner change only in the Properties window. A server file opens in any Windows app and goes back on save.
+- **Exclusions** — masks like `node_modules` and `*.log` stay out both ways.
+- **Commands and scripts** — several commands in one tab run in turn: the next one after the previous succeeds. A script of any length goes whole through stdin; answer `[Y/n]` from the app, the sudo password is supplied for you. Command sets go to favourites.
+- **Each server's output** — live and separate, highlighted, with a zoom for larger text. Copy progress with time left; one **Stop** button.
+- **See what's wrong** — a persistent notice when commands after copying won't run: the tab is empty or the servers differ. Errors in plain words.
 - **Tabs for different jobs** — each tab has its own servers, files, path and command. **Run everywhere** starts all tabs at once; the result shows on the tab labels.
-- **SSH key or password** — OpenSSH, PEM and PuTTY `.ppk` keys, with or without a passphrase. With nothing set, the standard keys from `%USERPROFILE%\.ssh` are tried, like `ssh` does.
-- **Passwords encrypted** — under your Windows account by default, or with a master password that works on any computer.
-- **Smart mode** — remembers where each command and each copy tab usually runs, and asks before running it on a server it doesn't normally go to. Read‑only commands are not checked.
+- **Connection** — OpenSSH and PuTTY keys or a password, login through a jump host, import from `~/.ssh/config`, PuTTY and WinSCP. The server's host key is remembered — a swap gets noticed.
+- **Passwords encrypted** — under your Windows account or with a master password.
+- **Smart mode** — asks if a command or copy is about to run on a server it doesn't usually go to.
 
 ## Get started
 
@@ -76,4 +80,4 @@ The launcher `MultiServerSync.exe` appears in the repository root, the program i
 
 ---
 
-<sub>Keywords: multi-server SSH, SFTP sync, deploy files to multiple servers, run a command on many servers, parallel SSH, Windows SSH tool.</sub>
+<sub>Keywords: multi-server SSH, SFTP sync, deploy files to multiple servers, run a command on many servers, parallel SSH, download from multiple servers, two-pane SFTP explorer, Windows SSH tool.</sub>

@@ -74,6 +74,22 @@ public sealed class AppSettings
 
     public bool CompactTabsFiles { get; set; }
 
+    public bool CompactTabsDownload { get; set; }
+
+    public bool CompactTabsExplorer { get; set; }
+
+    /// <summary>Закладки папок проводника на компьютере — общие для всех вкладок.</summary>
+    public List<string> ExplorerLocalBookmarks { get; set; } = new();
+
+    /// <summary>Закладки папок на сервере — свои у каждого сервера (ключ — Id сервера).</summary>
+    public Dictionary<string, List<string>> ExplorerRemoteBookmarks { get; set; } = new();
+
+    /// <summary>Последние папки на компьютере.</summary>
+    public List<string> ExplorerLocalRecent { get; set; } = new();
+
+    /// <summary>Последние папки на сервере — у каждого сервера свои.</summary>
+    public Dictionary<string, List<string>> ExplorerRemoteRecent { get; set; } = new();
+
     /// <summary>
     /// Галочки «IP» и «User» в 2.0.8 — по разделу. Теперь они свои у каждой вкладки
     /// (<see cref="WorkspaceState.PaneShowIp"/>), отсюда берутся один раз при переносе.
@@ -93,6 +109,9 @@ public sealed class AppSettings
     /// </summary>
     public double LogPanelHeight { get; set; } = 220;
 
+    /// <summary>Своя высота нижней панели в проводнике; 0 — пятая часть окна, чтобы панелям было где развернуться.</summary>
+    public double ExplorerLogPanelHeight { get; set; }
+
     public bool LogPanelVisible { get; set; } = true;
 
     /// <summary>
@@ -100,6 +119,9 @@ public sealed class AppSettings
     /// через отбивку. Снято — вывод каждый раз начинается с чистого.
     /// </summary>
     public bool KeepOutputLog { get; set; }
+
+    /// <summary>Размер шрифта вывода — лупой над выводом или Ctrl + колесо.</summary>
+    public double OutputFontSize { get; set; } = 12;
 
     /// <summary>Команда закончилась — вывод всех серверов сам уходит в буфер обмена.</summary>
     public bool AutoCopyAll { get; set; }
@@ -136,6 +158,12 @@ public sealed class AppSettings
 
     /// <summary>Копирование закончилось — вывод сервера, выбранного в терминале, сам уходит в буфер.</summary>
     public bool AutoCopyCurrentAfterCopy { get; set; }
+
+    /// <summary>
+    /// Копирование вывода в разделе «Копирование» берёт и вывод личных команд вкладки:
+    /// в буфере один отчёт — сначала копирование, потом команды.
+    /// </summary>
+    public bool CopyWithChain { get; set; }
 
     /// <summary>
     /// Сортировка таблиц: имя таблицы → «свойство|asc|desc». Порядок, выбранный щелчком

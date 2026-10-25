@@ -47,11 +47,13 @@
         <ItemsControl x:Name="SetList">
           <ItemsControl.ItemTemplate>
             <DataTemplate>
+              <!--  имя текстом: подчёркивание в Content WPF съедает («TGbyFox_bot» → «TGbyFoxbot»)  -->
               <CheckBox
                 Margin="0,2"
                 Click="OnPickChanged"
-                Content="{Binding Label}"
-                IsChecked="{Binding IsPicked, Mode=TwoWay}" />
+                IsChecked="{Binding IsPicked, Mode=TwoWay}">
+                <TextBlock Text="{Binding Label}" />
+              </CheckBox>
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>
@@ -60,16 +62,12 @@
 
     <Border
       Grid.Row="2"
-      Padding="22,14"
-      Background="{DynamicResource ControlFillColorDefaultBrush}"
-      BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-      BorderThickness="0,1,0,0">
+      Padding="22,14">
       <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
         <ui:Button
           x:Name="ConfirmButton"
           MinWidth="110"
           Margin="0,0,8,0"
-          Appearance="Primary"
           Click="OnConfirm"
           Content="Скопировать"
           IsDefault="True"

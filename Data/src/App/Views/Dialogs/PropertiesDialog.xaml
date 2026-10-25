@@ -1,0 +1,336 @@
+<ui:FluentWindow
+  x:Class="MultiServerSync.Views.Dialogs.PropertiesDialog"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+  Title="Свойства"
+  Width="500"
+  MinHeight="0"
+  MaxHeight="900"
+  ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
+  ExtendsContentIntoTitleBar="True"
+  Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  ResizeMode="NoResize"
+  ShowInTaskbar="False"
+  SizeToContent="Height"
+  WindowBackdropType="Mica"
+  WindowCornerPreference="Round"
+  WindowStartupLocation="CenterOwner">
+
+  <ui:FluentWindow.Resources>
+    <Style x:Key="LabelStyle" TargetType="TextBlock">
+      <Setter Property="Margin" Value="0,4,12,4" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+
+    <Style x:Key="ValueStyle" TargetType="TextBlock">
+      <Setter Property="Margin" Value="0,4,0,4" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <Style
+      x:Key="BitStyle"
+      BasedOn="{StaticResource {x:Type CheckBox}}"
+      TargetType="CheckBox">
+      <Setter Property="MinWidth" Value="0" />
+      <Setter Property="MinHeight" Value="24" />
+      <Setter Property="Margin" Value="0,0,4,0" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+    </Style>
+
+    <Style
+      x:Key="SmallButtonStyle"
+      BasedOn="{StaticResource {x:Type ui:Button}}"
+      TargetType="ui:Button">
+      <Setter Property="Height" Value="28" />
+      <Setter Property="Padding" Value="10,0" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+  </ui:FluentWindow.Resources>
+
+  <StackPanel>
+    <ui:TitleBar
+      Title="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
+      ShowMaximize="False"
+      ShowMinimize="False" />
+
+    <StackPanel Margin="12,0,12,12">
+      <!--  что это  -->
+      <Grid Margin="0,0,0,8">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Image
+          x:Name="HeadIcon"
+          Width="32"
+          Height="32"
+          Margin="0,0,12,0" />
+        <TextBox
+          x:Name="HeadName"
+          Grid.Column="1"
+          VerticalAlignment="Center"
+          Background="Transparent"
+          BorderThickness="0"
+          FontSize="15"
+          FontWeight="SemiBold"
+          IsReadOnly="True"
+          TextWrapping="Wrap" />
+      </Grid>
+
+      <Grid x:Name="InfoGrid">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Style="{StaticResource LabelStyle}" Text="Тип" />
+        <TextBlock x:Name="TypeText" Grid.Row="0" Grid.Column="1" Style="{StaticResource ValueStyle}" />
+
+        <TextBlock Grid.Row="1" Style="{StaticResource LabelStyle}" Text="Где" />
+        <TextBox
+          x:Name="WhereText"
+          Grid.Row="1"
+          Grid.Column="1"
+          Margin="0,2"
+          Background="Transparent"
+          BorderThickness="0"
+          FontSize="12"
+          IsReadOnly="True"
+          TextWrapping="Wrap" />
+
+        <TextBlock Grid.Row="2" Style="{StaticResource LabelStyle}" Text="Размер" />
+        <StackPanel
+          Grid.Row="2"
+          Grid.Column="1"
+          Orientation="Horizontal">
+          <TextBlock x:Name="SizeText" Style="{StaticResource ValueStyle}" />
+          <ui:Button
+            x:Name="MeasureButton"
+            Margin="8,0,0,0"
+            Click="OnMeasure"
+            Content="Посчитать"
+            Style="{StaticResource SmallButtonStyle}"
+            ToolTip="Посчитать размер папок целиком — на большом дереве это займёт время" />
+        </StackPanel>
+
+        <TextBlock
+          x:Name="ContainsLabel"
+          Grid.Row="3"
+          Style="{StaticResource LabelStyle}"
+          Text="Содержит"
+          Visibility="Collapsed" />
+        <TextBlock
+          x:Name="ContainsText"
+          Grid.Row="3"
+          Grid.Column="1"
+          Style="{StaticResource ValueStyle}"
+          Visibility="Collapsed" />
+
+        <TextBlock Grid.Row="4" Style="{StaticResource LabelStyle}" Text="Изменён" />
+        <TextBlock x:Name="ModifiedText" Grid.Row="4" Grid.Column="1" Style="{StaticResource ValueStyle}" />
+
+        <TextBlock
+          x:Name="LinkLabel"
+          Grid.Row="5"
+          Style="{StaticResource LabelStyle}"
+          Text="Ссылка на"
+          Visibility="Collapsed" />
+        <TextBlock
+          x:Name="LinkText"
+          Grid.Row="5"
+          Grid.Column="1"
+          Style="{StaticResource ValueStyle}"
+          Visibility="Collapsed" />
+      </Grid>
+
+      <!--  контрольная сумма одного файла  -->
+      <Grid x:Name="HashRow" Margin="0,6,0,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <ui:Button
+          x:Name="HashButton"
+          Click="OnHash"
+          Content="SHA-256"
+          Style="{StaticResource SmallButtonStyle}"
+          ToolTip="Посчитать контрольную сумму файла" />
+        <TextBox
+          x:Name="HashText"
+          Grid.Column="1"
+          Margin="8,0,0,0"
+          VerticalAlignment="Center"
+          Background="Transparent"
+          BorderThickness="0"
+          FontFamily="Consolas"
+          FontSize="11"
+          IsReadOnly="True"
+          TextWrapping="Wrap" />
+        <ui:Button
+          x:Name="HashCopy"
+          Grid.Column="2"
+          Width="28"
+          Height="28"
+          Padding="0"
+          Appearance="Transparent"
+          Click="OnCopyHash"
+          Icon="{ui:SymbolIcon Copy24}"
+          ToolTip="Скопировать сумму"
+          Visibility="Collapsed" />
+      </Grid>
+
+      <!--  права и владелец — только на сервере  -->
+      <StackPanel x:Name="RightsPanel" Visibility="Collapsed">
+        <Separator Margin="0,10,0,6" Opacity="0.4" />
+
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="70" />
+            <ColumnDefinition Width="70" />
+            <ColumnDefinition Width="70" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+
+          <TextBlock Style="{StaticResource LabelStyle}" Text="Права" />
+          <TextBlock Grid.Column="1" HorizontalAlignment="Center" Style="{StaticResource LabelStyle}" Text="чтение" />
+          <TextBlock Grid.Column="2" HorizontalAlignment="Center" Style="{StaticResource LabelStyle}" Text="запись" />
+          <TextBlock Grid.Column="3" HorizontalAlignment="Center" Style="{StaticResource LabelStyle}" Text="запуск" />
+
+          <TextBlock Grid.Row="1" Style="{StaticResource LabelStyle}" Text="владелец" />
+          <CheckBox x:Name="Ur" Grid.Row="1" Grid.Column="1" Click="OnBitClick" Style="{StaticResource BitStyle}" />
+          <CheckBox x:Name="Uw" Grid.Row="1" Grid.Column="2" Click="OnBitClick" Style="{StaticResource BitStyle}" />
+          <CheckBox x:Name="Ux" Grid.Row="1" Grid.Column="3" Click="OnBitClick" Style="{StaticResource BitStyle}" />
+
+          <TextBlock Grid.Row="2" Style="{StaticResource LabelStyle}" Text="группа" />
+          <CheckBox x:Name="Gr" Grid.Row="2" Grid.Column="1" Click="OnBitClick" Style="{StaticResource BitStyle}" />
+          <CheckBox x:Name="Gw" Grid.Row="2" Grid.Column="2" Click="OnBitClick" Style="{StaticResource BitStyle}" />
+          <CheckBox x:Name="Gx" Grid.Row="2" Grid.Column="3" Click="OnBitClick" Style="{StaticResource BitStyle}" />
+
+          <TextBlock Grid.Row="3" Style="{StaticResource LabelStyle}" Text="остальные" />
+          <CheckBox x:Name="Or" Grid.Row="3" Grid.Column="1" Click="OnBitClick" Style="{StaticResource BitStyle}" />
+          <CheckBox x:Name="Ow" Grid.Row="3" Grid.Column="2" Click="OnBitClick" Style="{StaticResource BitStyle}" />
+          <CheckBox x:Name="Ox" Grid.Row="3" Grid.Column="3" Click="OnBitClick" Style="{StaticResource BitStyle}" />
+
+          <!--  то же числом: правится и тут, и галочками — одно и то же  -->
+          <StackPanel
+            Grid.Row="1"
+            Grid.RowSpan="3"
+            Grid.Column="4"
+            Margin="12,0,0,0"
+            VerticalAlignment="Center">
+            <TextBlock Style="{StaticResource LabelStyle}" Text="числом" />
+            <ui:TextBox
+              x:Name="OctalBox"
+              Width="90"
+              HorizontalAlignment="Left"
+              FontFamily="Consolas"
+              MaxLength="4"
+              TextChanged="OnOctalChanged"
+              ToolTip="Права числом, как в chmod: 755, 644, 2775" />
+          </StackPanel>
+        </Grid>
+
+        <Grid Margin="0,8,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <TextBlock Style="{StaticResource LabelStyle}" Text="Владелец" />
+          <ComboBox
+            x:Name="OwnerBox"
+            Grid.Column="1"
+            Margin="0,0,12,0"
+            IsEditable="True"
+            ToolTip="Сменить владельца может только root" />
+          <TextBlock Grid.Column="2" Style="{StaticResource LabelStyle}" Text="Группа" />
+          <ComboBox
+            x:Name="GroupBox"
+            Grid.Column="3"
+            IsEditable="True" />
+        </Grid>
+
+        <TextBlock
+          x:Name="OwnerHint"
+          Margin="0,4,0,0"
+          FontSize="11"
+          Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+          Text="Сменить владельца может только root."
+          TextWrapping="Wrap"
+          Visibility="Collapsed" />
+
+        <!--  со вложенными: папкам и файлам — разные права, иначе файлы станут исполняемыми  -->
+        <CheckBox
+          x:Name="RecursiveBox"
+          Margin="0,8,0,0"
+          Click="OnRecursiveClick"
+          Content="применить ко всему внутри папок"
+          ToolTip="Права — отдельно папкам и файлам. Ссылки не трогаются" />
+
+        <Grid
+          x:Name="RecursiveGrid"
+          Margin="24,4,0,0"
+          Visibility="Collapsed">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="90" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="90" />
+          </Grid.ColumnDefinitions>
+          <TextBlock Style="{StaticResource LabelStyle}" Text="папкам" />
+          <ui:TextBox x:Name="DirModeBox" Grid.Column="1" FontFamily="Consolas" MaxLength="4" />
+          <TextBlock Grid.Column="2" Margin="12,4,12,4" Style="{StaticResource LabelStyle}" Text="файлам" />
+          <ui:TextBox x:Name="FileModeBox" Grid.Column="3" FontFamily="Consolas" MaxLength="4" />
+        </Grid>
+      </StackPanel>
+
+      <TextBlock
+        x:Name="ResultText"
+        Margin="0,8,0,0"
+        FontSize="12"
+        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+        TextWrapping="Wrap" />
+
+      <StackPanel
+        Margin="0,12,0,0"
+        HorizontalAlignment="Right"
+        Orientation="Horizontal">
+        <ui:Button
+          x:Name="WindowsButton"
+          Margin="0,0,4,0"
+          Click="OnWindowsProperties"
+          Content="Свойства Windows…"
+          Visibility="Collapsed" />
+        <ui:Button
+          x:Name="ApplyButton"
+          Margin="0,0,4,0"
+          Click="OnApply"
+          Content="Применить"
+          Visibility="Collapsed" />
+        <ui:Button Click="OnClose" Content="Закрыть" IsCancel="True" />
+      </StackPanel>
+    </StackPanel>
+  </StackPanel>
+</ui:FluentWindow>

@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using MultiServerSync.Core;
 using MultiServerSync.Models;
 using MultiServerSync.Services;
@@ -19,6 +20,7 @@ public sealed class RemoteNode : ObservableObject
 {
     private bool _isExpanded;
     private bool _isSelected;
+    private bool _isVisible = true;
 
     public RemoteNode(string name, string fullPath)
     {
@@ -53,6 +55,13 @@ public sealed class RemoteNode : ObservableObject
     {
         get => _isSelected;
         set => Set(ref _isSelected, value);
+    }
+
+    /// <summary>Подходит под маску папок сам или кто-то под ним.</summary>
+    public bool IsVisible
+    {
+        get => _isVisible;
+        set => Set(ref _isVisible, value);
     }
 
     public ObservableCollection<RemoteNode> Children { get; }
@@ -111,13 +120,24 @@ public partial class RemoteBrowserWindow : FluentWindow
     private string _sortKey = nameof(ListingItem.Name);
     private ListSortDirection _sortDirection = ListSortDirection.Ascending;
 
-    public RemoteBrowserWindow(ServerEntry server, string initialPath)
+    /// <summary>Выбор нескольких файлов и папок — для скачивания; иначе выбирается одна папка.</summary>
+    private readonly bool _pickMany;
+
+    public RemoteBrowserWindow(ServerEntry server, string initialPath, bool pickMany = false)
     {
         InitializeComponent();
 
+        _pickMany = pickMany;
+
+        if (pickMany)
+        {
+            Title = "Что скачать с сервера";
+            Listing.SelectionMode = DataGridSelectionMode.Extended;
+        }
+
         Server = server;
         _initialPath = string.IsNullOrWhiteSpace(initialPath) ? "/" : initialPath;
-        _session = new RemoteSession(server, AppState.Current.Settings);
+        _session = RemoteSession.Acquire(server, AppState.Current.Settings);
 
         // в списке — серверы выбранного набора (или всех, если слева «Все»); открытый есть в любом случае
         var servers = AppState.Current.PaneServers.ToList();
@@ -131,7 +151,8 @@ public partial class RemoteBrowserWindow : FluentWindow
         ServerBox.SelectedItem = server;
 
         PreviewKeyDown += OnWindowKeyDown;
-        Closed += (_, _) => _session.Dispose();
+        // подключение и прочитанные папки остаются в запасе: следующее открытие — без входа
+        Closed += (_, _) => _session.Release();
 
         Loaded += async (_, _) =>
         {
@@ -143,6 +164,12 @@ public partial class RemoteBrowserWindow : FluentWindow
     public ServerEntry Server { get; private set; }
 
     public string? SelectedPath { get; private set; }
+
+    /// <summary>Выбранное в режиме скачивания: выделенные файлы и папки, а если ничего — открытая папка.</summary>
+    public IReadOnlyList<string> SelectedPaths { get; private set; } = [];
+
+    /// <summary>То же со строками обзора: тип, размер и дата — для таблицы скачивания.</summary>
+    public IReadOnlyList<ListingItem> SelectedItems { get; private set; } = [];
 
     // ── открытие ───────────────────────────────────────────────────────────────
 
@@ -157,11 +184,19 @@ public partial class RemoteBrowserWindow : FluentWindow
         _forward.Clear();
 
         var session = _session;
-        BusyText.Text = $"подключение к {session.Server.Display} …";
+
+        // папка уже прочитана в прошлый раз — показываем сразу, проверка свежести сама подключится
+        if (!session.IsCached(SshService.NormalizeRemote(path)))
+        {
+            BusyText.Text = $"подключение к {session.Server.Display} …";
+        }
 
         try
         {
-            await session.ConnectAsync();
+            if (!session.IsCached(SshService.NormalizeRemote(path)))
+            {
+                await session.ConnectAsync();
+            }
         }
         catch (Exception ex)
         {
@@ -223,6 +258,9 @@ public partial class RemoteBrowserWindow : FluentWindow
             BusyText.Text = $"чтение {target} …";
         }
 
+        // из кэша, но давно — показать сразу и тихо перечитать, как у WinSCP
+        var revalidate = !refresh && session.IsCached(target) && !session.IsFresh(target);
+
         IReadOnlyList<RemoteEntry> items;
 
         try
@@ -275,8 +313,58 @@ public partial class RemoteBrowserWindow : FluentWindow
         BusyText.Text = $"{session.Server.Display} · папок: {dirs}, файлов: {items.Count - dirs}";
 
         _ = RevealInTreeAsync(target, version);
+
+        // подпапки — заранее, одной командой: щелчок по любой покажет её сразу
+        _ = session.PrefetchFastAsync(items
+            .Where(i => i.IsDirectory)
+            .OrderBy(i => i.Name, StringComparer.OrdinalIgnoreCase)
+            .Take(300)
+            .Select(i => i.FullPath)
+            .ToList());
+
+        if (revalidate)
+        {
+            _ = RevalidateAsync(target, items, version);
+        }
+
         return NavResult.Ok;
     }
+
+    /// <summary>
+    /// Папка показана из кэша — перечитываем её в фоне. Изменилась — список обновляется,
+    /// не изменилась — человек ничего не замечает. Ошибку здесь не показываем: список уже на экране.
+    /// </summary>
+    private async Task RevalidateAsync(string path, IReadOnlyList<RemoteEntry> shown, int version)
+    {
+        var session = _session;
+        IReadOnlyList<RemoteEntry> fresh;
+
+        try
+        {
+            fresh = await session.ListAsync(path, refresh: true);
+        }
+        catch
+        {
+            return;
+        }
+
+        if (version != _navVersion || !ReferenceEquals(session, _session) || _current != path || Same(shown, fresh))
+        {
+            return;
+        }
+
+        Show(path, fresh);
+
+        var dirs = fresh.Count(i => i.IsDirectory);
+        BusyText.Text = $"{session.Server.Display} · папок: {dirs}, файлов: {fresh.Count - dirs}";
+    }
+
+    private static bool Same(IReadOnlyList<RemoteEntry> a, IReadOnlyList<RemoteEntry> b) =>
+        a.Count == b.Count
+        && a.Zip(b).All(p => p.First.FullPath == p.Second.FullPath
+            && p.First.Length == p.Second.Length
+            && p.First.Modified == p.Second.Modified
+            && p.First.IsDirectory == p.Second.IsDirectory);
 
     private void Show(string path, IReadOnlyList<RemoteEntry> items)
     {
@@ -304,9 +392,70 @@ public partial class RemoteBrowserWindow : FluentWindow
             IsLink = x.IsLink,
         }));
 
-        Listing.ItemsSource = new ListCollectionView(rows) { CustomSort = new ListingOrder(_sortKey, _sortDirection) };
+        Listing.ItemsSource = new ListCollectionView(rows)
+        {
+            CustomSort = new ListingOrder(_sortKey, _sortDirection),
+            Filter = FileFilter,
+        };
         ShowSortArrow();
         UpdateChoice();
+    }
+
+    // ── маски ──────────────────────────────────────────────────────────────────
+
+    /// <summary>Маска файлов: «..» и папки видны всегда — по ним ходят.</summary>
+    private bool FileFilter(object row) =>
+        row is not ListingItem item || item.IsParent || item.IsDirectory || NameMask.Matches(item.Name, FileMaskBox.Text);
+
+    private void OnFileMaskChanged(object sender, TextChangedEventArgs e)
+    {
+        FileMaskClear.Visibility = NameMask.IsEmpty(FileMaskBox.Text) ? Visibility.Collapsed : Visibility.Visible;
+
+        if (Listing.ItemsSource is ListCollectionView view)
+        {
+            view.Refresh();
+        }
+    }
+
+    private void OnFolderMaskChanged(object sender, TextChangedEventArgs e)
+    {
+        FolderMaskClear.Visibility = NameMask.IsEmpty(FolderMaskBox.Text) ? Visibility.Collapsed : Visibility.Visible;
+        ApplyFolderMask();
+    }
+
+    private void OnClearFileMask(object sender, RoutedEventArgs e) => FileMaskBox.Text = string.Empty;
+
+    private void OnClearFolderMask(object sender, RoutedEventArgs e) => FolderMaskBox.Text = string.Empty;
+
+    /// <summary>
+    /// В дереве — подходящие папки, всё под ними и путь к ним сверху. Ищется среди уже
+    /// прочитанных веток: дерево сервера целиком не читается.
+    /// </summary>
+    private void ApplyFolderMask()
+    {
+        if (_root is not { } root)
+        {
+            return;
+        }
+
+        var mask = FolderMaskBox.Text;
+        Visit(root, underMatch: false);
+
+        // вернёт, есть ли совпадение в этой ветке; под подходящей папкой видно всё
+        bool Visit(RemoteNode node, bool underMatch)
+        {
+            var isRoot = ReferenceEquals(node, root);
+            var self = !isRoot && NameMask.Matches(node.Name, mask);
+            var below = false;
+
+            foreach (var child in node.Children.Where(c => !c.IsPlaceholder))
+            {
+                below |= Visit(child, underMatch || self);
+            }
+
+            node.IsVisible = isRoot || underMatch || self || below;
+            return self || below;
+        }
     }
 
     // ── сортировка ─────────────────────────────────────────────────────────────
@@ -416,7 +565,64 @@ public partial class RemoteBrowserWindow : FluentWindow
             .Where(c => c.IsDirectory)
             .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase))
         {
-            node.Children.Add(new RemoteNode(dir.Name, dir.FullPath));
+            var child = new RemoteNode(dir.Name, dir.FullPath);
+            MarkIfEmpty(child);
+            node.Children.Add(child);
+        }
+
+        if (!NameMask.IsEmpty(FolderMaskBox.Text))
+        {
+            ApplyFolderMask();
+        }
+
+        _ = PrefetchChildrenAsync(node);
+    }
+
+    /// <summary>Стрелка — только у папки, где есть подпапки: ложная стрелка обещает то, чего нет.</summary>
+    private void MarkIfEmpty(RemoteNode node)
+    {
+        if (node.IsLoaded)
+        {
+            return;
+        }
+
+        var empty = _session.HasSubdirs(node.FullPath) is { } has
+            ? !has
+            : _session.Cached(node.FullPath) is { } items && !items.Any(i => i.IsDirectory);
+
+        if (empty)
+        {
+            node.IsLoaded = true;
+            node.Children.Clear();
+        }
+    }
+
+    /// <summary>
+    /// Обычно чтение папки уже сказало, у каких подпапок есть свои. Где не сказало (сервер без
+    /// полноценного find) — подпапки читаются в фоне, чтобы узнать, у каких стрелка не нужна.
+    /// </summary>
+    private async Task PrefetchChildrenAsync(RemoteNode node)
+    {
+        var session = _session;
+        var children = node.Children
+            .Where(c => !c.IsPlaceholder && !c.IsLoaded && session.HasSubdirs(c.FullPath) is null)
+            .ToList();
+
+        if (children.Count == 0)
+        {
+            return;
+        }
+
+        await session.PrefetchAsync(children.Select(c => c.FullPath).ToList());
+
+        if (!ReferenceEquals(session, _session))
+        {
+            return;
+        }
+
+        foreach (var child in children)
+        {
+            MarkIfEmpty(child);
         }
     }
 
@@ -437,6 +643,7 @@ public partial class RemoteBrowserWindow : FluentWindow
         }
 
         var session = _session;
+        var chain = new List<RemoteNode> { node };
 
         try
         {
@@ -459,6 +666,7 @@ public partial class RemoteBrowserWindow : FluentWindow
                 }
 
                 node = next;
+                chain.Add(node);
             }
 
             _syncingTree = true;
@@ -470,11 +678,81 @@ public partial class RemoteBrowserWindow : FluentWindow
 
             node.IsSelected = true;
             _treeSelected = node;
+            ScrollTreeTo(chain);
         }
         finally
         {
             _syncingTree = false;
         }
+    }
+
+    /// <summary>
+    /// Дерево прокручивается к открытой папке, если её не видно: она встаёт чуть ниже середины,
+    /// чтобы сверху было видно, откуда она, — как в проводнике.
+    /// </summary>
+    private void ScrollTreeTo(IReadOnlyList<RemoteNode> chain)
+    {
+        // ветки только что развернулись — строки дерева появятся после раскладки
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        {
+            ItemsControl parent = Tree;
+            System.Windows.Controls.TreeViewItem? item = null;
+
+            foreach (var node in chain)
+            {
+                parent.UpdateLayout();
+                item = parent.ItemContainerGenerator.ContainerFromItem(node) as System.Windows.Controls.TreeViewItem;
+
+                if (item is null)
+                {
+                    return;
+                }
+
+                parent = item;
+            }
+
+            if (item is null || Find<ScrollViewer>(Tree) is not { } scroller)
+            {
+                return;
+            }
+
+            if (scroller.CanContentScroll)
+            {
+                item.BringIntoView();
+                return;
+            }
+
+            const double row = 24;
+            var top = item.TransformToAncestor(scroller).Transform(new Point(0, 0)).Y;
+
+            if (top >= 0 && top + row <= scroller.ViewportHeight)
+            {
+                return;
+            }
+
+            scroller.ScrollToVerticalOffset(Math.Max(0, scroller.VerticalOffset + top - scroller.ViewportHeight * 0.55));
+        });
+    }
+
+    private static T? Find<T>(DependencyObject root)
+        where T : DependencyObject
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+
+            if (child is T found)
+            {
+                return found;
+            }
+
+            if (Find<T>(child) is { } deeper)
+            {
+                return deeper;
+            }
+        }
+
+        return null;
     }
 
     private async void OnTreeSelected(object sender, RoutedPropertyChangedEventArgs<object> e)
@@ -505,8 +783,8 @@ public partial class RemoteBrowserWindow : FluentWindow
 
         Server = picked;
 
-        _session.Dispose();
-        _session = new RemoteSession(picked, AppState.Current.Settings);
+        _session.Release();
+        _session = RemoteSession.Acquire(picked, AppState.Current.Settings);
 
         await OpenAsync(_missingChoice ?? _current);
     }
@@ -793,14 +1071,41 @@ public partial class RemoteBrowserWindow : FluentWindow
 
     /// <summary>Выделенная в списке папка, а если не выделена — открытая.</summary>
     private string Choice =>
-        Listing.SelectedItem is ListingItem { IsDirectory: true, IsParent: false } item
-            ? item.FullPath
-            : _missingChoice ?? _current;
+        _pickMany
+            ? Picked.Count switch
+            {
+                0 => _current,
+                1 => Picked[0].FullPath,
+                var n => $"{n} объектов в {_current}",
+            }
+            : Listing.SelectedItem is ListingItem { IsDirectory: true, IsParent: false } item
+                ? item.FullPath
+                : _missingChoice ?? _current;
+
+    /// <summary>Выделенное в режиме скачивания: и файлы, и папки, без «..».</summary>
+    private List<ListingItem> Picked => Listing.SelectedItems
+        .OfType<ListingItem>()
+        .Where(i => !i.IsParent)
+        .ToList();
 
     private void UpdateChoice() => ChoiceText.Text = Choice;
 
     private void OnChoose(object sender, RoutedEventArgs e)
     {
+        if (_pickMany)
+        {
+            var picked = Picked;
+
+            // ничего не выделено — берётся открытая папка
+            SelectedItems = picked.Count > 0
+                ? picked
+                : [new ListingItem { Name = _current, FullPath = _current, IsDirectory = true }];
+            SelectedPaths = SelectedItems.Select(i => SshService.NormalizeRemote(i.FullPath)).ToList();
+            DialogResult = true;
+            Close();
+            return;
+        }
+
         SelectedPath = SshService.NormalizeRemote(Choice);
         DialogResult = true;
         Close();

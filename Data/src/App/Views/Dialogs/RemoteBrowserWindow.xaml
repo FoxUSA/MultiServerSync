@@ -17,13 +17,14 @@
   WindowStartupLocation="CenterOwner">
 
   <ui:FluentWindow.Resources>
-    <!--  кнопки панели инструментов: квадратные, только значок, как в проводнике  -->
+    <!--  кнопки панели инструментов: квадратные, только значок, как в проводнике.
+          Высота 36 — как у выбора сервера, адреса и маски: весь ряд ровный  -->
     <Style
       x:Key="NavButtonStyle"
       BasedOn="{StaticResource {x:Type ui:Button}}"
       TargetType="ui:Button">
-      <Setter Property="Width" Value="34" />
-      <Setter Property="Height" Value="32" />
+      <Setter Property="Width" Value="36" />
+      <Setter Property="Height" Value="36" />
       <Setter Property="Padding" Value="0" />
       <Setter Property="Margin" Value="0,0,4,0" />
       <Setter Property="HorizontalContentAlignment" Value="Center" />
@@ -62,6 +63,43 @@
 
     <!--  папки жёлтые, как в проводнике и WinSCP: глаз находит их сразу  -->
     <SolidColorBrush x:Key="FolderBrush" Color="#E8B54A" />
+
+    <!--  крестик сброса маски: виден, пока маска не пустая, даже без фокуса в поле —
+          иначе забытый фильтр молча прячет файлы  -->
+    <Style x:Key="MaskClearButtonStyle" TargetType="Button">
+      <Setter Property="Width" Value="26" />
+      <Setter Property="Height" Value="26" />
+      <Setter Property="Margin" Value="0,0,5,0" />
+      <Setter Property="HorizontalAlignment" Value="Right" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Visibility" Value="Collapsed" />
+      <Setter Property="ToolTip" Value="Сбросить маску" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Bd"
+              Background="Transparent"
+              CornerRadius="4">
+              <TextBlock
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                FontSize="10"
+                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                Text="&#xE711;" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
   </ui:FluentWindow.Resources>
 
   <Grid>
@@ -73,20 +111,21 @@
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
-    <ui:TitleBar Grid.Row="0" Title="Папка на сервере" />
+    <ui:TitleBar Grid.Row="0" Title="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}" />
 
-    <!--  навигация: сервер, назад/вперёд/вверх/корень/обновить, адрес, новая папка  -->
+    <!--  навигация: сервер, назад/вперёд/вверх/корень/обновить/новая папка, адрес, маска файлов  -->
     <Grid Grid.Row="1" Margin="12,2,12,8">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="220" />
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="*" />
-        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="220" />
       </Grid.ColumnDefinitions>
 
       <ComboBox
         x:Name="ServerBox"
         Grid.Column="0"
+        Height="36"
         Margin="0,0,10,0"
         VerticalContentAlignment="Center"
         DisplayMemberPath="Display"
@@ -121,6 +160,11 @@
           Icon="{ui:SymbolIcon ArrowClockwise24}"
           Style="{StaticResource NavButtonStyle}"
           ToolTip="Перечитать папку с сервера (F5)" />
+        <ui:Button
+          Click="OnNewFolder"
+          Icon="{ui:SymbolIcon FolderAdd24}"
+          Style="{StaticResource NavButtonStyle}"
+          ToolTip="Новая папка в открытой" />
       </StackPanel>
 
       <!--
@@ -128,7 +172,10 @@
         (или Ctrl+L, F4) открывает обычное поле для ввода. Поле скрыто, но не убрано —
         по нему строка берёт высоту, и при переключении ничего не прыгает.
       -->
-      <Grid Grid.Column="2" Margin="6,0,0,0">
+      <Grid
+        Grid.Column="2"
+        Height="36"
+        Margin="6,0,0,0">
         <ui:TextBox
           x:Name="PathBox"
           VerticalContentAlignment="Center"
@@ -160,13 +207,23 @@
         </Border>
       </Grid>
 
-      <ui:Button
-        Grid.Column="3"
-        Height="32"
-        Margin="8,0,0,0"
-        Click="OnNewFolder"
-        Content="Новая папка"
-        Icon="{ui:SymbolIcon FolderAdd24}" />
+      <!--  маска файлов: в списке остаются папки и файлы, подходящие под неё  -->
+      <Grid Grid.Column="3" Margin="8,0,0,0">
+        <ui:TextBox
+          x:Name="FileMaskBox"
+          Height="36"
+          Padding="10,0,34,0"
+          VerticalContentAlignment="Center"
+          ClearButtonEnabled="False"
+          Icon="{ui:SymbolIcon Filter24}"
+          PlaceholderText="маска файлов: *.conf"
+          TextChanged="OnFileMaskChanged"
+          ToolTip="Показывать только файлы, подходящие под маску: *.conf, *.log, nginx. Несколько — через пробел. Папки видны всегда" />
+        <Button
+          x:Name="FileMaskClear"
+          Click="OnClearFileMask"
+          Style="{StaticResource MaskClearButtonStyle}" />
+      </Grid>
     </Grid>
 
     <Grid Grid.Row="2" Margin="12,0,12,0">
@@ -176,8 +233,32 @@
         <ColumnDefinition Width="*" MinWidth="300" />
       </Grid.ColumnDefinitions>
 
+      <Grid Grid.Column="0">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!--  маска папок: в дереве остаются подходящие папки и путь к ним  -->
+        <Grid Grid.Row="0" Margin="0,0,0,4">
+          <ui:TextBox
+            x:Name="FolderMaskBox"
+            Height="36"
+            Padding="10,0,34,0"
+            VerticalContentAlignment="Center"
+            ClearButtonEnabled="False"
+            Icon="{ui:SymbolIcon Filter24}"
+            PlaceholderText="маска папок: nginx"
+            TextChanged="OnFolderMaskChanged"
+            ToolTip="Показывать в дереве только папки, подходящие под маску, и путь к ним. Ищет среди уже раскрытых веток" />
+          <Button
+            x:Name="FolderMaskClear"
+            Click="OnClearFolderMask"
+            Style="{StaticResource MaskClearButtonStyle}" />
+        </Grid>
+
       <Border
-        Grid.Column="0"
+        Grid.Row="1"
         BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
         BorderThickness="1"
         CornerRadius="6">
@@ -307,6 +388,12 @@
                   </ControlTemplate>
                 </Setter.Value>
               </Setter>
+              <Style.Triggers>
+                <!--  не подходит под маску папок  -->
+                <DataTrigger Binding="{Binding IsVisible}" Value="False">
+                  <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+              </Style.Triggers>
             </Style>
           </TreeView.ItemContainerStyle>
           <TreeView.ItemTemplate>
@@ -328,6 +415,7 @@
           </TreeView.ItemTemplate>
         </TreeView>
       </Border>
+      </Grid>
 
       <GridSplitter
         Grid.Column="1"
@@ -446,7 +534,6 @@
       <StackPanel Grid.Column="2" Orientation="Horizontal">
         <ui:Button
           Margin="0,0,8,0"
-          Appearance="Primary"
           Click="OnChoose"
           Content="Выбрать"
           Icon="{ui:SymbolIcon Checkmark24}"

@@ -13,6 +13,9 @@
   <Page.Resources>
     <BooleanToVisibilityConverter x:Key="BoolToVis" />
 
+    <!--  правка избранного: окна подкрашены, чтобы не спутать с рабочими  -->
+    <SolidColorBrush x:Key="EditTint" Color="#33E8B54A" />
+
     <!--  строка истории и избранного: невысокие, чтобы поле ввода было больше  -->
     <Style
       x:Key="SlimComboStyle"
@@ -30,8 +33,8 @@
       а действие относится ровно к тому полю, над которым висят.
     -->
     <Style x:Key="EditorIconStyle" TargetType="Button">
-      <Setter Property="Width" Value="40" />
-      <Setter Property="Height" Value="40" />
+      <Setter Property="Width" Value="34" />
+      <Setter Property="Height" Value="34" />
       <Setter Property="Margin" Value="2,0,0,0" />
       <Setter Property="Padding" Value="0" />
       <Setter Property="Focusable" Value="False" />
@@ -64,7 +67,7 @@
     </Style>
   </Page.Resources>
 
-  <Grid Margin="20,12,20,12">
+  <Grid Margin="12">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
@@ -79,7 +82,7 @@
     <TextBlock
       Grid.Row="0"
       Grid.Column="0"
-      Margin="0,0,10,0"
+      Margin="0,0,4,0"
       VerticalAlignment="Center"
       FontSize="12"
       Text="История:" />
@@ -87,6 +90,7 @@
       x:Name="HistoryBox"
       Grid.Row="0"
       Grid.Column="1"
+      IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}"
       SelectionChanged="OnHistoryPicked"
       Style="{StaticResource SlimComboStyle}"
       ToolTip="Ранее выполнявшиеся команды — общие для всех вкладок. Крестик убирает строку из истории.">
@@ -130,7 +134,7 @@
     <TextBlock
       Grid.Row="1"
       Grid.Column="0"
-      Margin="0,6,10,0"
+      Margin="0,4,4,0"
       VerticalAlignment="Center"
       FontSize="12"
       Text="Избранное:" />
@@ -138,10 +142,11 @@
       x:Name="BookBox"
       Grid.Row="1"
       Grid.Column="1"
-      Margin="0,6,0,0"
+      IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}"
+      Margin="0,4,0,0"
       SelectionChanged="OnSnippetPicked"
       Style="{StaticResource SlimComboStyle}"
-      ToolTip="Сохранённые команды с описанием — общие для всех вкладок. Выбор подставляет команду в поле ввода, карандаш правит название и код, крестик удаляет запись.">
+      ToolTip="Сохранённые команды с описанием — общие для всех вкладок. Выбор подставляет команду в окно, а запись из нескольких окон раскрывает их все. Карандаш открывает запись на правку прямо в окнах, крестик удаляет.">
       <ComboBox.ItemTemplate>
         <DataTemplate>
           <Grid ToolTip="{Binding Preview}">
@@ -156,10 +161,26 @@
               MinWidth="320"
               MaxWidth="760"
               HorizontalAlignment="Left">
-              <TextBlock
-                FontWeight="SemiBold"
-                Text="{Binding Comment}"
-                TextTrimming="CharacterEllipsis" />
+              <StackPanel Orientation="Horizontal">
+                <TextBlock
+                  FontWeight="SemiBold"
+                  Text="{Binding Comment}"
+                  TextTrimming="CharacterEllipsis" />
+                <Border
+                  Margin="8,0,0,0"
+                  Padding="5,0"
+                  VerticalAlignment="Center"
+                  BorderBrush="{DynamicResource TextFillColorSecondaryBrush}"
+                  BorderThickness="1"
+                  CornerRadius="3"
+                  ToolTip="Многозадачная запись: при вставке раскроет все свои окна"
+                  Visibility="{Binding IsMulti, Converter={StaticResource BoolToVis}}">
+                  <TextBlock
+                    FontSize="11"
+                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                    Text="{Binding MultiText}" />
+                </Border>
+              </StackPanel>
               <TextBlock
                 x:Name="Line"
                 FontFamily="Consolas"
@@ -195,100 +216,278 @@
       </ComboBox.ItemTemplate>
     </ComboBox>
 
-    <!--  поле ввода занимает всё оставшееся место  -->
+    <!--  окна команды: делят место поровну; правка избранного — те же окна, другим фоном  -->
     <Grid
       Grid.Row="2"
       Grid.Column="0"
-      Grid.ColumnSpan="2"
-      Margin="0,10,0,0">
-      <ui:TextBox
-        x:Name="CommandBox"
-        AcceptsReturn="True"
-        AcceptsTab="True"
-        ClearButtonEnabled="False"
-        FontFamily="Consolas"
-        HorizontalScrollBarVisibility="Auto"
-        PreviewKeyDown="OnCommandKeyDown"
-        Padding="10,8,250,8"
-        PlaceholderText="Например: systemctl restart nginx&#x0a;Можно вставлять многострочные скрипты любой длины — они уходят на сервер целиком."
-        Text="{Binding CommandText, UpdateSourceTrigger=PropertyChanged}"
-        TextWrapping="NoWrap"
-        VerticalContentAlignment="Top"
-        VerticalScrollBarVisibility="Auto" />
+      Grid.ColumnSpan="2">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+      </Grid.RowDefinitions>
 
-      <!--  значки поверх поля, в его правом верхнем углу  -->
-      <StackPanel
-        Margin="0,6,10,0"
-        HorizontalAlignment="Right"
-        VerticalAlignment="Top"
-        Orientation="Horizontal">
-        <!--  по ходу работы: вставить → выполнить → забрать вывод; дальше избранное и очистка  -->
-        <Button
-          Click="OnPasteCommand"
-          Style="{StaticResource EditorIconStyle}"
-          ToolTip="Вставить из буфера обмена — заменяет всё содержимое поля, чтобы вставка не приклеилась к прошлой команде">
-          <ui:SymbolIcon FontSize="22" Symbol="ClipboardPaste24" />
-        </Button>
-        <!--  на одном месте запуск и остановка: пока команда идёт, ▶ становится ■  -->
-        <Button
-          Click="OnRun"
-          Style="{StaticResource EditorIconStyle}"
-          ToolTip="Выполнить (Ctrl+Enter)"
-          Visibility="{Binding CommandBatch.IsIdle, Converter={StaticResource BoolToVis}}">
-          <ui:SymbolIcon
-            FontSize="22"
-            Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
-            Symbol="Play24" />
-        </Button>
-        <Button
-          Click="OnInterrupt"
-          Style="{StaticResource EditorIconStyle}"
-          ToolTip="Прервать — Ctrl+C командам на всех серверах (Ctrl+Enter или Esc)"
-          Visibility="{Binding CommandBatch.IsRunning, Converter={StaticResource BoolToVis}}">
-          <ui:SymbolIcon
-            FontSize="22"
-            Foreground="#E0574A"
-            Symbol="Stop24" />
-        </Button>
-        <Button
-          Click="OnCopyOutput"
-          Style="{StaticResource EditorIconStyle}"
-          ToolTip="Копировать вывод (Ctrl+Shift+C) — то же, что «Копировать. Текущее окно» в терминале: вывод сервера, выбранного в таблице слева">
-          <ui:SymbolIcon FontSize="22" Symbol="Copy24" />
-        </Button>
-        <Border
-          Width="1"
-          Height="22"
-          Margin="6,0,4,0"
-          VerticalAlignment="Center"
-          Background="{DynamicResource ControlStrokeColorDefaultBrush}" />
-        <Button
-          Click="OnAddSnippet"
-          Style="{StaticResource EditorIconStyle}"
-          ToolTip="В избранное — записать команду из поля ввода с названием. Существующее название перезапишет свою запись.">
-          <ui:SymbolIcon FontSize="22" Symbol="Heart24" />
-        </Button>
-        <Button
-          Click="OnClearCommand"
-          Style="{StaticResource EditorIconStyle}"
-          ToolTip="Очистить поле ввода команды">
-          <ui:SymbolIcon FontSize="22" Symbol="Delete24" />
-        </Button>
-      </StackPanel>
+      <!--  полоса правки избранного: пока она видна, работают только правка окон, «Сохранить» и «Отменить»  -->
+      <Border
+        x:Name="EditBar"
+        Grid.Row="0"
+        Margin="0,4,0,0"
+        Padding="10,6"
+        Background="{StaticResource EditTint}"
+        BorderBrush="#E8B54A"
+        BorderThickness="1"
+        CornerRadius="4"
+        Visibility="Collapsed">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <TextBlock
+            Grid.Column="0"
+            Margin="0,0,4,0"
+            VerticalAlignment="Center"
+            FontWeight="SemiBold"
+            Text="Правка избранного:" />
+          <ui:TextBox
+            x:Name="EditNameBox"
+            Grid.Column="1"
+            PlaceholderText="название записи" />
+          <ui:Button
+            Grid.Column="2"
+            Margin="4,0,4,0"
+            Appearance="Primary"
+            Click="OnSaveEdit"
+            Content="Сохранить" />
+          <ui:Button
+            Grid.Column="3"
+            Click="OnCancelEdit"
+            Content="Отменить" />
+        </Grid>
+      </Border>
 
-      <!--  «не вставлено» — посреди поля, крупно: в углу окна такую плашку не замечали  -->
+      <ItemsControl
+        x:Name="StepsList"
+        Grid.Row="1"
+        Focusable="False"
+        ItemsSource="{Binding Steps}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <UniformGrid Columns="1" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate>
+            <Grid Margin="0,4,0,0">
+              <ui:TextBox
+                x:Name="Box"
+                AcceptsReturn="True"
+                AcceptsTab="True"
+                ClearButtonEnabled="False"
+                DataObject.Pasting="OnCommandBoxPasting"
+                FontFamily="Consolas"
+                GotKeyboardFocus="OnStepFocused"
+                HorizontalScrollBarVisibility="Auto"
+                Loaded="OnStepBoxLoaded"
+                Padding="10,8,320,30"
+                PlaceholderText="Например: systemctl restart nginx&#x0a;Можно вставлять многострочные скрипты любой длины — они уходят на сервер целиком."
+                PreviewKeyDown="OnCommandKeyDown"
+                Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}"
+                TextWrapping="NoWrap"
+                VerticalContentAlignment="Top"
+                VerticalScrollBarVisibility="Auto" />
+
+              <!--  значки поверх окна, в его правом верхнем углу  -->
+              <StackPanel
+                Margin="0,4,8,0"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                Orientation="Horizontal">
+                <Button
+                  Click="OnPasteStep"
+                  Style="{StaticResource EditorIconStyle}"
+                  ToolTip="Вставить из буфера — заменяет всё окно, чтобы вставка не приклеилась к прошлой команде">
+                  <ui:SymbolIcon FontSize="20" Symbol="ClipboardPaste24" />
+                </Button>
+
+                <!--  на одном месте запуск и остановка: пока команда идёт, ▶ становится ■  -->
+                <Button
+                  x:Name="RunOne"
+                  Click="OnRunStep"
+                  IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}"
+                  Style="{StaticResource EditorIconStyle}"
+                  ToolTip="Выполнить только это окно"
+                  Visibility="{Binding DataContext.CommandBatch.IsIdle, RelativeSource={RelativeSource AncestorType=Page}, Converter={StaticResource BoolToVis}}">
+                  <ui:SymbolIcon
+                    FontSize="20"
+                    Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
+                    Symbol="Play24" />
+                </Button>
+                <Button
+                  x:Name="RunBelow"
+                  Click="OnRunFromStep"
+                  IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}"
+                  Style="{StaticResource EditorIconStyle}"
+                  ToolTip="Выполнить это окно и все ниже — по очереди, каждое после успешного предыдущего (Ctrl+Enter)">
+                  <ui:SymbolIcon
+                    FontSize="20"
+                    Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
+                    Symbol="FastForward24" />
+                </Button>
+                <Button
+                  Click="OnInterrupt"
+                  Style="{StaticResource EditorIconStyle}"
+                  ToolTip="{x:Static controls:StopButton.Hint}"
+                  Visibility="{Binding DataContext.CommandBatch.IsRunning, RelativeSource={RelativeSource AncestorType=Page}, Converter={StaticResource BoolToVis}}">
+                  <ui:SymbolIcon
+                    FontSize="20"
+                    Foreground="#E0574A"
+                    Symbol="Stop24" />
+                </Button>
+                <Button
+                  x:Name="CopyOut"
+                  Click="OnCopyOutput"
+                  IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}"
+                  Style="{StaticResource EditorIconStyle}"
+                  ToolTip="Копировать вывод (Ctrl+Shift+C) — то же, что «Копировать. Текущее окно» в терминале: весь вывод сервера, выбранного в таблице слева, со всеми окнами">
+                  <ui:SymbolIcon FontSize="20" Symbol="Copy24" />
+                </Button>
+
+                <Border
+                  Width="1"
+                  Height="20"
+                  Margin="5,0,3,0"
+                  VerticalAlignment="Center"
+                  Background="{DynamicResource ControlStrokeColorDefaultBrush}" />
+
+                <Button
+                  Click="OnAddSnippet"
+                  IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}"
+                  Style="{StaticResource EditorIconStyle}"
+                  ToolTip="В избранное — это окно. Существующее название перезапишет свою запись.">
+                  <ui:SymbolIcon FontSize="20" Symbol="Heart24" />
+                </Button>
+                <!--  два сердечка: весь набор окон одной записью  -->
+                <Button
+                  x:Name="SaveSet"
+                  Click="OnAddSnippetSet"
+                  IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}"
+                  Style="{StaticResource EditorIconStyle}"
+                  ToolTip="В избранное — все окна одной записью. При вставке окна раскроются сами."
+                  Visibility="{Binding CanSaveSet, Converter={StaticResource BoolToVis}}">
+                  <Grid Width="24" Height="20">
+                    <ui:SymbolIcon
+                      Margin="0,0,6,0"
+                      HorizontalAlignment="Left"
+                      FontSize="16"
+                      Symbol="Heart24" />
+                    <ui:SymbolIcon
+                      Margin="6,4,0,0"
+                      HorizontalAlignment="Right"
+                      FontSize="16"
+                      Symbol="Heart24" />
+                  </Grid>
+                </Button>
+                <Button
+                  Click="OnClearStep"
+                  Style="{StaticResource EditorIconStyle}"
+                  ToolTip="Очистить окно">
+                  <ui:SymbolIcon FontSize="20" Symbol="Delete24" />
+                </Button>
+
+                <Border
+                  Width="1"
+                  Height="20"
+                  Margin="5,0,3,0"
+                  VerticalAlignment="Center"
+                  Background="{DynamicResource ControlStrokeColorDefaultBrush}" />
+
+                <Button
+                  Click="OnAddStep"
+                  Style="{StaticResource EditorIconStyle}"
+                  ToolTip="Добавить окно ниже — выполнится после этого">
+                  <ui:SymbolIcon FontSize="20" Symbol="Add24" />
+                </Button>
+                <Button
+                  Click="OnRemoveStep"
+                  Style="{StaticResource EditorIconStyle}"
+                  ToolTip="Убрать это окно"
+                  Visibility="{Binding IsMulti, Converter={StaticResource BoolToVis}}">
+                  <ui:SymbolIcon FontSize="20" Symbol="Subtract24" />
+                </Button>
+              </StackPanel>
+
+              <!--  низ справа: sudo окна, статус, секундомер и номер — по ним видно, где встало  -->
+              <StackPanel
+                Margin="0,0,12,6"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom"
+                Orientation="Horizontal">
+                <CheckBox
+                  MinWidth="0"
+                  Margin="0,0,14,0"
+                  Padding="4,0,0,0"
+                  VerticalAlignment="Center"
+                  Content="sudo"
+                  FontSize="12"
+                  IsChecked="{Binding UseSudo, Mode=TwoWay}"
+                  ToolTip="Это окно выполняется как sudo -S -p '' bash -s, пароль сервера подаётся на stdin" />
+                <TextBlock
+                  Margin="0,0,10,0"
+                  VerticalAlignment="Center"
+                  FontSize="12"
+                  FontWeight="Bold"
+                  Text="{Binding StatusText}" />
+                <TextBlock
+                  Margin="0,0,10,0"
+                  VerticalAlignment="Center"
+                  FontFamily="Consolas"
+                  FontSize="12"
+                  Text="{Binding ClockText}" />
+                <TextBlock
+                  x:Name="Number"
+                  VerticalAlignment="Center"
+                  FontSize="12"
+                  Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                  Text="{Binding NumberText}"
+                  Visibility="{Binding IsMulti, Converter={StaticResource BoolToVis}}" />
+              </StackPanel>
+            </Grid>
+
+            <DataTemplate.Triggers>
+              <!--  у последнего окна «это и все ниже» — то же самое, что «только это»  -->
+              <DataTrigger Binding="{Binding HasBelow}" Value="False">
+                <Setter TargetName="RunBelow" Property="Visibility" Value="Collapsed" />
+              </DataTrigger>
+              <DataTrigger Binding="{Binding DataContext.CommandBatch.IsRunning, RelativeSource={RelativeSource AncestorType=Page}}" Value="True">
+                <Setter TargetName="RunBelow" Property="Visibility" Value="Collapsed" />
+              </DataTrigger>
+              <!--  вывод общий на все окна — копировать его достаточно с первого  -->
+              <DataTrigger Binding="{Binding IsFirst}" Value="False">
+                <Setter TargetName="CopyOut" Property="Visibility" Value="Collapsed" />
+              </DataTrigger>
+            </DataTemplate.Triggers>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <!--  «не вставлено» — посреди окон, крупно: в углу окна такую плашку не замечали  -->
       <controls:ActionToast
         x:Name="PasteToast"
+        Grid.Row="1"
         Margin="20"
         HorizontalAlignment="Center"
         VerticalAlignment="Center" />
     </Grid>
 
     <Grid
+      x:Name="BottomBar"
       Grid.Row="3"
       Grid.Column="0"
       Grid.ColumnSpan="2"
-      Margin="0,10,0,0">
+      Margin="0,4,0,0"
+      IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="*" />
@@ -296,28 +495,21 @@
 
       <StackPanel Grid.Column="0" Orientation="Horizontal">
         <ui:Button
-          Margin="0,0,10,0"
+          Margin="0,0,4,0"
           Appearance="Primary"
           Click="OnRun"
           Content="Выполнить тут"
           Icon="{ui:SymbolIcon Play24}"
           IsEnabled="{Binding CommandBatch.IsIdle}"
-          ToolTip="Команда этой вкладки на её отмеченных серверах (Ctrl+Enter в поле ввода)" />
+          ToolTip="Все окна этой вкладки по очереди на её отмеченных серверах (Ctrl+Enter в первом окне)" />
 
         <ui:Button
-          Margin="0,0,18,0"
           Appearance="Danger"
           Click="OnRunEverywhere"
           Content="Выполнить везде"
           Icon="{ui:SymbolIcon Play24}"
           IsEnabled="{Binding CommandBatch.IsIdle}"
-          ToolTip="Запускает команды сразу во всех командных вкладках — каждая со своей командой и серверами. Итог по каждой видно на её ярлыке." />
-
-        <CheckBox
-          VerticalAlignment="Center"
-          Content="через sudo -S"
-          IsChecked="{Binding UseSudo, Mode=TwoWay}"
-          ToolTip="Команда выполняется как sudo -S -p '' bash -s, пароль сервера подаётся на stdin" />
+          ToolTip="Запускает команды сразу во всех командных вкладках — каждая со своими окнами и серверами. Личные вкладки копирования не запускаются. Итог по каждой видно на её ярлыке." />
       </StackPanel>
 
       <TextBlock

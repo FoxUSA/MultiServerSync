@@ -9,7 +9,7 @@
   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
   ScrollViewer.CanContentScroll="False">
 
-  <Grid Margin="24,16,24,16">
+  <Grid Margin="12">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
@@ -26,47 +26,60 @@
 
     <TextBlock
       Grid.Row="1"
-      Margin="0,0,0,10"
+      Margin="0,0,0,4"
       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
       Text="У каждой вкладки свой набор серверов. Выбранный набор целиком стоит в панели «Целевые сервера» слева. Галочки здесь — чтобы удалить, дублировать, скопировать в другой набор или проверить связь."
       TextWrapping="Wrap" />
 
-    <WrapPanel Grid.Row="2" Margin="0,0,0,10">
+    <!--  нижний зазор 4 до таблицы дают сами кнопки  -->
+    <WrapPanel Grid.Row="2">
       <ui:Button
-        Margin="0,0,6,6"
+        Margin="0,0,4,4"
         Appearance="Primary"
         Click="OnAdd"
         Content="Добавить"
         Icon="{ui:SymbolIcon Add24}" />
       <ui:Button
-        Margin="0,0,6,6"
+        Margin="0,0,4,4"
+        Click="OnImport"
+        Content="Импорт…"
+        Icon="{ui:SymbolIcon ArrowImport24}"
+        ToolTip="Серверы из ~/.ssh/config, PuTTY и WinSCP — без паролей" />
+      <ui:Button
+        Margin="0,0,4,4"
         Click="OnEdit"
         Content="Изменить"
         Icon="{ui:SymbolIcon Edit24}" />
       <ui:Button
-        Margin="0,0,6,6"
+        Margin="0,0,4,4"
         Click="OnDuplicate"
         Content="Дублировать"
         Icon="{ui:SymbolIcon Copy24}" />
       <ui:Button
-        Margin="0,0,6,6"
+        Margin="0,0,4,4"
         Click="OnCopyToSets"
         Content="Скопировать в…"
         Icon="{ui:SymbolIcon CopyArrowRight24}"
         ToolTip="Скопировать отмеченные серверы в другие наборы (вкладки)" />
       <ui:Button
-        Margin="0,0,6,6"
+        Margin="0,0,4,4"
         Click="OnDelete"
         Content="Удалить"
         Icon="{ui:SymbolIcon Delete24}" />
-      <Separator Margin="6,0,12,6" />
+      <Separator Margin="0,0,4,4" />
       <ui:Button
-        Margin="0,0,6,6"
+        Margin="0,0,4,4"
         Click="OnTest"
         Content="Проверить связь"
         Icon="{ui:SymbolIcon PlugConnected24}" />
+      <ui:Button
+        Margin="0,0,4,4"
+        Click="OnExplorer"
+        Content="Проводник"
+        Icon="{ui:SymbolIcon Folder24}"
+        ToolTip="Открыть папки выделенного сервера рядом с папками этого компьютера" />
       <TextBlock
-        Margin="12,0,0,6"
+        Margin="0,0,0,4"
         VerticalAlignment="Center"
         Foreground="{DynamicResource TextFillColorSecondaryBrush}"
         Text="{Binding State.ActiveServerSet.SelectionInfo}" />

@@ -31,10 +31,12 @@ public partial class MainWindow : FluentWindow
 
         BottomRow.Height = new GridLength(Math.Max(0, settings.LogPanelHeight));
         SetBottomVisible(settings.LogPanelVisible);
+        SwitchBottomHeight();
 
         // умный режим спрашивает посреди окна; фокус на «Отменить», так что случайный Enter не запустит
         SmartSwitch.IsChecked = settings.SmartMode;
-        RunHistory.Ask = (headline, detail) => ConfirmDialog.Ask(this, headline, detail, "Выполнить", "Отменить");
+        RunHistory.Choose = (headline, detail, confirm, extra) =>
+            ConfirmDialog.Choose(this, headline, detail, confirm, extra, "Отменить");
 
         // операция запущена — сразу показываем терминал, чтобы вывод был перед глазами,
         // а если она не начата — журнал, где написано почему
@@ -60,6 +62,15 @@ public partial class MainWindow : FluentWindow
             // вкладку могли открыть с доски вкладок — лента наверху должна до неё доехать
             ScrollTabIntoView(workspace);
         };
+
+        // проводник просит открыть вкладку другого раздела — например, команду «здесь»
+        AppState.Current.TabShowRequested += tab => ShowTab(tab, State.SectionOfTab(tab) switch
+        {
+            AppSection.Command => typeof(CommandPage),
+            AppSection.Download => typeof(DownloadPage),
+            AppSection.Explorer => typeof(ExplorerPage),
+            _ => typeof(FilesPage),
+        });
 
         AppState.Current.ActiveServerSetChanged += set =>
         {
@@ -270,8 +281,33 @@ public partial class MainWindow : FluentWindow
         }
         else if (State.ShowsWorkspaceTabs)
         {
-            State.RemoveWorkspace(State.ActiveWorkspace);
+            CloseWorkspace(this, State.ActiveWorkspace);
         }
+    }
+
+    /// <summary>
+    /// Вкладка закрывается только с подтверждением: крестик рядом с переключателями, промахнуться легко.
+    /// Первую и занятую не спрашиваем — их закрыть и так нельзя, об этом скажет журнал.
+    /// </summary>
+    internal static bool CloseWorkspace(Window owner, Workspace workspace)
+    {
+        var state = AppState.Current;
+
+        if (!workspace.IsMain && !workspace.IsBusy && workspace.Personal is not { IsBusy: true })
+        {
+            var detail = workspace.Personal is { } personal
+                ? $"Вместе с ней закроется её личная вкладка команд «{personal.Title}»."
+                : workspace.Owner is { } parent
+                    ? $"Команды после копирования у «{parent.Title}» выключатся."
+                    : "Всё, что на ней настроено, пропадёт.";
+
+            if (!ConfirmDialog.Ask(owner, $"Закрыть вкладку «{workspace.Title}»?", detail, "Закрыть"))
+            {
+                return false;
+            }
+        }
+
+        return state.RemoveWorkspace(workspace);
     }
 
     /// <summary>
@@ -365,7 +401,7 @@ public partial class MainWindow : FluentWindow
         switch (sender)
         {
             case FrameworkElement { DataContext: Workspace workspace }:
-                State.RemoveWorkspace(workspace);
+                CloseWorkspace(this, workspace);
                 break;
             case FrameworkElement { DataContext: ServerSet set }:
                 CloseServerSet(set);
@@ -425,6 +461,9 @@ public partial class MainWindow : FluentWindow
         _wideTabTemplate = TabStrip.ItemTemplate;
         _wideSetTemplate = SetStrip.ItemTemplate;
 
+        // лента не уже окна — иначе личным вкладкам не к чему прижаться справа
+        TabScroller.SizeChanged += (_, _) => TabStrip.MinWidth = TabScroller.ActualWidth;
+
         ApplyTabView();
 
         State.PropertyChanged += (_, e) =>
@@ -432,6 +471,10 @@ public partial class MainWindow : FluentWindow
             if (e.PropertyName == nameof(AppState.CompactTabs))
             {
                 ApplyTabView();
+            }
+            else if (e.PropertyName == nameof(AppState.Section))
+            {
+                SwitchBottomHeight();
             }
         };
     }
@@ -536,6 +579,69 @@ public partial class MainWindow : FluentWindow
         }
     }
 
+    /// <summary>
+    /// Свитч на ярлыке копирования. Первое включение создаёт пустую личную вкладку команд
+    /// и сразу ведёт на неё; дальше свитч только включает и выключает запуск после копирования.
+    /// </summary>
+    private void OnAfterCopySwitch(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+
+        if (sender is not FrameworkElement { DataContext: Workspace copy })
+        {
+            return;
+        }
+
+        if (!copy.AfterCopyEnabled)
+        {
+            AppLog.Info($"Команды после копирования выключены: «{copy.Title}».");
+            return;
+        }
+
+        if (copy.Personal is { } personal)
+        {
+            AppLog.Info($"Команды после копирования включены: «{copy.Title}».");
+            return;
+        }
+
+        personal = State.CreatePersonalTab(copy);
+        copy.RaiseChain();
+        State.JumpToPersonal(personal);
+        ShowTab(personal, typeof(CommandPage));
+    }
+
+    /// <summary>Стрелка на ярлыке копирования — в её личные команды.</summary>
+    private void OnGoPersonal(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+
+        if (sender is FrameworkElement { DataContext: Workspace { Personal: { } personal } })
+        {
+            State.JumpToPersonal(personal);
+            ShowTab(personal, typeof(CommandPage));
+        }
+    }
+
+    /// <summary>Стрелка на личной вкладке — назад, к её вкладке копирования.</summary>
+    private void OnGoOwner(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+
+        if (sender is FrameworkElement { DataContext: Workspace { Owner: { } owner } })
+        {
+            ShowTab(owner, typeof(FilesPage));
+        }
+    }
+
+    private void OnOpenSettings(object sender, RoutedEventArgs e) => RootNavigation.Navigate(typeof(SettingsPage));
+
+    /// <summary>Открыть вкладку в её разделе: сначала выбрать её, потом перейти в раздел.</summary>
+    private void ShowTab(Workspace tab, Type page)
+    {
+        State.ActiveWorkspace = tab;
+        RootNavigation.Navigate(page);
+    }
+
     /// <summary>Двойной щелчок по ярлыку — то же самое.</summary>
     private void OnRenameTab(object sender, MouseButtonEventArgs e)
     {
@@ -573,6 +679,12 @@ public partial class MainWindow : FluentWindow
 
     private void Rename(Workspace workspace)
     {
+        if (workspace.IsPersonal)
+        {
+            AppLog.Info("Личная вкладка называется как её вкладка копирования — переименуйте ту.");
+            return;
+        }
+
         var dialog = new InputDialog("Название вкладки", "Как назвать эту вкладку:", workspace.Title)
         {
             Owner = this,
@@ -610,17 +722,73 @@ public partial class MainWindow : FluentWindow
         BottomPanel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         BottomSplitter.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
 
-        if (visible)
+        BottomRow.Height = new GridLength(visible ? StoredBottom() : 0);
+    }
+
+    /// <summary>Нижняя панель сейчас стоит с высотой проводника.</summary>
+    private bool _explorerBottom;
+
+    /// <summary>
+    /// Проводнику окно нужно под две панели, а не под вывод: у него своя высота терминала,
+    /// по умолчанию пятая часть. Остальные разделы делят одну общую.
+    /// </summary>
+    private void SwitchBottomHeight()
+    {
+        var explorer = State.Section == AppSection.Explorer;
+
+        if (explorer == _explorerBottom)
         {
-            // панель не должна съедать кнопки запуска на странице копирования:
-            // при окне по умолчанию 220 точек — предел, который она может занять
-            var stored = AppState.Current.Settings.LogPanelHeight;
-            BottomRow.Height = new GridLength(stored < 120 ? 220 : stored);
+            return;
+        }
+
+        RememberBottom();
+        _explorerBottom = explorer;
+
+        if (BottomPanel.Visibility == Visibility.Visible)
+        {
+            BottomRow.Height = new GridLength(StoredBottom());
+        }
+    }
+
+    /// <summary>Что натянул разделителем — запоминается для своего вида: проводника или остальных.</summary>
+    private void RememberBottom()
+    {
+        if (BottomPanel.Visibility != Visibility.Visible || BottomRow.ActualHeight <= 40)
+        {
+            return;
+        }
+
+        if (_explorerBottom)
+        {
+            AppState.Current.Settings.ExplorerLogPanelHeight = BottomRow.ActualHeight;
         }
         else
         {
-            BottomRow.Height = new GridLength(0);
+            AppState.Current.Settings.LogPanelHeight = BottomRow.ActualHeight;
         }
+    }
+
+    private double StoredBottom()
+    {
+        var settings = AppState.Current.Settings;
+
+        if (_explorerBottom)
+        {
+            if (settings.ExplorerLogPanelHeight >= 120)
+            {
+                return settings.ExplorerLogPanelHeight;
+            }
+
+            // пятая часть того, что делят страница и панель; до первой раскладки — от высоты окна
+            var page = ((System.Windows.Controls.Grid)BottomPanel.Parent).RowDefinitions[2].ActualHeight;
+            var shared = page > 0 ? page + BottomRow.ActualHeight : Height - 120;
+
+            return Math.Max(120, Math.Round(shared / 5));
+        }
+
+        // панель не должна съедать кнопки запуска на странице копирования:
+        // при окне по умолчанию 220 точек — предел, который она может занять
+        return settings.LogPanelHeight < 120 ? 220 : settings.LogPanelHeight;
     }
 
     /// <summary>Разворачивает нижнюю панель на вкладке «Терминал».</summary>
@@ -688,10 +856,20 @@ public partial class MainWindow : FluentWindow
 
     /// <summary>
     /// Выход из программы. Если идёт копирование или команда, сначала спрашиваем:
-    /// выход их оборвёт.
+    /// выход их оборвёт. Правленые в проводнике файлы сервера, ещё не залитые, — тоже.
     /// </summary>
-    private void ExitApp()
+    private async void ExitApp()
     {
+        if (RemoteEdit.Pending > 0)
+        {
+            ShowFromTray();
+        }
+
+        if (!await RemoteEdit.BeforeExitAsync(this))
+        {
+            return;
+        }
+
         var busy = State.AllWorkspaces.Where(w => w.IsBusy).ToList();
 
         if (busy.Count > 0)
@@ -720,11 +898,7 @@ public partial class MainWindow : FluentWindow
         settings.WindowWidth = Width;
         settings.WindowHeight = Height;
         settings.LogPanelVisible = BottomPanel.Visibility == Visibility.Visible;
-
-        if (settings.LogPanelVisible && BottomRow.ActualHeight > 40)
-        {
-            settings.LogPanelHeight = BottomRow.ActualHeight;
-        }
+        RememberBottom();
 
         AppState.Current.SaveAll();
 

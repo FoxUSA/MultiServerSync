@@ -97,6 +97,14 @@ public sealed class OperationResult : ObservableObject
             {
                 TrackTime(value == OperationStatus.Running);
 
+                // полоса прошлой передачи новому запуску не нужна: свою он выставит сам
+                if (value == OperationStatus.Running)
+                {
+                    _transferTotal = 0;
+                }
+
+                Raise(nameof(HasTransfer));
+
                 // закончил — с этого момента идёт столбец «Прошло»; снова в очереди или в работе — пусто
                 _finishedUtc = value is OperationStatus.Success or OperationStatus.Failed or OperationStatus.Cancelled
                     ? DateTime.UtcNow
@@ -221,6 +229,54 @@ public sealed class OperationResult : ObservableObject
         foreach (var result in running)
         {
             result.RaiseMany(nameof(ElapsedText), nameof(DurationText));
+        }
+    }
+
+    private long _transferDone;
+    private long _transferTotal;
+    private DateTime _transferStartUtc;
+
+    /// <summary>
+    /// Сколько байт ушло или пришло из скольких — полоса внизу вывода. 0 из 0 — полосы нет:
+    /// передавать нечего или передача ещё не началась.
+    /// </summary>
+    public void SetTransfer(long done, long total)
+    {
+        if (total > 0 && _transferTotal == 0)
+        {
+            _transferStartUtc = DateTime.UtcNow;
+        }
+
+        // посланное повторно (пачка не встала и ушла по одному) не должно увести полосу за край
+        _transferDone = Math.Clamp(done, 0, Math.Max(total, 0));
+        _transferTotal = Math.Max(total, 0);
+        RaiseMany(nameof(HasTransfer), nameof(TransferPercent), nameof(TransferText));
+    }
+
+    public bool HasTransfer => IsRunning && _transferTotal > 0;
+
+    public double TransferPercent => _transferTotal > 0 ? 100.0 * _transferDone / _transferTotal : 0;
+
+    /// <summary>«240 МБ из 1,8 ГБ · 13% · осталось ≈ 9:40» — оценка времени, когда уже есть по чему судить.</summary>
+    public string TransferText
+    {
+        get
+        {
+            if (_transferTotal <= 0)
+            {
+                return string.Empty;
+            }
+
+            var text = $"{TransferItem.Format(_transferDone)} из {TransferItem.Format(_transferTotal)} · {TransferPercent:0}%";
+            var spent = DateTime.UtcNow - _transferStartUtc;
+
+            if (_transferDone > 0 && _transferDone < _transferTotal && spent.TotalSeconds >= 3)
+            {
+                var left = TimeSpan.FromSeconds(spent.TotalSeconds * (_transferTotal - _transferDone) / _transferDone);
+                text += " · осталось ≈ " + Clock(left);
+            }
+
+            return text;
         }
     }
 

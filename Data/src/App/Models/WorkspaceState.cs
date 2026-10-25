@@ -65,6 +65,30 @@ public sealed class WorkspaceState
     public bool UseSudo { get; set; }
 
     /// <summary>
+    /// Окна многозадачности по порядку. Пусто — файл старой версии: тогда окно одно,
+    /// из <see cref="CommandText"/> и <see cref="UseSudo"/> (они же пишутся из первого окна).
+    /// </summary>
+    public List<SavedCommandStep> Commands { get; set; } = new();
+
+    /// <summary>Вкладка копирования: её личная командная вкладка (выполняется после удачного копирования).</summary>
+    public string AfterCopyTabId { get; set; } = string.Empty;
+
+    /// <summary>Свитч на ярлыке копирования: выполнять ли личные команды после копирования.</summary>
+    public bool AfterCopyEnabled { get; set; }
+
+    /// <summary>Личная командная вкладка: чья она.</summary>
+    public string OwnerCopyTabId { get; set; } = string.Empty;
+
+    /// <summary>Вкладка скачивания: что скачивать — строки со своим сервером и галочкой.</summary>
+    public List<SavedDownloadItem> Downloads { get; set; } = new();
+
+    /// <summary>Вкладка проводника: папки обеих панелей, курсор, сортировка, маски.</summary>
+    public ExplorerTabState? Explorer { get; set; }
+
+    /// <summary>Вкладка скачивания: куда скачивать.</summary>
+    public string LocalFolder { get; set; } = string.Empty;
+
+    /// <summary>
     /// Набор серверов, из которого вкладка выбирает цели. null — файл прежней версии, где набор
     /// был общий на все вкладки: тогда вкладка получает тот, что был выбран.
     /// </summary>
@@ -146,4 +170,16 @@ public sealed class WorkspacesFile
     /// поля команды. Пусто — файл старой версии, где команда жила на основной вкладке.
     /// </summary>
     public List<WorkspaceState> CommandTabs { get; set; } = new();
+
+    /// <summary>Открытая вкладка раздела «Скачивание».</summary>
+    public string ActiveDownloadId { get; set; } = string.Empty;
+
+    /// <summary>Вкладки раздела «Скачивание». Пусто — файл версии, где раздела ещё не было.</summary>
+    public List<WorkspaceState> DownloadTabs { get; set; } = new();
+
+    /// <summary>Открытая вкладка раздела «Проводник».</summary>
+    public string ActiveExplorerId { get; set; } = string.Empty;
+
+    /// <summary>Вкладки раздела «Проводник». Пусто — файл версии, где раздела ещё не было.</summary>
+    public List<WorkspaceState> ExplorerTabs { get; set; } = new();
 }

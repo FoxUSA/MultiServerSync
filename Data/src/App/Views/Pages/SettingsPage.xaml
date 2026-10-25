@@ -10,14 +10,14 @@
   ScrollViewer.CanContentScroll="False">
 
   <ScrollViewer VerticalScrollBarVisibility="Auto">
-    <StackPanel Margin="24,16,24,24">
+    <StackPanel Margin="12">
       <TextBlock
-        Margin="0,0,0,16"
+        Margin="0,0,0,4"
         FontSize="24"
         FontWeight="SemiBold"
         Text="Настройки" />
 
-      <ui:CardControl Margin="0,0,0,8" Icon="{ui:SymbolIcon Info24}">
+      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Info24}">
         <ui:CardControl.Header>
           <StackPanel>
             <TextBlock FontWeight="SemiBold" Text="Версия программы" />
@@ -34,7 +34,7 @@
       </ui:CardControl>
 
       <!--  обновление: само окно с шагами и полосой — то же, что открывает кнопка в шапке  -->
-      <ui:CardControl Margin="0,0,0,8" Icon="{ui:SymbolIcon ArrowDownload24}">
+      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowDownload24}">
         <ui:CardControl.Header>
           <StackPanel>
             <TextBlock FontWeight="SemiBold" Text="Обновление программы" />
@@ -51,7 +51,7 @@
           Icon="{ui:SymbolIcon ArrowSync24}" />
       </ui:CardControl>
 
-      <ui:CardControl Margin="0,0,0,8" Icon="{ui:SymbolIcon Globe24}">
+      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Globe24}">
         <ui:CardControl.Header>
           <StackPanel>
             <TextBlock FontWeight="SemiBold" Text="Страница утилиты" />
@@ -66,7 +66,7 @@
           Content="Открыть" />
       </ui:CardControl>
 
-      <ui:CardControl Margin="0,0,0,8" Icon="{ui:SymbolIcon DarkTheme24}">
+      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon DarkTheme24}">
         <ui:CardControl.Header>
           <StackPanel>
             <TextBlock FontWeight="SemiBold" Text="Тема оформления" />
@@ -85,7 +85,7 @@
         </ComboBox>
       </ui:CardControl>
 
-      <ui:CardControl Margin="0,0,0,8" Icon="{ui:SymbolIcon Flash24}">
+      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Flash24}">
         <ui:CardControl.Header>
           <StackPanel>
             <TextBlock FontWeight="SemiBold" Text="Одновременных подключений" />
@@ -103,7 +103,7 @@
           ValueChanged="OnNumbersChanged" />
       </ui:CardControl>
 
-      <ui:CardControl Margin="0,0,0,8" Icon="{ui:SymbolIcon Timer24}">
+      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Timer24}">
         <ui:CardControl.Header>
           <StackPanel>
             <TextBlock FontWeight="SemiBold" Text="Таймаут подключения, сек" />
@@ -121,7 +121,7 @@
           ValueChanged="OnNumbersChanged" />
       </ui:CardControl>
 
-      <ui:CardControl Margin="0,0,0,8" Icon="{ui:SymbolIcon Clock24}">
+      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Clock24}">
         <ui:CardControl.Header>
           <StackPanel>
             <TextBlock FontWeight="SemiBold" Text="Таймаут команды, сек" />
@@ -139,7 +139,7 @@
           ValueChanged="OnNumbersChanged" />
       </ui:CardControl>
 
-      <ui:CardControl Margin="0,0,0,8" Icon="{ui:SymbolIcon ShieldCheckmark24}">
+      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ShieldCheckmark24}">
         <ui:CardControl.Header>
           <StackPanel>
             <TextBlock FontWeight="SemiBold" Text="Защита от двойного запуска команды" />
@@ -153,12 +153,12 @@
       </ui:CardControl>
 
       <TextBlock
-        Margin="0,20,0,8"
+        Margin="0,0,0,4"
         FontSize="18"
         FontWeight="SemiBold"
         Text="Расположение файлов" />
 
-      <ui:CardControl Margin="0,0,0,8" Icon="{ui:SymbolIcon Folder24}">
+      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Folder24}">
         <ui:CardControl.Header>
           <StackPanel>
             <TextBlock FontWeight="SemiBold" Text="UserData — настройки, серверы, вкладки, логи" />
@@ -174,7 +174,7 @@
           Icon="{ui:SymbolIcon FolderOpen24}" />
       </ui:CardControl>
 
-      <ui:CardControl Margin="0,0,0,8" Icon="{ui:SymbolIcon Apps24}">
+      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Apps24}">
         <ui:CardControl.Header>
           <StackPanel>
             <TextBlock FontWeight="SemiBold" Text="Data — программа и библиотеки" />
@@ -191,7 +191,7 @@
       </ui:CardControl>
 
       <!--  пароли в servers.json всегда зашифрованы; выбирается только чем  -->
-      <ui:CardControl Margin="0,0,0,8" Icon="{ui:SymbolIcon LockClosed24}">
+      <ui:CardControl Icon="{ui:SymbolIcon LockClosed24}">
         <ui:CardControl.Header>
           <StackPanel>
             <TextBlock FontWeight="SemiBold" Text="Пароли серверов" />
@@ -204,7 +204,7 @@
         <StackPanel Orientation="Horizontal">
           <ui:Button
             x:Name="ChangeMasterButton"
-            Margin="0,0,8,0"
+            Margin="0,0,4,0"
             Click="OnChangeMaster"
             Content="Сменить пароль" />
           <ComboBox

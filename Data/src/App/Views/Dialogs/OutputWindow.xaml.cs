@@ -104,24 +104,6 @@ public partial class OutputWindow : FluentWindow
     /// <summary>Итог прогона живёт своей привязкой: заголовок и вывод показывают один сервер.</summary>
     private void ShowBatch(OperationBatch? batch) => StatusHost.DataContext = batch;
 
-    /// <summary>Ctrl+C: сигнал INT процессам команды — то же прерывание, что в терминале.</summary>
-    private async void OnInterrupt(object sender, RoutedEventArgs e)
-    {
-        if (StatusHost.DataContext is OperationBatch batch)
-        {
-            await batch.InterruptAsync();
-        }
-    }
-
-    /// <summary>Снять: сигнал KILL — для того, что после Ctrl+C не отпускает.</summary>
-    private async void OnKill(object sender, RoutedEventArgs e)
-    {
-        if (StatusHost.DataContext is OperationBatch batch)
-        {
-            await batch.KillAsync();
-        }
-    }
-
     private void OnCopy(object sender, RoutedEventArgs e)
     {
         if (DataContext is not OperationResult result)

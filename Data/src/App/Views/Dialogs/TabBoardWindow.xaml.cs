@@ -139,7 +139,7 @@ public partial class TabBoardWindow : FluentWindow
 
         if (sender is FrameworkElement { DataContext: Workspace workspace })
         {
-            AppState.Current.RemoveWorkspace(workspace);
+            MainWindow.CloseWorkspace(this, workspace);
             UpdateCount();
         }
     }

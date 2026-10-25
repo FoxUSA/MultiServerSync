@@ -18,6 +18,8 @@ public sealed class OperationBatch : ObservableObject
 {
     private CancellationTokenSource? _cts;
     private ServerWork? _lastWork;
+    private Action<IReadOnlyList<ServerEntry>>? _beforeRetry;
+    private Action? _afterRetry;
     private string _operationName = string.Empty;
 
     /// <summary>Прогоны других вкладок, если этот прогон — сводный.</summary>
@@ -164,14 +166,74 @@ public sealed class OperationBatch : ObservableObject
         return text.ToString().TrimEnd() + Environment.NewLine;
     }
 
-    /// <summary>
-    /// Ctrl+C: то же прерывание, что в терминале. Команда получает сигнал INT и сворачивается
-    /// сама — вывод, который она успела дать, остаётся на месте.
-    /// </summary>
-    public Task InterruptAsync() => SignalAsync("INT", "Ctrl+C (сигнал INT)");
+    private bool _stopping;
 
-    /// <summary>Снятие: сигнал KILL всей группе процессов — для того, что после Ctrl+C не отпускает.</summary>
-    public Task KillAsync() => SignalAsync("KILL", "снятие (сигнал KILL)");
+    /// <summary>
+    /// «Остановить» — одна кнопка на всё, её зовут все кнопки стопа программы. Команде на сервере —
+    /// сначала Ctrl+C (сигнал INT), чтобы свернулась сама; не отпустила за 3 с — KILL;
+    /// и после этого ещё 2 с — закрываем канал. Копирование и скачивание процесса на сервере
+    /// не держат — их обрывает сразу закрытие канала. Второе нажатие не ждёт: KILL и закрыть.
+    /// </summary>
+    public async Task StopAsync()
+    {
+        // сводный прогон ничего не выполняет сам — останавливают те, кто выполняет
+        if (_sources.Count > 0)
+        {
+            await Task.WhenAll(_sources.Select(s => s.StopAsync()));
+            return;
+        }
+
+        if (!IsRunning)
+        {
+            return;
+        }
+
+        var hasProcess = Results.Any(r => r.IsRunning && r.RemoteGroup > 0);
+
+        if (_stopping || !hasProcess)
+        {
+            if (hasProcess)
+            {
+                await SignalAsync("KILL", "снятие (сигнал KILL)");
+            }
+
+            Cancel();
+            return;
+        }
+
+        _stopping = true;
+
+        try
+        {
+            await SignalAsync("INT", "Ctrl+C (сигнал INT)");
+
+            if (await StillRunningAfter(TimeSpan.FromSeconds(3)))
+            {
+                await SignalAsync("KILL", "снятие (сигнал KILL)");
+
+                if (await StillRunningAfter(TimeSpan.FromSeconds(2)))
+                {
+                    Cancel();
+                }
+            }
+        }
+        finally
+        {
+            _stopping = false;
+        }
+    }
+
+    private async Task<bool> StillRunningAfter(TimeSpan wait)
+    {
+        var until = DateTime.UtcNow + wait;
+
+        while (IsRunning && DateTime.UtcNow < until)
+        {
+            await Task.Delay(100);
+        }
+
+        return IsRunning;
+    }
 
     /// <summary>
     /// Посылает сигнал команде на тех серверах, где она ещё идёт. Отдельным подключением:
@@ -231,7 +293,7 @@ public sealed class OperationBatch : ObservableObject
         }));
     }
 
-    public void Cancel()
+    private void Cancel()
     {
         if (_sources.Count > 0)
         {
@@ -320,7 +382,9 @@ public sealed class OperationBatch : ObservableObject
         string operationName,
         IReadOnlyList<ServerEntry> servers,
         ServerWork work,
-        int maxParallel)
+        int maxParallel,
+        Action<IReadOnlyList<ServerEntry>>? beforeRetry = null,
+        Action? afterRetry = null)
     {
         if (IsRunning || servers.Count == 0)
         {
@@ -329,6 +393,8 @@ public sealed class OperationBatch : ObservableObject
 
         _operationName = operationName;
         _lastWork = work;
+        _beforeRetry = beforeRetry;
+        _afterRetry = afterRetry;
 
         // «Сохранять лог»: строки прошлого прогона по тем же серверам остаются вместе со своим
         // выводом, новый прогон дописывается под отбивкой. Серверы, которых в этом прогоне нет,
@@ -396,7 +462,17 @@ public sealed class OperationBatch : ObservableObject
             }
         }
 
-        await ExecuteAsync(failed, _lastWork, maxParallel);
+        // цепочке команд надо знать, кто повторяет: счётчики окон и итог на ярлыке
+        _beforeRetry?.Invoke(failed.Select(r => r.Server).ToList());
+
+        try
+        {
+            await ExecuteAsync(failed, _lastWork, maxParallel);
+        }
+        finally
+        {
+            _afterRetry?.Invoke();
+        }
     }
 
     /// <summary>Отбивка между прогонами в выводе, когда лог сохраняется.</summary>
@@ -464,8 +540,10 @@ public sealed class OperationBatch : ObservableObject
                     result.Status = OperationStatus.Success;
                 }
             }
-            catch (OperationCanceledException)
+            catch (Exception ex) when (ex is OperationCanceledException || ct.IsCancellationRequested)
             {
+                // после «Остановить» всё, что оборвалось, — выполненная просьба, а не сбой:
+                // закрытый канал SSH.NET сообщает своей ошибкой, а не отменой
                 result.Status = OperationStatus.Cancelled;
                 result.Message = "отменено";
                 result.Append("Операция отменена.");

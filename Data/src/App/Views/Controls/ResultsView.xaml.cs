@@ -157,26 +157,6 @@ public partial class ResultsView : UserControl
             : "Открыть вывод в отдельном окне";
     }
 
-    private void OnCancel(object sender, RoutedEventArgs e) => Batch?.Cancel();
-
-    /// <summary>Ctrl+C: сигнал INT процессам команды — то же прерывание, что в терминале.</summary>
-    private async void OnInterrupt(object sender, RoutedEventArgs e)
-    {
-        if (Batch is { } batch)
-        {
-            await batch.InterruptAsync();
-        }
-    }
-
-    /// <summary>Снять: сигнал KILL — для того, что после Ctrl+C не отпускает.</summary>
-    private async void OnKill(object sender, RoutedEventArgs e)
-    {
-        if (Batch is { } batch)
-        {
-            await batch.KillAsync();
-        }
-    }
-
     /// <summary>Складывает вывод всех серверов в буфер обмена одним текстом.</summary>
     private void OnCopyAll(object sender, RoutedEventArgs e) => CopyAll(Batch);
 
@@ -194,6 +174,13 @@ public partial class ResultsView : UserControl
         }
 
         var text = batch.BuildTranscript();
+
+        // «+ команды»: следом вывод личных команд вкладки — один отчёт, сначала копирование
+        if (AppState.Current.ChainFor(batch) is { } chain)
+        {
+            text = "═════ Копирование ═════" + Environment.NewLine + text + Environment.NewLine
+                + OutputFeed.ChainHeader + Environment.NewLine + chain.BuildTranscript();
+        }
 
         if (ClipboardText.CopyTerminalOutput(text, auto: finished is not null))
         {
@@ -221,7 +208,7 @@ public partial class ResultsView : UserControl
             return;
         }
 
-        CopyResult(result, finished);
+        CopyResult(result, finished, batch);
     }
 
     /// <summary>Вывод только выбранного сервера.</summary>
@@ -239,11 +226,11 @@ public partial class ResultsView : UserControl
             return;
         }
 
-        CopyResult(result, finished);
+        CopyResult(result, finished, Batch);
     }
 
     /// <summary>Вывод одного сервера в буфер — по кнопке или галочкой «после …».</summary>
-    private static void CopyResult(OperationResult result, string? finished)
+    private static void CopyResult(OperationResult result, string? finished, OperationBatch? batch)
     {
         var text = result.Output.TrimEnd();
 
@@ -256,6 +243,17 @@ public partial class ResultsView : UserControl
         if (result.TimeLine is { } time)
         {
             text += Environment.NewLine + time;
+        }
+
+        // «+ команды»: следом вывод личных команд этого же сервера
+        if (batch is not null
+            && AppState.Current.ChainFor(batch) is { } chain
+            && chain.Results.FirstOrDefault(r => ReferenceEquals(r.Server, result.Server)) is { } after
+            && after.Output.TrimEnd() is { Length: > 0 } afterText)
+        {
+            text = "═════ Копирование ═════" + Environment.NewLine + text + Environment.NewLine + Environment.NewLine
+                + OutputFeed.ChainHeader + Environment.NewLine + afterText
+                + (after.TimeLine is { } afterTime ? Environment.NewLine + afterTime : string.Empty);
         }
 
         if (ClipboardText.CopyTerminalOutput(text + Environment.NewLine, auto: finished is not null))

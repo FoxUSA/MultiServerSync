@@ -113,6 +113,18 @@ public sealed class ServerEntry : ObservableObject
     [JsonIgnore]
     public bool HasKey => !string.IsNullOrWhiteSpace(KeyPath);
 
+    private string _jumpServerId = string.Empty;
+
+    /// <summary>
+    /// Промежуточный сервер (jump host, как ProxyJump у ssh): подключение идёт через него.
+    /// Пусто — напрямую.
+    /// </summary>
+    public string JumpServerId
+    {
+        get => _jumpServerId;
+        set => Set(ref _jumpServerId, value ?? string.Empty);
+    }
+
     /// <summary>
     /// Расшифровать пароль и пароль ключа после загрузки. false — что-то не вышло,
     /// зашифрованное значение сохранено.
@@ -231,6 +243,7 @@ public sealed class ServerEntry : ObservableObject
         Password = Password,
         KeyPath = KeyPath,
         KeyPassphrase = KeyPassphrase,
+        JumpServerId = JumpServerId,
         Notes = Notes,
         ShowNotesInPane = ShowNotesInPane,
         IsSelected = IsSelected,

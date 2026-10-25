@@ -1,0 +1,610 @@
+<UserControl
+  x:Class="MultiServerSync.Views.Controls.FilePane"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:controls="clr-namespace:MultiServerSync.Views.Controls"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+  Focusable="False">
+
+  <UserControl.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+    <!--  кнопки панели инструментов: квадратные, только значок, как в проводнике  -->
+    <Style
+      x:Key="PaneButtonStyle"
+      BasedOn="{StaticResource {x:Type ui:Button}}"
+      TargetType="ui:Button">
+      <Setter Property="Width" Value="30" />
+      <Setter Property="Height" Value="30" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Margin" Value="0,0,2,0" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="Appearance" Value="Transparent" />
+      <Setter Property="Focusable" Value="False" />
+    </Style>
+
+    <!--  часть адреса: плоский текст, подсветка под мышью  -->
+    <Style x:Key="CrumbButtonStyle" TargetType="Button">
+      <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Cursor" Value="Arrow" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Bd"
+              Padding="4,2"
+              Background="Transparent"
+              CornerRadius="4">
+              <ContentPresenter VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!--  крестик сброса маски: виден, пока маска не пустая, — забытый фильтр молча прячет файлы  -->
+    <Style x:Key="MaskClearButtonStyle" TargetType="Button">
+      <Setter Property="Width" Value="24" />
+      <Setter Property="Height" Value="24" />
+      <Setter Property="Margin" Value="0,0,4,0" />
+      <Setter Property="HorizontalAlignment" Value="Right" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Visibility" Value="Collapsed" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Bd"
+              Background="Transparent"
+              CornerRadius="4">
+              <TextBlock
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                FontSize="10"
+                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                Text="&#xE711;" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!--  стрелка раскрытия в дереве  -->
+    <Style x:Key="TreeExpanderStyle" TargetType="ToggleButton">
+      <Setter Property="Width" Value="16" />
+      <Setter Property="Height" Value="16" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ToggleButton">
+            <Border
+              Width="16"
+              Height="16"
+              Background="Transparent">
+              <Path
+                x:Name="Arrow"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Data="M 5 2 L 10 7 L 5 12"
+                RenderTransformOrigin="0.5,0.5"
+                Stroke="{DynamicResource TextFillColorSecondaryBrush}"
+                StrokeEndLineCap="Round"
+                StrokeStartLineCap="Round"
+                StrokeThickness="1.4">
+                <Path.RenderTransform>
+                  <RotateTransform Angle="0" />
+                </Path.RenderTransform>
+              </Path>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Arrow" Property="RenderTransform">
+                  <Setter.Value>
+                    <RotateTransform Angle="90" />
+                  </Setter.Value>
+                </Setter>
+              </Trigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Arrow" Property="Stroke" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!--  строка списка: скрытые файлы приглушены, как в проводнике  -->
+    <Style
+      x:Key="PaneRowStyle"
+      BasedOn="{StaticResource AppDataGridRowStyle}"
+      TargetType="DataGridRow">
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding IsHidden}" Value="True">
+          <Setter Property="Opacity" Value="0.6" />
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+  </UserControl.Resources>
+
+  <!--  рамка активной панели — цветом акцента: видно, куда пойдут клавиши  -->
+  <Border
+    x:Name="Frame"
+    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+    BorderThickness="1"
+    CornerRadius="4">
+    <Grid>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <!--  шапка: чьи это файлы и панель инструментов  -->
+      <Grid
+        Grid.Row="0"
+        Margin="8,4,4,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <Image
+          x:Name="TitleIcon"
+          Grid.Column="0"
+          Width="16"
+          Height="16"
+          Margin="0,0,6,0"
+          VerticalAlignment="Center" />
+        <TextBlock
+          x:Name="TitleText"
+          Grid.Column="1"
+          VerticalAlignment="Center"
+          FontSize="13"
+          FontWeight="SemiBold"
+          TextTrimming="CharacterEllipsis" />
+
+        <StackPanel Grid.Column="2" Orientation="Horizontal">
+          <ui:Button
+            x:Name="BackButton"
+            Click="OnBack"
+            Icon="{ui:SymbolIcon ArrowLeft24}"
+            Style="{StaticResource PaneButtonStyle}"
+            ToolTip="Назад (Alt+←)" />
+          <ui:Button
+            x:Name="ForwardButton"
+            Click="OnForward"
+            Icon="{ui:SymbolIcon ArrowRight24}"
+            Style="{StaticResource PaneButtonStyle}"
+            ToolTip="Вперёд (Alt+→)" />
+          <ui:Button
+            Click="OnUp"
+            Icon="{ui:SymbolIcon ArrowUp24}"
+            Style="{StaticResource PaneButtonStyle}"
+            ToolTip="На уровень вверх (Backspace)" />
+          <ui:Button
+            Click="OnHome"
+            Icon="{ui:SymbolIcon Home24}"
+            Style="{StaticResource PaneButtonStyle}"
+            ToolTip="Домашняя папка" />
+          <ui:Button
+            Click="OnRoot"
+            Icon="{ui:SymbolIcon ArrowUpload24}"
+            Style="{StaticResource PaneButtonStyle}"
+            ToolTip="В корень: на сервере — /, на компьютере — корень диска, из него — «Этот компьютер»" />
+          <ui:Button
+            Click="OnRefresh"
+            Icon="{ui:SymbolIcon ArrowClockwise24}"
+            Style="{StaticResource PaneButtonStyle}"
+            ToolTip="Обновить (F5)" />
+          <ui:Button
+            Click="OnNewFolder"
+            Icon="{ui:SymbolIcon FolderAdd24}"
+            Style="{StaticResource PaneButtonStyle}"
+            ToolTip="Новая папка (F7)" />
+          <ui:Button
+            Click="OnNewFile"
+            Icon="{ui:SymbolIcon DocumentAdd24}"
+            Style="{StaticResource PaneButtonStyle}"
+            ToolTip="Новый файл" />
+          <ui:Button
+            x:Name="TreeButton"
+            Click="OnToggleTree"
+            Icon="{ui:SymbolIcon TextBulletListTree24}"
+            Style="{StaticResource PaneButtonStyle}"
+            ToolTip="Дерево папок слева" />
+          <ui:Button
+            x:Name="BookmarkButton"
+            Click="OnBookmarks"
+            Icon="{ui:SymbolIcon Star24}"
+            Style="{StaticResource PaneButtonStyle}"
+            ToolTip="Закладки и последние папки" />
+        </StackPanel>
+      </Grid>
+
+      <!--
+        Адрес как в проводнике: части пути — кнопки, щелчок по пустому месту (Ctrl+L, F4)
+        открывает поле ввода с подсказками подпапок. Поле скрыто, но не убрано — строка
+        берёт высоту по нему, и при переключении ничего не прыгает.
+      -->
+      <Grid
+        Grid.Row="1"
+        Height="32"
+        Margin="8,4,8,0">
+        <ui:TextBox
+          x:Name="PathBox"
+          VerticalContentAlignment="Center"
+          ClearButtonEnabled="False"
+          KeyDown="OnPathKeyDown"
+          LostKeyboardFocus="OnPathLostFocus"
+          PreviewKeyDown="OnPathPreviewKeyDown"
+          TextChanged="OnPathTextChanged"
+          ToolTip="Адрес папки. Впишите путь и нажмите Enter"
+          Visibility="Hidden" />
+
+        <Border
+          x:Name="CrumbBar"
+          Background="{DynamicResource ControlFillColorDefaultBrush}"
+          BorderBrush="{DynamicResource ControlElevationBorderBrush}"
+          BorderThickness="1"
+          CornerRadius="4"
+          Cursor="IBeam"
+          MouseLeftButtonDown="OnCrumbBarClick"
+          ToolTip="Щелчок по части пути — перейти, по пустому месту — вписать путь">
+          <ScrollViewer
+            x:Name="CrumbScroll"
+            HorizontalScrollBarVisibility="Hidden"
+            VerticalScrollBarVisibility="Disabled">
+            <StackPanel
+              x:Name="Crumbs"
+              Margin="4,0"
+              VerticalAlignment="Center"
+              Orientation="Horizontal" />
+          </ScrollViewer>
+        </Border>
+
+        <!--  подсказки подпапок, пока вписывают путь  -->
+        <Popup
+          x:Name="SuggestPopup"
+          AllowsTransparency="True"
+          Placement="Bottom"
+          PlacementTarget="{Binding ElementName=PathBox}"
+          StaysOpen="False">
+          <Border
+            MinWidth="{Binding ActualWidth, ElementName=PathBox}"
+            MaxHeight="260"
+            Background="{DynamicResource ApplicationBackgroundBrush}"
+            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="4">
+            <ListBox
+              x:Name="SuggestList"
+              Focusable="False"
+              MouseUp="OnSuggestPicked" />
+          </Border>
+        </Popup>
+      </Grid>
+
+      <!--  маски: файлы — фильтр открытой папки, папки — поиск вглубь  -->
+      <Grid
+        Grid.Row="2"
+        Margin="8,4,8,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="4" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Grid Grid.Column="0">
+          <ui:TextBox
+            x:Name="FileMaskBox"
+            Height="32"
+            Padding="10,0,30,0"
+            VerticalContentAlignment="Center"
+            ClearButtonEnabled="False"
+            Icon="{ui:SymbolIcon Filter24}"
+            PlaceholderText="маска файлов: *.conf"
+            TextChanged="OnFileMaskChanged"
+            ToolTip="Показывать только подходящие файлы: *.conf, *.log, nginx. Папки видны всегда (Ctrl+F)" />
+          <Button
+            x:Name="FileMaskClear"
+            Click="OnClearFileMask"
+            Style="{StaticResource MaskClearButtonStyle}"
+            ToolTip="Сбросить маску" />
+        </Grid>
+
+        <Grid Grid.Column="2">
+          <ui:TextBox
+            x:Name="FolderMaskBox"
+            Height="32"
+            Padding="10,0,30,0"
+            VerticalContentAlignment="Center"
+            ClearButtonEnabled="False"
+            Icon="{ui:SymbolIcon FolderSearch24}"
+            KeyDown="OnFolderMaskKeyDown"
+            PlaceholderText="найти папку: nginx"
+            TextChanged="OnFolderMaskChanged"
+            ToolTip="Ищет папки по маске вглубь от открытой. Enter по найденной — перейти в неё" />
+          <Button
+            x:Name="FolderMaskClear"
+            Click="OnClearFolderMask"
+            Style="{StaticResource MaskClearButtonStyle}"
+            ToolTip="Сбросить поиск" />
+        </Grid>
+      </Grid>
+
+      <!--  дерево и список  -->
+      <Grid
+        Grid.Row="3"
+        Margin="8,4,8,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition x:Name="TreeColumn" Width="0" />
+          <ColumnDefinition x:Name="TreeSplitColumn" Width="0" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Border
+          x:Name="TreeHost"
+          Grid.Column="0"
+          BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+          BorderThickness="1"
+          CornerRadius="4"
+          Visibility="Collapsed">
+          <TreeView
+            x:Name="Tree"
+            Padding="2,4"
+            Background="Transparent"
+            BorderThickness="0"
+            Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+            SelectedItemChanged="OnTreeSelected">
+            <TreeView.ItemContainerStyle>
+              <Style TargetType="TreeViewItem">
+                <EventSetter Event="Expanded" Handler="OnNodeExpanded" />
+                <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Padding" Value="4,2" />
+                <Setter Property="Template">
+                  <Setter.Value>
+                    <ControlTemplate TargetType="TreeViewItem">
+                      <Grid>
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="18" />
+                          <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                          <RowDefinition Height="Auto" />
+                          <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <ToggleButton
+                          x:Name="Expander"
+                          VerticalAlignment="Center"
+                          ClickMode="Press"
+                          IsChecked="{Binding IsExpanded, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                          Style="{StaticResource TreeExpanderStyle}" />
+
+                        <Border
+                          x:Name="Bd"
+                          Grid.Column="1"
+                          Padding="{TemplateBinding Padding}"
+                          Background="{TemplateBinding Background}"
+                          CornerRadius="4">
+                          <ContentPresenter ContentSource="Header" />
+                        </Border>
+
+                        <ItemsPresenter
+                          x:Name="ItemsHost"
+                          Grid.Row="1"
+                          Grid.Column="1" />
+                      </Grid>
+
+                      <ControlTemplate.Triggers>
+                        <Trigger Property="IsExpanded" Value="False">
+                          <Setter TargetName="ItemsHost" Property="Visibility" Value="Collapsed" />
+                        </Trigger>
+                        <Trigger Property="HasItems" Value="False">
+                          <Setter TargetName="Expander" Property="Visibility" Value="Hidden" />
+                        </Trigger>
+                        <Trigger SourceName="Bd" Property="IsMouseOver" Value="True">
+                          <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AppRowHoverBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                          <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AppRowSelectedBrush}" />
+                        </Trigger>
+                      </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                  </Setter.Value>
+                </Setter>
+              </Style>
+            </TreeView.ItemContainerStyle>
+            <TreeView.ItemTemplate>
+              <HierarchicalDataTemplate DataType="{x:Type controls:PaneNode}" ItemsSource="{Binding Children}">
+                <StackPanel Orientation="Horizontal">
+                  <Image
+                    Width="16"
+                    Height="16"
+                    Margin="0,0,6,0"
+                    VerticalAlignment="Center"
+                    Source="{Binding Icon}" />
+                  <TextBlock
+                    VerticalAlignment="Center"
+                    FontSize="12"
+                    Text="{Binding Name}" />
+                </StackPanel>
+              </HierarchicalDataTemplate>
+            </TreeView.ItemTemplate>
+          </TreeView>
+        </Border>
+
+        <GridSplitter
+          x:Name="TreeSplitter"
+          Grid.Column="1"
+          Width="4"
+          HorizontalAlignment="Stretch"
+          Background="Transparent"
+          Visibility="Collapsed" />
+
+        <!--  список: «..» сверху, папки перед файлами, сортировка щелчком по шапке со стрелкой  -->
+        <DataGrid
+          x:Name="List"
+          Grid.Column="2"
+          AllowDrop="True"
+          CellStyle="{StaticResource AppDataGridCellStyle}"
+          ColumnHeaderStyle="{StaticResource AppColumnHeaderStyle}"
+          DragOver="OnListDragOver"
+          Drop="OnListDrop"
+          GotKeyboardFocus="OnListFocused"
+          MouseDoubleClick="OnListDoubleClick"
+          PreviewKeyDown="OnListKeyDown"
+          PreviewMouseLeftButtonDown="OnListMouseDown"
+          PreviewMouseMove="OnListMouseMove"
+          PreviewMouseRightButtonDown="OnListRightDown"
+          PreviewTextInput="OnListTextInput"
+          RowStyle="{StaticResource PaneRowStyle}"
+          SelectionChanged="OnListSelected"
+          Sorting="OnListSorting"
+          Style="{StaticResource AppDataGridStyle}"
+          VirtualizingPanel.IsVirtualizing="True"
+          VirtualizingPanel.VirtualizationMode="Recycling">
+          <DataGrid.Columns>
+            <DataGridTemplateColumn
+              Width="*"
+              MinWidth="160"
+              Header="Имя"
+              SortMemberPath="Name">
+              <DataGridTemplateColumn.CellTemplate>
+                <DataTemplate>
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="Auto" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Grid
+                      Width="16"
+                      Height="16"
+                      Margin="0,0,8,0"
+                      VerticalAlignment="Center">
+                      <Image Source="{Binding Icon}" />
+                      <!--  стрелка ярлыка поверх значка, как у ярлыков Windows  -->
+                      <Image
+                        Width="10"
+                        Height="10"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Bottom"
+                        Source="{Binding Overlay}" />
+                    </Grid>
+
+                    <TextBlock
+                      Grid.Column="1"
+                      VerticalAlignment="Center"
+                      Text="{Binding Name}"
+                      TextTrimming="CharacterEllipsis"
+                      Visibility="{Binding ShowsName, Converter={StaticResource BoolToVis}}" />
+
+                    <!--  переименование на месте (F2): Enter — готово, Esc — отмена  -->
+                    <TextBox
+                      x:Name="RenameBox"
+                      Grid.Column="1"
+                      Margin="-4,0,0,0"
+                      Padding="2,0"
+                      VerticalAlignment="Center"
+                      KeyDown="OnRenameKeyDown"
+                      LostKeyboardFocus="OnRenameLostFocus"
+                      Text="{Binding EditName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                      Visibility="{Binding IsRenaming, Converter={StaticResource BoolToVis}}" />
+                  </Grid>
+                </DataTemplate>
+              </DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
+            <DataGridTextColumn
+              x:Name="WhereColumn"
+              Binding="{Binding Where}"
+              Header="Где"
+              SortMemberPath="Where"
+              Visibility="Collapsed" />
+            <DataGridTextColumn
+              Binding="{Binding TypeText}"
+              Header="Тип"
+              SortMemberPath="Type" />
+            <DataGridTextColumn
+              Binding="{Binding SizeText}"
+              Header="Размер"
+              SortMemberPath="Length">
+              <DataGridTextColumn.ElementStyle>
+                <Style TargetType="TextBlock">
+                  <Setter Property="HorizontalAlignment" Value="Right" />
+                </Style>
+              </DataGridTextColumn.ElementStyle>
+            </DataGridTextColumn>
+            <DataGridTextColumn
+              Binding="{Binding ModifiedText}"
+              Header="Изменено"
+              SortMemberPath="Modified" />
+            <DataGridTextColumn
+              x:Name="RightsColumn"
+              Binding="{Binding Permissions}"
+              FontFamily="Consolas"
+              Header="Права"
+              SortMemberPath="Permissions" />
+            <DataGridTextColumn
+              x:Name="OwnerColumn"
+              Binding="{Binding OwnerText}"
+              Header="Владелец"
+              SortMemberPath="Owner" />
+            <DataGridTextColumn
+              x:Name="LinkColumn"
+              Binding="{Binding LinkText}"
+              Header="Куда ведёт"
+              SortMemberPath="LinkTarget" />
+          </DataGrid.Columns>
+        </DataGrid>
+
+        <!--  пусто, нет связи, не выбран сервер — словами посреди списка  -->
+        <TextBlock
+          x:Name="EmptyText"
+          Grid.Column="2"
+          Margin="16,48,16,0"
+          HorizontalAlignment="Center"
+          VerticalAlignment="Top"
+          FontSize="13"
+          Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+          IsHitTestVisible="False"
+          TextAlignment="Center"
+          TextWrapping="Wrap"
+          Visibility="Collapsed" />
+      </Grid>
+
+      <!--  строка состояния: сколько всего, сколько выбрано, свободно на диске  -->
+      <TextBlock
+        x:Name="StatusText"
+        Grid.Row="4"
+        Margin="10,4,10,6"
+        FontSize="11"
+        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+        TextTrimming="CharacterEllipsis" />
+    </Grid>
+  </Border>
+</UserControl>

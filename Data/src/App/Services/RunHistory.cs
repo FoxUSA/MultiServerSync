@@ -66,81 +66,164 @@ public static class RunHistory
 
     private static RunHistoryFile? _file;
 
-    /// <summary>Вопрос пользователю: заголовок, пояснение → true, если «Выполнить». Ставит главное окно.</summary>
-    public static Func<string, string, bool>? Ask { get; set; }
+    /// <summary>
+    /// Вопрос пользователю посреди окна: заголовок, пояснение и, если нужна, третья кнопка.
+    /// Ответ: 0 — отмена, 1 — основная кнопка, 2 — третья. Ставит главное окно.
+    /// </summary>
+    public static Func<string, string, string, string?, int>? Choose { get; set; }
 
     private static RunHistoryFile File => _file ??= Load();
 
     /// <summary>
-    /// Проверка перед командой. true — запускать (и запуск уже записан), false — пользователь отменил.
+    /// Проверка команд одной вкладки — одно окно или цепочка окон. Ничего не спрашивает
+    /// и не пишет: спросить — <see cref="Confirm"/>, записать — <see cref="Commit"/>.
     /// </summary>
-    public static bool ApproveCommand(Workspace tab, string command, IReadOnlyList<ServerEntry> targets)
+    /// <param name="steps">Номер окна (0 — окно одно, номер не нужен) и его текст.</param>
+    public static SmartCheck CheckCommands(Workspace tab, IEnumerable<(int Number, string Text)> steps, IReadOnlyList<ServerEntry> targets)
     {
-        var text = Normalize(command);
+        var check = new SmartCheck(tab.Title, targets);
 
-        // «только посмотреть» безопасно на любом сервере: не спрашиваем и в историю не пишем
-        // смотрим исходный текст: в нормализованном переносы строк уже стали пробелами
-        if (text.Length < MinCommandLength || IsReadOnly(command))
+        foreach (var (number, command) in steps)
         {
-            return true;
+            var text = Normalize(command);
+
+            // «только посмотреть» безопасно на любом сервере: не спрашиваем и в историю не пишем.
+            // Смотрим исходный текст: в нормализованном переносы строк уже стали пробелами
+            if (text.Length < MinCommandLength || IsReadOnly(command))
+            {
+                continue;
+            }
+
+            var tabKey = $"cmd:{tab.Id}:{text}";
+            var anyKey = $"cmd:*:{text}";
+            check.Keys.Add((tabKey, check.Targets));
+            check.Keys.Add((anyKey, check.Targets));
+
+            // у вкладки своя история точнее; у новой вкладки её нет — тогда по всем вкладкам
+            var key = Events(tabKey).Count >= MinRuns ? tabKey : anyKey;
+
+            if (Evaluate(key, targets) is { } odd)
+            {
+                var what = number > 0 ? $"#{number} {Preview(command)}" : Preview(command);
+                check.Add(odd, what, "запусков");
+            }
         }
 
-        var tabKey = $"cmd:{tab.Id}:{text}";
-        var anyKey = $"cmd:*:{text}";
-
-        // у вкладки своя история точнее; у новой вкладки её нет — тогда по всем вкладкам
-        var key = Events(tabKey).Count >= MinRuns ? tabKey : anyKey;
-
-        var preview = command.Trim().Replace("\r\n", "\n").Split('\n')[0];
-
-        if (preview.Length > 60)
-        {
-            preview = preview[..60] + "…";
-        }
-
-        if (!Approve(key, targets, tab.Title,
-                usual => $"Обычно эта команда выполняется на {usual}",
-                "запусков",
-                $"Команда: {preview}"))
-        {
-            return false;
-        }
-
-        Record(tabKey, targets);
-        Record(anyKey, targets);
-        Save();
-        return true;
+        return check;
     }
 
-    /// <summary>Проверка перед копированием с вкладки. Смысл ответа тот же, что у команды.</summary>
-    public static bool ApproveCopy(Workspace tab, IReadOnlyList<ServerEntry> targets)
+    /// <summary>Проверка копирования с вкладки. Ничего не спрашивает и не пишет.</summary>
+    public static SmartCheck CheckCopy(Workspace tab, IReadOnlyList<ServerEntry> targets)
     {
+        var check = new SmartCheck(tab.Title, targets);
         var key = $"copy:{tab.Id}";
+        check.Keys.Add((key, check.Targets));
 
-        if (!Approve(key, targets, tab.Title,
-                usual => $"С вкладки «{tab.Title}» обычно копируют на {usual}",
-                "копирований",
-                null))
+        if (Evaluate(key, targets) is { } odd)
         {
-            return false;
+            check.Add(odd, "копирование", "копирований");
         }
 
-        Record(key, targets);
-        Save();
-        return true;
+        return check;
     }
 
-    private static bool Approve(
-        string key,
-        IReadOnlyList<ServerEntry> targets,
-        string tabTitle,
-        Func<string, string> headline,
-        string runsWord,
-        string? footer)
+    /// <summary>
+    /// Спросить по одной вкладке, если есть что спрашивать. true — запускать.
+    /// Выключенный режим и пустая проверка не спрашивают.
+    /// </summary>
+    public static bool Confirm(SmartCheck check)
     {
-        if (!AppState.Current.Settings.SmartMode || Ask is null)
+        if (!check.HasWarnings || Choose is null)
         {
             return true;
+        }
+
+        var (head, detail) = check.Warnings.Count == 1
+            ? (check.Warnings[0].Headline, check.Warnings[0].Detail + $"\nВкладка «{check.Tab}».")
+            : ("Непривычные серверы — проверьте перед запуском",
+                string.Join("\n", check.Warnings.Select(w => "• " + w.Line)) + $"\nВкладка «{check.Tab}».");
+
+        AppLog.Info($"Умный режим: {head}.", check.Tab);
+
+        if (Choose(head, detail, "Выполнить", null) == 1)
+        {
+            AppLog.Info("Умный режим: выполнено по подтверждению.", check.Tab);
+            return true;
+        }
+
+        AppLog.Info("Умный режим: запуск отменён.", check.Tab);
+        return false;
+    }
+
+    /// <summary>
+    /// «Выполнить везде»: одно окно на все вкладки вместо череды. Возвращает вкладки, которые
+    /// запускать, или null — отменили всё. «Пропустить» запускает все, кроме подозрительных.
+    /// </summary>
+    public static List<T>? ConfirmMany<T>(IReadOnlyList<(T Tab, SmartCheck? Check)> checks)
+    {
+        var warned = checks.Where(c => c.Check is { HasWarnings: true }).ToList();
+
+        if (warned.Count == 0 || Choose is null)
+        {
+            return checks.Select(c => c.Tab).ToList();
+        }
+
+        var lines = warned
+            .SelectMany(c => c.Check!.Warnings.Select(w => $"• «{c.Check.Tab}» — {w.Line}"))
+            .Take(12)
+            .ToList();
+
+        var more = warned.Sum(c => c.Check!.Warnings.Count) - lines.Count;
+
+        if (more > 0)
+        {
+            lines.Add($"…и ещё {more}");
+        }
+
+        var head = warned.Count == 1
+            ? "На одной вкладке непривычный сервер"
+            : $"На {warned.Count} вкладках непривычные серверы";
+
+        AppLog.Info($"Умный режим: {head}.");
+
+        switch (Choose(head, string.Join("\n", lines), "Выполнить всё", $"Пропустить эти ({warned.Count})"))
+        {
+            case 1:
+                AppLog.Info("Умный режим: выполнено везде по подтверждению.");
+                return checks.Select(c => c.Tab).ToList();
+
+            case 2:
+                AppLog.Info($"Умный режим: вкладки с непривычными серверами пропущены ({warned.Count}).");
+                return checks.Where(c => c.Check is not { HasWarnings: true }).Select(c => c.Tab).ToList();
+
+            default:
+                AppLog.Info("Умный режим: запуск отменён.");
+                return null;
+        }
+    }
+
+    /// <summary>Запуск состоялся — записываем: на следующий раз эти серверы уже знакомы.</summary>
+    public static void Commit(SmartCheck? check)
+    {
+        if (check is null || check.Keys.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var (key, targets) in check.Keys.DistinctBy(k => k.Key))
+        {
+            Record(key, targets);
+        }
+
+        Save();
+    }
+
+    /// <summary>Чем этот запуск непривычен — или null, если всё как обычно или судить не по чему.</summary>
+    private static Oddity? Evaluate(string key, IReadOnlyList<ServerEntry> targets)
+    {
+        if (!AppState.Current.Settings.SmartMode)
+        {
+            return null;
         }
 
         var known = AppState.Current.Servers.ToDictionary(s => s.Id);
@@ -154,7 +237,7 @@ public static class RunHistory
 
         if (events.Count < MinRuns)
         {
-            return true;
+            return null;
         }
 
         var total = 0.0;
@@ -188,7 +271,7 @@ public static class RunHistory
 
         if (usual.Count == 0)
         {
-            return true;
+            return null;
         }
 
         var strangers = targets
@@ -197,37 +280,21 @@ public static class RunHistory
 
         if (strangers.Count == 0)
         {
-            return true;
+            return null;
         }
 
-        var main = usual[0];
-        var hits = events.Count(e => e.Servers.Contains(main.Id));
+        return new Oddity(
+            usual,
+            strangers,
+            events.Count,
+            events.Count(e => e.Servers.Contains(usual[0].Id)),
+            strangers.All(s => !ever.Contains(s.Id)));
+    }
 
-        var never = strangers.All(s => !ever.Contains(s.Id));
-        var nowPicked = strangers.Count == 1
-            ? $"Сейчас отмечен {Names(strangers)}"
-            : $"Сейчас отмечены {Names(strangers)}";
-        var why = never
-            ? " — здесь на нём такого ещё не запускали."
-            : $" — здесь на нём такого не запускали последние {HalfLifeDays:0} дней.";
-
-        var detail = nowPicked + why + "\n"
-            + $"Из последних {events.Count} {runsWord} на «{main.PaneLabel}» — {hits}.\n"
-            + $"Вкладка «{tabTitle}»."
-            + (footer is null ? string.Empty : "\n" + footer);
-
-        var head = headline(Names(usual));
-
-        AppLog.Info($"Умный режим: {head}. {nowPicked.ToLowerInvariant()}.", tabTitle);
-
-        if (Ask(head, detail))
-        {
-            AppLog.Info("Умный режим: выполнено по подтверждению.", tabTitle);
-            return true;
-        }
-
-        AppLog.Info("Умный режим: запуск отменён.", tabTitle);
-        return false;
+    private static string Preview(string command)
+    {
+        var line = command.Trim().Replace("\r\n", "\n").Split('\n')[0];
+        return line.Length > 60 ? line[..60] + "…" : line;
     }
 
     private static string Names(IReadOnlyList<ServerEntry> servers)
@@ -235,6 +302,63 @@ public static class RunHistory
         var shown = string.Join(", ", servers.Take(3).Select(s => $"«{s.PaneLabel}»"));
         return servers.Count > 3 ? $"{shown} и ещё {servers.Count - 3}" : shown;
     }
+
+    /// <summary>Что непривычно: где обычно, где сейчас, и насколько уверенно.</summary>
+    internal sealed record Oddity(
+        IReadOnlyList<ServerEntry> Usual,
+        IReadOnlyList<ServerEntry> Strangers,
+        int Runs,
+        int Hits,
+        bool Never);
+
+    /// <summary>Итог проверки одной вкладки: что спросить и что записать после запуска.</summary>
+    public sealed class SmartCheck(string tab, IReadOnlyList<ServerEntry> targets)
+    {
+        public string Tab { get; } = tab;
+
+        public IReadOnlyList<ServerEntry> Targets { get; } = targets;
+
+        public List<SmartWarning> Warnings { get; } = [];
+
+        public bool HasWarnings => Warnings.Count > 0;
+
+        /// <summary>Что записать в историю и на каких серверах это выполнится.</summary>
+        internal List<(string Key, IReadOnlyList<ServerEntry> Targets)> Keys { get; } = [];
+
+        /// <summary>Связка «копирование → команды»: обе проверки — одним вопросом и одной записью.</summary>
+        public SmartCheck With(SmartCheck? other)
+        {
+            if (other is not null)
+            {
+                Warnings.AddRange(other.Warnings);
+                Keys.AddRange(other.Keys);
+            }
+
+            return this;
+        }
+
+        internal void Add(Oddity odd, string what, string runsWord)
+        {
+            var now = odd.Strangers.Count == 1
+                ? $"сейчас отмечен {Names(odd.Strangers)}"
+                : $"сейчас отмечены {Names(odd.Strangers)}";
+            var why = odd.Never
+                ? "здесь на нём такого ещё не запускали"
+                : $"здесь на нём такого не запускали последние {HalfLifeDays:0} дней";
+
+            Warnings.Add(new SmartWarning(
+                $"{what}: обычно на {Names(odd.Usual)}, {now}",
+                what == "копирование"
+                    ? $"Обычно с этой вкладки копируют на {Names(odd.Usual)}"
+                    : $"Обычно эта команда выполняется на {Names(odd.Usual)}",
+                char.ToUpper(now[0]) + now[1..] + " — " + why + ".\n"
+                    + $"Из последних {odd.Runs} {runsWord} на «{odd.Usual[0].PaneLabel}» — {odd.Hits}."
+                    + (what == "копирование" ? string.Empty : $"\nКоманда: {what}")));
+        }
+    }
+
+    /// <summary>Одно непривычное место: строкой для списка и заголовком с пояснением для одиночного вопроса.</summary>
+    public sealed record SmartWarning(string Line, string Headline, string Detail);
 
     /// <summary>Команды, которые только читают, — с любыми аргументами.</summary>
     private static readonly HashSet<string> ReadVerbs =

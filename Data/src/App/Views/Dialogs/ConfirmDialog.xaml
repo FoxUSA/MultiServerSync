@@ -61,13 +61,10 @@
       </StackPanel>
     </Grid>
 
-    <!--  полоса с кнопками, как у системных диалогов Windows 11  -->
+    <!--  кнопки — на фоне окна, без отдельной полосы  -->
     <Border
       Grid.Row="2"
-      Padding="22,14"
-      Background="{DynamicResource ControlFillColorDefaultBrush}"
-      BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-      BorderThickness="0,1,0,0">
+      Padding="22,14">
       <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
         <ui:Button
           x:Name="ConfirmButton"
@@ -75,6 +72,13 @@
           Margin="0,0,8,0"
           Appearance="Danger"
           Click="OnConfirm" />
+        <!--  третий вариант, когда он есть: «Пропустить эти» у «Выполнить везде»  -->
+        <ui:Button
+          x:Name="ExtraButton"
+          MinWidth="110"
+          Margin="0,0,8,0"
+          Click="OnExtra"
+          Visibility="Collapsed" />
         <ui:Button
           x:Name="CancelButton"
           MinWidth="110"

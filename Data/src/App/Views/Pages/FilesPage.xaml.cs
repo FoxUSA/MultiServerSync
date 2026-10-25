@@ -158,6 +158,16 @@ public partial class FilesPage : Page
         }
     }
 
+    /// <summary>Щелчок по плашке — туда, где устраняется: в личную вкладку команд.</summary>
+    private void OnNoticeClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (Workspace?.Personal is { } personal)
+        {
+            AppState.Current.JumpToPersonal(personal);
+            AppState.Current.ShowTab(personal);
+        }
+    }
+
     private void OnBrowse(object sender, RoutedEventArgs e)
     {
         if (Workspace is not { } workspace)
@@ -225,20 +235,39 @@ public partial class FilesPage : Page
             return;
         }
 
-        if (all.Count <= 1)
+        // умный режим — одним окном на все вкладки, а не по окну на каждую
+        var checks = all.Select(t => (Tab: t, Check: t.PrecheckCopy())).ToList();
+
+        if (RunHistory.ConfirmMany(checks) is not { } chosen)
         {
-            await workspace.RunCopyAsync();
             return;
         }
 
-        AppLog.Info($"«Выполнить везде» — копирование запускается во всех вкладках: {all.Count}.");
+        foreach (var (tab, check) in checks.Where(c => chosen.Contains(c.Tab)))
+        {
+            RunHistory.Commit(check);
+        }
+
+        if (chosen.Count == 0)
+        {
+            AppLog.Info("«Выполнить везде»: запускать нечего — все вкладки пропущены.");
+            return;
+        }
+
+        if (chosen.Count == 1)
+        {
+            await chosen[0].RunCopyAsync(approved: true);
+            return;
+        }
+
+        AppLog.Info($"«Выполнить везде» — копирование запускается во всех вкладках: {chosen.Count}.");
 
         // операции стартуют синхронно, поэтому строки уже созданы и попадут в сводку
-        var running = all.Select(w => w.RunCopyAsync(notify: false)).ToList();
+        var running = chosen.Select(w => w.RunCopyAsync(notify: false, approved: true)).ToList();
 
         // вкладка, которая отказалась (нет файлов, пути или серверов), в сводку не идёт:
         // её отказ уже виден на ярлыке и в журнале
-        var started = all.Where((_, i) => !(running[i].IsCompletedSuccessfully && !running[i].Result)).ToList();
+        var started = chosen.Where((_, i) => !(running[i].IsCompletedSuccessfully && !running[i].Result)).ToList();
 
         if (started.Count == 0)
         {

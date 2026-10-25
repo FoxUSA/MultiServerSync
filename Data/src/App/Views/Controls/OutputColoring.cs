@@ -19,6 +19,10 @@ public static class OutputColoring
 {
     private static readonly SolidColorBrush Sent = Freeze(Color.FromRgb(0x2D, 0xB0, 0x55));
     private static readonly SolidColorBrush Error = Freeze(Color.FromRgb(0xE8, 0x5C, 0x5C));
+    private static readonly SolidColorBrush Warning = Freeze(Color.FromRgb(0xE8, 0x9A, 0x3C));
+
+    /// <summary>Начало строки-предупреждения: ничего не сломалось, но сделано не всё, что просили.</summary>
+    public const string WarningMark = "— ВНИМАНИЕ: ";
 
     public static readonly DependencyProperty TextProperty = DependencyProperty.RegisterAttached(
         "Text",
@@ -117,6 +121,11 @@ public static class OutputColoring
         else if (line.StartsWith("замена (", StringComparison.Ordinal))
         {
             run.SetResourceReference(TextElement.ForegroundProperty, "TextFillColorSecondaryBrush");
+        }
+        else if (line.StartsWith(WarningMark, StringComparison.Ordinal))
+        {
+            run.Foreground = Warning;
+            run.FontWeight = FontWeights.SemiBold;
         }
         else if (line.StartsWith("ОШИБКА", StringComparison.Ordinal)
             || line.StartsWith("РАСХОЖДЕНИЕ", StringComparison.Ordinal)

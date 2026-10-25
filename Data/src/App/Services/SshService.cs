@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Formats.Tar;
+using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Net.Sockets;
@@ -15,6 +16,9 @@ namespace MultiServerSync.Services;
 
 /// <param name="Permissions">Права строкой, как в ls и WinSCP: rwxr-xr-x.</param>
 /// <param name="IsLink">Символическая ссылка. IsDirectory у неё — про то, куда она указывает.</param>
+/// <param name="Owner">Владелец именем; где имени нет — числом.</param>
+/// <param name="Mode">Права числом, как в chmod, вместе с setuid/setgid/sticky; -1 — неизвестно.</param>
+/// <param name="LinkTarget">Куда ведёт ссылка — как записано в ней самой.</param>
 public sealed record RemoteEntry(
     string Name,
     string FullPath,
@@ -22,7 +26,11 @@ public sealed record RemoteEntry(
     long Length,
     DateTime Modified,
     string Permissions = "",
-    bool IsLink = false);
+    bool IsLink = false,
+    string Owner = "",
+    string Group = "",
+    int Mode = -1,
+    string LinkTarget = "");
 
 /// <param name="MatchByDate">
 /// Заменять файлы с другой датой изменения: расхождение в любую сторону — повод отправить файл
@@ -69,7 +77,54 @@ public sealed record UploadStats(
     int FilesRedated,
     int DirsCreated,
     long BytesSent,
-    IReadOnlyList<UploadedFile> Files);
+    IReadOnlyList<UploadedFile> Files,
+    IReadOnlyList<string> CreatedDirs,
+    StageClock Clock);
+
+/// <summary>Время этапов копирования — строкой в вывод сервера: видно, на что уходят секунды.</summary>
+public sealed class StageClock
+{
+    private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
+
+    private readonly List<(string Stage, TimeSpan Time)> _stages = [];
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+
+    /// <summary>Закрывает этап: ему уходит время с прошлой отметки. Одноимённые этапы складываются.</summary>
+    public void Mark(string stage)
+    {
+        var spent = _clock.Elapsed;
+        _clock.Restart();
+
+        var i = _stages.FindIndex(s => s.Stage == stage);
+
+        if (i >= 0)
+        {
+            _stages[i] = (stage, _stages[i].Time + spent);
+        }
+        else
+        {
+            _stages.Add((stage, spent));
+        }
+    }
+
+    /// <summary>Отсчёт заново — после паузы, которая ни к одному этапу не относится.</summary>
+    public void Restart() => _clock.Restart();
+
+    public override string ToString()
+    {
+        var total = _stages.Aggregate(TimeSpan.Zero, (sum, s) => sum + s.Time);
+
+        // доли секунды — шум, они только удлиняют строку
+        return string.Join(
+            " · ",
+            _stages
+                .Where(s => s.Time.TotalSeconds >= 0.05)
+                .Select(s => $"{s.Stage} {Seconds(s.Time)}")
+                .Append($"всего {Seconds(total)}"));
+    }
+
+    private static string Seconds(TimeSpan t) => t.TotalSeconds.ToString("0.0", Ru) + " с";
+}
 
 /// <summary>Ответ сервера на команду целиком: оба потока вывода и чем всё закончилось.</summary>
 public sealed record CommandOutcome(int? ExitCode, string StdOut, string StdErr, bool TimedOut, string? ExitSignal)
@@ -104,15 +159,53 @@ public sealed class SshKeyException(string message) : Exception(message);
 /// <summary>Работа с сервером по SSH и SFTP. Все вызовы синхронной библиотеки уводятся в пул потоков.</summary>
 public static class SshService
 {
-    /// <summary>Клиент SSH с проверкой ключа сервера — все подключения создаются так.</summary>
-    public static SshClient NewSsh(ServerEntry server, AppSettings settings) =>
-        HostKeys.Watch(new SshClient(BuildConnectionInfo(server, settings)), server);
+    /// <summary>
+    /// Клиент SSH с проверкой ключа сервера — все подключения создаются так.
+    /// Через промежуточный сервер — по туннелю, который живёт, пока жив клиент.
+    /// </summary>
+    public static SshClient NewSsh(ServerEntry server, AppSettings settings)
+    {
+        if (Jump.Open(server, settings) is not { } tunnel)
+        {
+            return HostKeys.Watch(new SshClient(BuildConnectionInfo(server, settings)), server);
+        }
+
+        // ключ не прочитался — туннель уже открыт и сам не закроется
+        try
+        {
+            return HostKeys.Watch(new TunneledSshClient(BuildConnectionInfo(server, settings, "127.0.0.1", tunnel.Port), tunnel), server);
+        }
+        catch
+        {
+            tunnel.Dispose();
+            throw;
+        }
+    }
 
     /// <summary>Клиент SFTP с проверкой ключа сервера.</summary>
-    public static SftpClient NewSftp(ServerEntry server, AppSettings settings) =>
-        HostKeys.Watch(new SftpClient(BuildConnectionInfo(server, settings)), server);
+    public static SftpClient NewSftp(ServerEntry server, AppSettings settings)
+    {
+        if (Jump.Open(server, settings) is not { } tunnel)
+        {
+            return HostKeys.Watch(new SftpClient(BuildConnectionInfo(server, settings)), server);
+        }
 
-    public static ConnectionInfo BuildConnectionInfo(ServerEntry server, AppSettings settings)
+        try
+        {
+            return HostKeys.Watch(new TunneledSftpClient(BuildConnectionInfo(server, settings, "127.0.0.1", tunnel.Port), tunnel), server);
+        }
+        catch
+        {
+            tunnel.Dispose();
+            throw;
+        }
+    }
+
+    public static ConnectionInfo BuildConnectionInfo(ServerEntry server, AppSettings settings) =>
+        BuildConnectionInfo(server, settings, server.Host.Trim(), server.Port <= 0 ? 22 : server.Port);
+
+    /// <summary>То же, но подключаться по другому адресу — к концу туннеля через промежуточный сервер.</summary>
+    public static ConnectionInfo BuildConnectionInfo(ServerEntry server, AppSettings settings, string host, int port)
     {
         var user = string.IsNullOrWhiteSpace(server.User) ? "root" : server.User.Trim();
         var password = server.Password ?? string.Empty;
@@ -143,8 +236,8 @@ public static class SshService
         }
 
         var info = new ConnectionInfo(
-            server.Host.Trim(),
-            server.Port <= 0 ? 22 : server.Port,
+            host,
+            port,
             user,
             [.. methods])
         {
@@ -510,12 +603,15 @@ public static class SshService
         ConcurrentDictionary<string, string> localHashes,
         Action<string> report,
         CancellationToken ct,
-        Action<UploadStep>? step = null)
+        Action<UploadStep>? step = null,
+        Action<long, long>? progress = null)
     {
         return Task.Run(
             () =>
             {
                 var stats = new Counters();
+                var clock = new StageClock();
+                var meter = new TransferMeter(progress, ct);
 
                 step?.Invoke(UploadStep.Connecting);
 
@@ -528,10 +624,9 @@ public static class SshService
                 }
 
                 using var ssh = NewSsh(server, settings);
-                ssh.Connect();
-
                 using var sftp = NewSftp(server, settings);
-                sftp.Connect();
+                ConnectBoth(ssh, sftp);
+                clock.Mark("подключение");
 
                 if (options.MatchByDate && !options.MatchByHash)
                 {
@@ -541,23 +636,30 @@ public static class SshService
                 // что уже лежит на сервере — одной командой на всё сразу, а не запросом на файл:
                 // на десятке тысяч файлов это секунды вместо минут ожидания ответов
                 var inventory = TakeInventory(ssh, plan, report, ct);
-                var ctx = new UploadContext(sftp, options, localHashes, inventory, stats, report);
+                var ctx = new UploadContext(sftp, options, localHashes, inventory, stats, report) { Meter = meter };
+                clock.Mark("опись");
 
                 if (options.MatchByHash && options.Overwrite)
                 {
                     ctx.RemoteHashes = FetchRemoteHashes(ssh, ctx, plan.Files, report, ct, step);
+                    clock.Mark("суммы до");
                 }
 
                 EnsureDirectory(sftp, root, stats, report);
                 ctx.MarkKnown(root);
 
                 // папки — заранее и по порядку, родитель раньше детей: потоки отправки
-                // потом только кладут файлы и не спорят, кому создавать общую папку
+                // потом только кладут файлы и не спорят, кому создавать общую папку.
+                // Новые — одной командой на все, по одной остаются только те, что так не вышли
+                MakeDirs(ssh, ctx, plan.Dirs, report, ct);
+
                 foreach (var dir in plan.Dirs)
                 {
                     ct.ThrowIfCancellationRequested();
                     ctx.EnsureDir(dir.RemotePath);
                 }
+
+                clock.Mark("папки");
 
                 // сначала решаем по каждому файлу, потом везём: так видно, сколько и чего
                 // отправлять, и под это выбирается способ доставки
@@ -572,7 +674,9 @@ public static class SshService
                     }
                 });
 
+                clock.Mark("разбор");
                 ApplyDates(ssh, sftp, redate.ToList(), report, ct);
+                clock.Mark("даты");
 
                 var dates = new List<Retouch>();
 
@@ -583,6 +687,9 @@ public static class SshService
                     var rootStamp = TryGetAttributes(sftp, root)?.LastWriteTimeUtc;
                     var jobs = send.OrderBy(s => s.Job.RemotePath, StringComparer.Ordinal).ToList();
 
+                    meter.Total = jobs.Sum(s => s.Info.Length);
+                    meter.Finish(); // 0 из N — полоса появляется сразу, а не с первым куском
+
                     // временная папка пачки лежит в корне назначения и сбивает ему дату —
                     // возвращаем прежнюю, если ничего своего в корень не легло
                     if (Send(ssh, ctx, jobs, server, settings, root, ct)
@@ -592,6 +699,9 @@ public static class SshService
                     {
                         dates.Add(new Retouch(root, stamp));
                     }
+
+                    meter.Finish();
+                    clock.Mark("отправка");
                 }
 
                 // время папки правится последним: запись файлов внутрь всё равно его сбивает.
@@ -614,6 +724,7 @@ public static class SshService
                 }
 
                 ApplyDates(ssh, sftp, dates, report, ct);
+                clock.Mark("даты");
 
                 ssh.Disconnect();
                 sftp.Disconnect();
@@ -622,7 +733,8 @@ public static class SshService
                 var uploaded = stats.Uploaded.OrderBy(f => f.RemotePath, StringComparer.Ordinal).ToList();
 
                 return new UploadStats(
-                    stats.Files, stats.Skipped, stats.UpToDate, stats.Redated, stats.Dirs, stats.Bytes, uploaded);
+                    stats.Files, stats.Skipped, stats.UpToDate, stats.Redated, stats.Dirs, stats.Bytes, uploaded,
+                    stats.CreatedDirs.Order(StringComparer.Ordinal).ToList(), clock);
             },
             ct);
     }
@@ -647,6 +759,22 @@ public static class SshService
         }
     }
 
+    /// <summary>
+    /// Два входа на сервер — одновременно: каждый ждёт своего обмена ключами,
+    /// и по очереди подключение шло вдвое дольше.
+    /// </summary>
+    internal static void ConnectBoth(SshClient ssh, SftpClient sftp)
+    {
+        try
+        {
+            Parallel.Invoke(ssh.Connect, sftp.Connect);
+        }
+        catch (AggregateException ae) when (ae.InnerExceptions.Count > 0)
+        {
+            ThrowFirst(ae);
+        }
+    }
+
     /// <summary>Наружу — настоящая причина сбоя, а не обёртка «одна или несколько ошибок».</summary>
     private static void ThrowFirst(AggregateException ae)
     {
@@ -657,46 +785,263 @@ public static class SshService
     }
 
     /// <summary>
+    /// Папка одной командой find: её содержимое (тип, куда ведёт ссылка, размер, дата, права)
+    /// и заодно — у каких подпапок внутри есть свои папки, чтобы дерево не рисовало ложных стрелок.
+    /// По SFTP на то же уходил запрос на папку и ещё по запросу на каждую ссылку.
+    /// null — на сервере find без -printf (урезанный busybox): читать по SFTP.
+    /// </summary>
+    internal static (IReadOnlyList<RemoteEntry> Items, HashSet<string> WithSubdirs)? ReadDirectoryFast(SshClient ssh, string path)
+    {
+        var target = NormalizeRemote(path);
+        var q = ShellQuote(target);
+
+        // метки в stderr вместо текста ошибок: он бывает на языке сервера
+        var script =
+            "export LC_ALL=C\n"
+            + $"[ -e {q} ] || {{ echo MSS:NOENT >&2; exit 3; }}\n"
+            + $"[ -r {q} ] && [ -x {q} ] || {{ echo MSS:EACCES >&2; exit 4; }}\n"
+            + $"cd {q} || exit 4\n"
+            + "find . -mindepth 1 -maxdepth 1 -printf '1\\t" + EntryFormat + "\\t%P\\0'\n"
+            + "find -L . -mindepth 2 -maxdepth 2 -type d -printf '2\\t%h\\0' 2>/dev/null\n";
+
+        var (output, error) = RunInput(ssh, script, CancellationToken.None);
+
+        if (error.Contains("MSS:NOENT", StringComparison.Ordinal))
+        {
+            throw new SftpPathNotFoundException($"Папки {target} нет на сервере.");
+        }
+
+        if (error.Contains("MSS:EACCES", StringComparison.Ordinal))
+        {
+            throw new SftpPermissionDeniedException($"Нет прав на чтение {target}.");
+        }
+
+        // find ругнулся и ничего не вывел — это не тот find
+        if (output.Length == 0 && error.Trim().Length > 0)
+        {
+            return null;
+        }
+
+        var items = new List<RemoteEntry>();
+        var withSubdirs = new HashSet<string>(StringComparer.Ordinal);
+        var prefix = target == "/" ? "/" : target + "/";
+
+        foreach (var record in output.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (record.StartsWith("2\t", StringComparison.Ordinal))
+            {
+                // «./имя» — у этой подпапки есть свои папки
+                var parent = record[2..];
+                withSubdirs.Add(parent.StartsWith("./", StringComparison.Ordinal) ? parent[2..] : parent);
+                continue;
+            }
+
+            if (record.Length < 2 || record[0] != '1' || record[1] != '\t'
+                || ParseEntry(record[2..], prefix) is not { } entry)
+            {
+                continue;
+            }
+
+            items.Add(entry);
+        }
+
+        return (items, withSubdirs);
+    }
+
+    /// <summary>
+    /// Поля записи find о файле: тип, тип цели ссылки, размер, дата, права строкой, владелец,
+    /// группа, права числом, цель ссылки. Имя всегда последним — в нём может быть что угодно.
+    /// </summary>
+    private const string EntryFormat = "%y\\t%Y\\t%s\\t%T@\\t%M\\t%u\\t%g\\t%m\\t%l";
+
+    /// <summary>Разбирает запись <see cref="EntryFormat"/> + «\t имя». null — запись битая.</summary>
+    private static RemoteEntry? ParseEntry(string record, string prefix)
+    {
+        var parts = record.Split('\t', 10);
+
+        if (parts.Length < 10)
+        {
+            return null;
+        }
+
+        var isLink = parts[0] == "l";
+        var name = parts[9];
+
+        return new RemoteEntry(
+            name,
+            prefix + name,
+            parts[0] == "d" || (isLink && parts[1] == "d"),
+            long.TryParse(parts[2], out var size) ? size : 0,
+            double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var time)
+                ? DateTimeOffset.FromUnixTimeMilliseconds((long)(time * 1000)).LocalDateTime
+                : default,
+            parts[4].Length == 10 ? parts[4][1..] : parts[4],
+            isLink,
+            parts[5],
+            parts[6],
+            TryOctal(parts[7]),
+            parts[8]);
+    }
+
+    /// <summary>
+    /// Несколько папок одной командой — для чтения на уровень вперёд: зашли в папку, и все её
+    /// подпапки уже лежат в кэше, щелчок по любой показывает её сразу. В ответе только те папки,
+    /// которые удалось прочитать: непрочитанная пустой не притворяется. Записей больше
+    /// <paramref name="limit"/> — остальное не разбирается.
+    /// </summary>
+    internal static Dictionary<string, List<RemoteEntry>> ReadDirectoriesFast(
+        SshClient ssh,
+        IReadOnlyList<string> paths,
+        int limit,
+        CancellationToken ct)
+    {
+        var result = new Dictionary<string, List<RemoteEntry>>(StringComparer.Ordinal);
+
+        if (paths.Count == 0)
+        {
+            return result;
+        }
+
+        var quoted = string.Join(" ", paths.Select(p => ShellQuote(NormalizeRemote(p))));
+
+        // метка R — папку можно читать: только такие встают в кэш, даже если они пустые
+        var script =
+            "export LC_ALL=C\n"
+            + $"for d in {quoted}; do [ -r \"$d\" ] && [ -x \"$d\" ] && printf 'R\\t%s\\0' \"$d\"; done\n"
+            + $"find {quoted} -mindepth 1 -maxdepth 1 -printf '1\\t%H\\t" + EntryFormat + "\\t%f\\0' 2>/dev/null"
+            + $" | head -c {64L * 1024 * 1024}\n";
+
+        var (output, _) = RunInput(ssh, script, ct);
+        var count = 0;
+
+        foreach (var record in output.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (record.StartsWith("R\t", StringComparison.Ordinal))
+            {
+                result.TryAdd(record[2..], []);
+                continue;
+            }
+
+            if (!record.StartsWith("1\t", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var tab = record.IndexOf('\t', 2);
+
+            if (tab < 0)
+            {
+                continue;
+            }
+
+            var dir = record[2..tab];
+
+            if (!result.TryGetValue(dir, out var list)
+                || ParseEntry(record[(tab + 1)..], dir == "/" ? "/" : dir + "/") is not { } entry)
+            {
+                continue;
+            }
+
+            list.Add(entry);
+
+            if (++count >= limit)
+            {
+                break;
+            }
+        }
+
+        // разбор оборвался на пределе — папки, дочитанные не до конца, в кэш не кладём
+        if (count >= limit)
+        {
+            return new Dictionary<string, List<RemoteEntry>>(StringComparer.Ordinal);
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Читает папку на уже открытом подключении. Ссылки на папки (в /var/www их полно)
     /// раскрываются: без этого в них нельзя было бы зайти.
     /// </summary>
     public static IReadOnlyList<RemoteEntry> ReadDirectory(SftpClient sftp, string path)
     {
         var target = NormalizeRemote(path);
-        var list = new List<RemoteEntry>();
+        var files = sftp.ListDirectory(target).Where(f => f.Name is not ("." or "..")).ToList();
 
-        foreach (ISftpFile file in sftp.ListDirectory(target))
-        {
-            if (file.Name is "." or "..")
-            {
-                continue;
-            }
+        // куда ведёт ссылка — отдельный запрос на каждую; в /etc и /usr/lib их сотни, и по одной
+        // папка открывалась секундами. Запросы на одном подключении идут параллельно
+        var linkIsDir = new System.Collections.Concurrent.ConcurrentDictionary<string, bool>();
 
-            var isDirectory = file.IsDirectory;
-
-            if (file.IsSymbolicLink)
+        Parallel.ForEach(
+            files.Where(f => f.IsSymbolicLink),
+            new ParallelOptions { MaxDegreeOfParallelism = 16 },
+            file =>
             {
                 try
                 {
-                    isDirectory = sftp.GetAttributes(file.FullName).IsDirectory;
+                    linkIsDir[file.FullName] = sftp.GetAttributes(file.FullName).IsDirectory;
                 }
                 catch (SshException)
                 {
                     // битая ссылка — показываем как файл
                 }
-            }
+            });
 
-            list.Add(new RemoteEntry(
+        return files
+            .Select(file => new RemoteEntry(
                 file.Name,
                 NormalizeRemote(file.FullName),
-                isDirectory,
+                file.IsSymbolicLink ? linkIsDir.GetValueOrDefault(file.FullName) : file.IsDirectory,
                 file.Length,
                 file.LastWriteTime,
                 Permissions(file),
-                file.IsSymbolicLink));
+                file.IsSymbolicLink,
+                file.Attributes.UserId.ToString(CultureInfo.InvariantCulture),
+                file.Attributes.GroupId.ToString(CultureInfo.InvariantCulture),
+                ModeOf(file.Attributes)))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Пустой файл с правами и владельцем папки, в которую он ложится, — без права запуска,
+    /// как у новых файлов при заливке. Файл с таким именем уже есть — ошибка, ничего не трогаем.
+    /// </summary>
+    public static void CreateEmptyFile(SftpClient sftp, string path, Action<string> report)
+    {
+        var target = NormalizeRemote(path);
+
+        if (sftp.Exists(target))
+        {
+            throw new IOException($"{Path.GetFileName(target)} уже есть в этой папке.");
         }
 
-        return list;
+        var parent = TryGetAttributes(sftp, ParentRemote(target));
+
+        using (sftp.Create(target))
+        {
+            // пустой — писать нечего
+        }
+
+        if (parent is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var attrs = sftp.GetAttributes(target);
+            CopyPermissions(parent, attrs);
+            attrs.OwnerCanExecute = false;
+            attrs.GroupCanExecute = false;
+            attrs.OthersCanExecute = false;
+            sftp.SetAttributes(target, attrs);
+        }
+        catch (Exception ex)
+        {
+            report($"не удалось перенести права на {target}: {ex.Message}");
+        }
+
+        CopyOwner(sftp, target, parent, report);
     }
 
     /// <summary>Создаёт папку (и недостающих родителей) на уже открытом подключении.</summary>
@@ -754,7 +1099,12 @@ public static class SshService
                 var user = string.IsNullOrWhiteSpace(server.User) ? "root" : server.User.Trim();
                 var none = new NoneAuthenticationMethod(user);
 
-                var info = new ConnectionInfo(server.Host.Trim(), server.Port <= 0 ? 22 : server.Port, user, none)
+                using var tunnel = Jump.Open(server, settings);
+                var (host, port) = tunnel is null
+                    ? (server.Host.Trim(), server.Port <= 0 ? 22 : server.Port)
+                    : ("127.0.0.1", tunnel.Port);
+
+                var info = new ConnectionInfo(host, port, user, none)
                 {
                     Timeout = TimeSpan.FromSeconds(Math.Max(5, settings.ConnectTimeoutSeconds)),
                 };
@@ -1205,19 +1555,11 @@ public static class SshService
             ctx.Report($"по одному через SFTP: {small.Count} файл(ов), {TransferItem.Format(small.Sum(s => s.Info.Length))}");
         }
 
-        // пачки идут каналами основного подключения SSH, крупное — своими подключениями SFTP,
-        // мелочь — основным SFTP: друг другу они не мешают и едут одновременно
+        // пачки и крупное — каждое своими подключениями, мелочь — основным SFTP:
+        // друг другу они не мешают и едут одновременно
         var tasks = new[]
         {
-            Task.Run(
-                () =>
-                {
-                    foreach (var batch in batches)
-                    {
-                        SendTar(ssh, ctx, root, batch, fallback, ct);
-                    }
-                },
-                ct),
+            Task.Run(() => SendBatches(ssh, ctx, root, batches, fallback, server, settings, ct), ct),
             Task.Run(() => SendBig(ctx, big, server, settings, ct), ct),
             Task.Run(() => RunParallel(small, ct, s => SendViaSftp(ctx, ctx.Sftp, s, ct)), ct),
         };
@@ -1303,8 +1645,109 @@ public static class SshService
     }
 
     /// <summary>
-    /// Крупные несжимаемые файлы — по SFTP, каждый на своём подключении: одно подключение
-    /// упирается в своё окно и шифрование на одном ядре, несколько — едут вместе.
+    /// Пачки — по нескольку сразу, каждая по своему подключению: одно соединение
+    /// до далёкого сервера упирается в свой предел скорости, несколько едут вместе.
+    /// </summary>
+    private static void SendBatches(
+        SshClient ssh,
+        UploadContext ctx,
+        string root,
+        List<List<SendJob>> batches,
+        ConcurrentBag<SendJob> fallback,
+        ServerEntry server,
+        AppSettings settings,
+        CancellationToken ct)
+    {
+        if (batches.Count == 0)
+        {
+            return;
+        }
+
+        var own = batches.Count > 1 ? ExtraSsh(server, settings, Math.Min(TarConnections, batches.Count) - 1) : [];
+        var pool = new ConcurrentBag<SshClient>(own) { ssh };
+
+        if (batches.Count > 1)
+        {
+            ctx.Report($"пачек: {batches.Count}, идут по {pool.Count} сразу, каждая своим подключением");
+        }
+
+        var done = 0;
+
+        try
+        {
+            RunParallel(
+                batches,
+                ct,
+                batch =>
+                {
+                    if (!pool.TryTake(out var client))
+                    {
+                        client = ssh;
+                    }
+
+                    try
+                    {
+                        SendTar(client, ctx, root, batch, fallback, ct, () => $"пачка {Interlocked.Increment(ref done)} из {batches.Count}");
+                    }
+                    finally
+                    {
+                        pool.Add(client);
+                    }
+                },
+                pool.Count);
+        }
+        finally
+        {
+            CloseAll(own);
+        }
+    }
+
+    /// <summary>Ещё подключения SSH к тому же серверу. Не пустил — обходимся теми, что вышли.</summary>
+    private static List<SshClient> ExtraSsh(ServerEntry server, AppSettings settings, int count)
+    {
+        var opened = new ConcurrentBag<SshClient>();
+
+        Parallel.For(0, Math.Max(count, 0), _ =>
+        {
+            SshClient? client = null;
+
+            try
+            {
+                // через промежуточный сервер ошибка бывает уже здесь — не повод валить всё копирование
+                client = NewSsh(server, settings);
+                client.Connect();
+                opened.Add(client);
+            }
+            catch (Exception)
+            {
+                client?.Dispose();
+            }
+        });
+
+        return [.. opened];
+    }
+
+    private static void CloseAll(IEnumerable<BaseClient> clients)
+    {
+        foreach (var client in clients)
+        {
+            try
+            {
+                client.Disconnect();
+            }
+            catch (Exception)
+            {
+                // подключение уже оборвано
+            }
+
+            client.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Крупные несжимаемые файлы. Где на сервере есть оболочка — кусками по нескольким
+    /// подключениям сразу, даже один файл: одно соединение до далёкого сервера быстрее
+    /// не едет, а каналу команды SSH.NET ещё и отдаёт данные быстрее, чем SFTP.
     /// </summary>
     private static void SendBig(UploadContext ctx, List<SendJob> big, ServerEntry server, AppSettings settings, CancellationToken ct)
     {
@@ -1313,6 +1756,169 @@ public static class SshService
             return;
         }
 
+        if (ctx.Inventory is not null)
+        {
+            var own = ExtraSsh(server, settings, BigFileConnections);
+
+            if (own.Count > 0)
+            {
+                try
+                {
+                    SendPieces(ctx, big, own, ct);
+                    return;
+                }
+                finally
+                {
+                    CloseAll(own);
+                }
+            }
+        }
+
+        SendBigSftp(ctx, big, server, settings, ct);
+    }
+
+    /// <summary>Сколько байт в одном куске крупного файла: целое число мегабайт — dd отсчитывает место ими.</summary>
+    private const long PieceBytes = 32L * 1024 * 1024;
+
+    private const long Mebibyte = 1024L * 1024;
+
+    /// <summary>Сколько пачек мелочи едут одновременно, каждая по своему подключению.</summary>
+    private const int TarConnections = 3;
+
+    /// <summary>Крупный файл, который едет кусками: сколько кусков ещё не дошло и куда они пишутся.</summary>
+    private sealed class PiecedFile(SendJob job, string temp, SftpFileAttributes? previous, SftpFileAttributes? parent, int pieces)
+    {
+        public SendJob Job { get; } = job;
+
+        public string Temp { get; } = temp;
+
+        public SftpFileAttributes? Previous { get; } = previous;
+
+        public SftpFileAttributes? Parent { get; } = parent;
+
+        public int Pieces { get; } = pieces;
+
+        public int Left = pieces;
+
+        public bool Done;
+    }
+
+    /// <summary>
+    /// Куски всех крупных файлов — одной очередью на все подключения. Каждый кусок пишет на
+    /// своё место во временный файл dd на сервере; последний дошедший ставит права, владельца
+    /// и подменяет прежний файл — так же, как SFTP, целиком или никак.
+    /// </summary>
+    private static void SendPieces(UploadContext ctx, List<SendJob> big, List<SshClient> own, CancellationToken ct)
+    {
+        ctx.Report($"крупные файлы кусками, в {own.Count} подключения сразу: {big.Count}, {TransferItem.Format(big.Sum(s => s.Info.Length))}");
+
+        var files = new List<PiecedFile>();
+
+        foreach (var s in big.OrderByDescending(s => s.Info.Length))
+        {
+            var parentDir = ParentRemote(s.Job.RemotePath);
+            ctx.EnsureDir(parentDir);
+
+            // образец прав и владельца — как у SFTP: прежний файл, а для нового — папка
+            var previous = s.Remote is null ? null : s.Remote.Attributes ?? TryGetAttributes(ctx.Sftp, s.Job.RemotePath);
+            var parent = s.Remote is null ? ctx.DirAttributes(parentDir) : null;
+            var pieces = (int)Math.Max(1, (s.Info.Length + PieceBytes - 1) / PieceBytes);
+
+            files.Add(new PiecedFile(s, TempName(s.Job.RemotePath), previous, parent, pieces));
+        }
+
+        var parts = files.SelectMany(f => Enumerable.Range(0, f.Pieces).Select(i => (File: f, Index: i))).ToList();
+        var pool = new ConcurrentBag<SshClient>(own);
+
+        try
+        {
+            RunParallel(
+                parts,
+                ct,
+                p =>
+                {
+                    if (!pool.TryTake(out var client))
+                    {
+                        client = own[0];
+                    }
+
+                    try
+                    {
+                        var offset = p.Index * PieceBytes;
+                        var count = Math.Min(PieceBytes, p.File.Job.Info.Length - offset);
+                        WritePiece(client, ctx.Meter, p.File.Job.Job.LocalPath, p.File.Temp, offset, count, ct);
+                    }
+                    finally
+                    {
+                        pool.Add(client);
+                    }
+
+                    if (Interlocked.Decrement(ref p.File.Left) == 0)
+                    {
+                        var f = p.File;
+                        ApplyAttributes(ctx.Sftp, f.Temp, f.Job.Info, f.Previous, f.Parent, ctx.Options, ctx.Report);
+                        Replace(ctx.Sftp, f.Temp, f.Job.Job.RemotePath);
+                        f.Done = true;
+                        Delivered(ctx, f.Job);
+                    }
+                },
+                own.Count);
+        }
+        catch
+        {
+            foreach (var f in files.Where(f => !f.Done))
+            {
+                TryDeleteRemote(ctx.Sftp, f.Temp);
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>Кусок файла — в его место во временном файле на сервере, через dd по каналу команды.</summary>
+    private static void WritePiece(SshClient ssh, TransferMeter meter, string localPath, string temp, long offset, long count, CancellationToken ct)
+    {
+        using var cmd = ssh.CreateCommand(
+            "dd of=" + ShellQuote(temp) + " bs=1048576 seek=" + (offset / Mebibyte).ToString(CultureInfo.InvariantCulture) + " conv=notrunc");
+        var run = cmd.ExecuteAsync(ct);
+
+        using (var channel = new BufferedStream(cmd.CreateInputStream(), 256 * 1024))
+        using (var file = File.OpenRead(localPath))
+        {
+            file.Seek(offset, SeekOrigin.Begin);
+            var buffer = new byte[256 * 1024];
+
+            while (count > 0)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var read = file.Read(buffer, 0, (int)Math.Min(buffer.Length, count));
+
+                if (read == 0)
+                {
+                    throw new IOException("файл стал короче, пока отправлялся");
+                }
+
+                channel.Write(buffer, 0, read);
+                meter.Add(read);
+                count -= read;
+            }
+        }
+
+        run.GetAwaiter().GetResult();
+
+        if (cmd.ExitStatus is not 0)
+        {
+            throw new InvalidOperationException("кусок файла не записался: " + (FirstLine(cmd.Error) ?? "dd на сервере не сработал"));
+        }
+    }
+
+    /// <summary>
+    /// Крупные файлы по SFTP, каждый на своём подключении — где оболочки на сервере нет
+    /// или лишних подключений он не пустил.
+    /// </summary>
+    private static void SendBigSftp(UploadContext ctx, List<SendJob> big, ServerEntry server, AppSettings settings, CancellationToken ct)
+    {
         ctx.Report($"крупные файлы по SFTP: {big.Count}, {TransferItem.Format(big.Sum(s => s.Info.Length))}");
 
         var pool = new ConcurrentBag<SftpClient> { ctx.Sftp };
@@ -1320,10 +1926,12 @@ public static class SshService
 
         Parallel.For(0, Math.Min(BigFileConnections, big.Count) - 1, _ =>
         {
-            var client = NewSftp(server, settings);
+            SftpClient? client = null;
 
             try
             {
+                // через промежуточный сервер ошибка бывает уже здесь — не повод валить всё копирование
+                client = NewSftp(server, settings);
                 client.Connect();
                 own.Add(client);
                 pool.Add(client);
@@ -1331,7 +1939,7 @@ public static class SshService
             catch (Exception)
             {
                 // не пустил ещё одно подключение — обойдёмся теми, что есть
-                client.Dispose();
+                client?.Dispose();
             }
         });
 
@@ -1398,7 +2006,7 @@ public static class SshService
 
         try
         {
-            using (var stream = File.OpenRead(s.Job.LocalPath))
+            using (var stream = ctx.Meter.Wrap(File.OpenRead(s.Job.LocalPath)))
             {
                 sftp.UploadFile(stream, temp, canOverride: true);
             }
@@ -1449,7 +2057,8 @@ public static class SshService
         string root,
         List<SendJob> batch,
         ConcurrentBag<SendJob> fallback,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<string> label)
     {
         ct.ThrowIfCancellationRequested();
 
@@ -1486,6 +2095,7 @@ public static class SshService
                 entries,
                 compress,
                 ctx.Options.PreserveTimestamps,
+                ctx.Meter,
                 ct);
         }
         catch (OperationCanceledException)
@@ -1575,7 +2185,7 @@ public static class SshService
 
         if (placed.Count > 0)
         {
-            ctx.Report($"одним потоком{(compress ? ", со сжатием" : string.Empty)}: {placed.Count} файл(ов), "
+            ctx.Report($"{label()} дошла{(compress ? " со сжатием" : string.Empty)}: {placed.Count} файл(ов), "
                 + TransferItem.Format(placed.Sum(e => e.Job.Info.Length)));
         }
 
@@ -1615,6 +2225,7 @@ public static class SshService
         IReadOnlyList<(SendJob Job, string Rel, TarOwner Owner)> entries,
         bool compress,
         bool preserveTimestamps,
+        TransferMeter meter,
         CancellationToken ct)
     {
         using var cmd = ssh.CreateCommand(command);
@@ -1631,7 +2242,7 @@ public static class SshService
             {
                 ct.ThrowIfCancellationRequested();
 
-                using var data = File.OpenRead(e.Job.Job.LocalPath);
+                using var data = meter.Wrap(File.OpenRead(e.Job.Job.LocalPath));
 
                 writer.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, e.Rel)
                 {
@@ -1761,7 +2372,7 @@ public static class SshService
     /// Служебный скрипт через stdin обычного sh: длина не ограничена, кавычки не мешают.
     /// Вернёт вывод и вывод ошибок.
     /// </summary>
-    private static (string Output, string Error) RunInput(SshClient ssh, string script, CancellationToken ct)
+    internal static (string Output, string Error) RunInput(SshClient ssh, string script, CancellationToken ct)
     {
         using var cmd = ssh.CreateCommand("sh -s");
         var run = cmd.ExecuteAsync(ct);
@@ -1996,7 +2607,7 @@ public static class SshService
     /// SHA-256 файлов на сервере одной командой: пути уходят на вход списком, а sha256sum
     /// работает сразу на всех ядрах сервера. Где xargs без -0/-P — пачками по сто, как раньше.
     /// </summary>
-    private static Dictionary<string, string> RemoteSums(
+    internal static Dictionary<string, string> RemoteSums(
         SshClient ssh,
         IReadOnlyList<string> paths,
         CancellationToken ct,
@@ -2171,7 +2782,7 @@ public static class SshService
         }
     }
 
-    private static string ComputeLocalSha256(string path)
+    internal static string ComputeLocalSha256(string path)
     {
         using var stream = File.OpenRead(path);
         using var sha = SHA256.Create();
@@ -2322,6 +2933,125 @@ public static class SshService
         }
     }
 
+    /// <summary>
+    /// Новые папки — одной командой на все: запросами SFTP на каждую, с переносом прав
+    /// и владельца, тысячи папок создавались часами. Права и владелец — как у ближайшей
+    /// папки выше, которая была до нас, так же как по одной. Что не вышло, досоздаст
+    /// EnsureDir по одной — там же скажется и причина.
+    /// </summary>
+    private static void MakeDirs(SshClient ssh, UploadContext ctx, IReadOnlyList<DirJob> dirs, Action<string> report, CancellationToken ct)
+    {
+        if (ctx.Inventory is not { } inventory)
+        {
+            return;
+        }
+
+        var missing = dirs
+            .Select(d => NormalizeRemote(d.RemotePath))
+            .Where(p => !inventory.IsBlind(p) && ctx.Known(p) is not { IsDirectory: true })
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        if (missing.Count == 0)
+        {
+            return;
+        }
+
+        var pending = missing.ToHashSet(StringComparer.Ordinal);
+
+        var chunks = missing
+            .GroupBy(p => DirSample(ctx, pending, p))
+            .SelectMany(g => g.Chunk(200).Select(paths => (Sample: g.Key, Paths: paths)))
+            .ToList();
+
+        // mkdir -p досоздаёт родителей сам, так что порядок пачек не важен:
+        // права и владельца каждой папке всё равно проставит её собственная пачка
+        var script = new StringBuilder();
+
+        for (var i = 0; i < chunks.Count; i++)
+        {
+            var (sample, paths) = chunks[i];
+            var list = string.Join(" ", paths.Select(ShellQuote));
+
+            script.Append("mkdir -p -- ").Append(list).Append(" 2>/dev/null || echo '").Append(FailMarker).Append(i).Append("'\n");
+
+            if (sample.Mode >= 0)
+            {
+                script.Append("chmod ").Append(Convert.ToString(sample.Mode, 8)).Append(" -- ").Append(list)
+                    .Append(" 2>/dev/null || echo '").Append(FailMarker).Append("-1'\n");
+            }
+
+            if (sample.Uid >= 0 && sample.Gid >= 0 && (sample.Uid != inventory.Uid || sample.Gid != inventory.Gid))
+            {
+                script.Append("chown ").Append(sample.Uid).Append(':').Append(sample.Gid).Append(" -- ").Append(list)
+                    .Append(" 2>/dev/null || echo '").Append(FailMarker).Append("-1'\n");
+            }
+        }
+
+        HashSet<int> failed;
+
+        try
+        {
+            failed = FailedLines(RunInput(ssh, script.ToString(), ct).Output);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return;
+        }
+
+        var created = 0;
+
+        for (var i = 0; i < chunks.Count; i++)
+        {
+            if (failed.Contains(i))
+            {
+                continue;
+            }
+
+            foreach (var path in chunks[i].Paths)
+            {
+                ctx.MarkCreated(path);
+                created++;
+            }
+        }
+
+        ctx.Stats.Dirs += created;
+
+        lock (ctx.Stats.CreatedDirs)
+        {
+            ctx.Stats.CreatedDirs.AddRange(chunks.Where((_, i) => !failed.Contains(i)).SelectMany(c => c.Paths));
+        }
+
+        report($"создано папок: {created} — одной командой");
+
+        if (failed.Contains(-1))
+        {
+            report("права или владелец перенесены не на все новые папки (владельца может сменить только root)");
+        }
+    }
+
+    /// <summary>Права и владелец ближайшей папки выше, которая была на сервере до нас; -1 — неизвестно.</summary>
+    private static (int Mode, int Uid, int Gid) DirSample(UploadContext ctx, HashSet<string> pending, string path)
+    {
+        var parent = ParentRemote(path);
+
+        while (pending.Contains(parent))
+        {
+            parent = ParentRemote(parent);
+        }
+
+        if (ctx.Known(parent) is { IsDirectory: true, Mode: >= 0, Uid: >= 0, Gid: >= 0 } known)
+        {
+            return (known.Mode, known.Uid, known.Gid);
+        }
+
+        return ctx.DirAttributes(parent) is { } a ? (ModeOf(a), a.UserId, a.GroupId) : (-1, -1, -1);
+    }
+
     private static void EnsureDirectory(SftpClient sftp, string remoteDir, Counters stats, Action<string> report)
     {
         var path = NormalizeRemote(remoteDir);
@@ -2348,6 +3078,12 @@ public static class SshService
 
             sftp.CreateDirectory(current);
             stats.Dirs++;
+
+            lock (stats.CreatedDirs)
+            {
+                stats.CreatedDirs.Add(current);
+            }
+
             report($"создана папка: {current}");
 
             // иначе папка достаётся тому, под кем мы зашли, с правами по умолчанию —
@@ -2483,6 +3219,9 @@ public static class SshService
 
         public IReadOnlyDictionary<string, string>? RemoteHashes { get; set; }
 
+        /// <summary>Счётчик отправленного — для полосы под выводом.</summary>
+        public TransferMeter Meter { get; init; } = new(null);
+
         /// <summary>Опись сервера; null — её снять не удалось, и всё едет по SFTP.</summary>
         public Inventory? Inventory => inventory;
 
@@ -2563,6 +3302,23 @@ public static class SshService
             }
         }
 
+        /// <summary>Папку создали одной командой со всеми: запомнить её и сбитое время у неё и у всех выше.</summary>
+        public void MarkCreated(string path)
+        {
+            path = NormalizeRemote(path);
+            _knownDirs[path] = 0;
+
+            for (var p = path; ; p = ParentRemote(p))
+            {
+                _touched[p] = 0;
+
+                if (p == "/")
+                {
+                    break;
+                }
+            }
+        }
+
         /// <summary>В папку что-то записали — её время сбито и его надо вернуть.</summary>
         public void Touch(string dir) => _touched[NormalizeRemote(dir)] = 0;
 
@@ -2582,6 +3338,9 @@ public static class SshService
         public int Dirs;
         public long Bytes;
         public readonly List<UploadedFile> Uploaded = [];
+
+        /// <summary>Созданные папки — списком в конце вывода, как и отправленные файлы.</summary>
+        public readonly List<string> CreatedDirs = [];
     }
 }
 

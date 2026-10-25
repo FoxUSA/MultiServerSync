@@ -39,8 +39,8 @@ public sealed class Workspace : ObservableObject
     private string _excludeMasks = string.Empty;
     private bool _matchByDate;
     private bool _matchByHash;
-    private string _commandText = string.Empty;
-    private bool _useSudo;
+    /// <summary>Идёт восстановление из файла: правки окон не должны сохранять недочитанное.</summary>
+    private bool _restoring;
 
     private string _statusBadge = string.Empty;
     private string _statusCaption = string.Empty;
@@ -61,6 +61,11 @@ public sealed class Workspace : ObservableObject
         _title = title;
 
         Items.CollectionChanged += OnItemsChanged;
+
+        Steps.CollectionChanged += OnStepsChanged;
+        Steps.Add(new CommandStep());
+
+        Downloads.CollectionChanged += OnDownloadsChanged;
     }
 
     public string Id { get; }
@@ -77,6 +82,12 @@ public sealed class Workspace : ObservableObject
         {
             if (Set(ref _title, string.IsNullOrWhiteSpace(value) ? "Вкладка" : value.Trim()))
             {
+                // личная вкладка называется как её вкладка копирования — переименовывается вместе с ней
+                if (Personal is { } personal)
+                {
+                    personal.FollowTitle(_title);
+                }
+
                 Save();
             }
         }
@@ -167,7 +178,11 @@ public sealed class Workspace : ObservableObject
 
             if (!_scopes.TryGetValue(key, out var scope))
             {
-                scope = new PaneScopeState { Key = key, SingleSelect = AppState.Current.CommandTabs.Contains(this) };
+                scope = new PaneScopeState
+                {
+                    Key = key,
+                    SingleSelect = AppState.Current.CommandTabs.Contains(this) || AppState.Current.ExplorerTabs.Contains(this),
+                };
                 _scopes[key] = scope;
             }
 
@@ -468,16 +483,524 @@ public sealed class Workspace : ObservableObject
         nameof(SendByDate),
         nameof(SendByHash));
 
+    // ── окна команды (многозадачность) ─────────────────────────────────────────
+
+    /// <summary>
+    /// Окна команды по порядку — минимум одно. Цепочкой: следующее окно начинается на сервере
+    /// только после успешного предыдущего на этом же сервере.
+    /// </summary>
+    public ObservableCollection<CommandStep> Steps { get; } = new();
+
+    /// <summary>
+    /// Личная командная вкладка вкладки копирования: id родителя. Пусто — обычная вкладка.
+    /// Личная выполняется после удачного копирования родителя и в «Выполнить везде» не идёт.
+    /// </summary>
+    public string OwnerCopyTabId { get; set; } = string.Empty;
+
+    public bool IsPersonal => OwnerCopyTabId.Length > 0;
+
+    /// <summary>Вкладка копирования, чья это личная вкладка.</summary>
+    public Workspace? Owner => IsPersonal
+        ? AppState.Current.Workspaces.FirstOrDefault(w => w.Id == OwnerCopyTabId)
+        : null;
+
+    /// <summary>Название личной вкладки — всегда как у родителя, руками не меняется.</summary>
+    public void FollowTitle(string title)
+    {
+        if (Set(ref _title, title, nameof(Title)))
+        {
+            Save();
+        }
+    }
+
+    // ── скачивание ─────────────────────────────────────────────────────────────
+
+    private string _localFolder = string.Empty;
+
+    /// <summary>
+    /// Что скачивать: файлы и папки, каждая строка со своего сервера — их выбирают обзором сервера.
+    /// Качаются строки с галочкой; отметки серверов слева здесь не нужны.
+    /// </summary>
+    public ObservableCollection<DownloadItem> Downloads { get; } = new();
+
+    private IEnumerable<DownloadItem> PickedDownloads => Downloads.Where(d => d.IsSelected);
+
+    private void OnDownloadsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        foreach (var item in e.OldItems?.OfType<DownloadItem>() ?? [])
+        {
+            item.PropertyChanged -= OnDownloadPicked;
+        }
+
+        foreach (var item in e.NewItems?.OfType<DownloadItem>() ?? [])
+        {
+            item.PropertyChanged += OnDownloadPicked;
+        }
+
+        RaiseDownloadInfo();
+    }
+
+    private void OnDownloadPicked(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(DownloadItem.IsSelected))
+        {
+            RaiseDownloadInfo();
+        }
+    }
+
+    private void RaiseDownloadInfo()
+    {
+        RaiseMany(nameof(DownloadInfo), nameof(AllDownloadsSelected), nameof(TabCounts), nameof(TabTooltip));
+
+        if (!_restoring)
+        {
+            Save();
+        }
+    }
+
+    /// <summary>Галочка в шапке таблицы скачивания: все / ничего / частично.</summary>
+    public bool? AllDownloadsSelected => TriState(Downloads.Count, Downloads.Count(d => d.IsSelected));
+
+    public void SelectAllDownloads(bool selectAll)
+    {
+        foreach (var item in Downloads)
+        {
+            item.IsSelected = selectAll;
+        }
+    }
+
+    /// <summary>Куда скачивать. С нескольких серверов — каждый в свою подпапку по имени сервера.</summary>
+    public string LocalFolder
+    {
+        get => _localFolder;
+        set
+        {
+            if (Set(ref _localFolder, value ?? string.Empty))
+            {
+                Raise(nameof(DownloadInfo));
+                Save();
+            }
+        }
+    }
+
+    public string DownloadInfo
+    {
+        get
+        {
+            var picked = PickedDownloads.ToList();
+            var servers = picked.Select(d => d.ServerId).Distinct().Count();
+            var where = servers > 1 ? " · каждый сервер — в свою папку" : string.Empty;
+
+            return $"Будет скачано отмеченных объектов: {picked.Count} из {Downloads.Count} · с серверов: {servers}{where}.";
+        }
+    }
+
+    /// <summary>Добавить выбранное в обзоре сервера, без повторов. Вернёт, сколько добавилось.</summary>
+    public int AddDownloads(ServerEntry server, IEnumerable<(string Path, bool IsDirectory, long Size, DateTime Modified)> picked)
+    {
+        var added = 0;
+
+        foreach (var (raw, isDirectory, size, modified) in picked)
+        {
+            var path = SshService.NormalizeRemote(raw);
+
+            if (path.Length <= 1 || Downloads.Any(d => d.ServerId == server.Id && d.Path == path))
+            {
+                continue;
+            }
+
+            Downloads.Add(new DownloadItem(server.Id, path, isDirectory, size, modified));
+            added++;
+        }
+
+        return added;
+    }
+
+    /// <summary>Имя подпапки сервера: его имя в списке, без знаков, которых не любит Windows.</summary>
+    private static string FolderName(ServerEntry server)
+    {
+        var name = string.IsNullOrWhiteSpace(server.PaneLabel) ? server.Host : server.PaneLabel;
+        var bad = Path.GetInvalidFileNameChars();
+        var clean = new string(name.Select(c => bad.Contains(c) ? '_' : c).ToArray()).Trim().TrimEnd('.');
+        return clean.Length == 0 ? server.Id : clean;
+    }
+
+    /// <summary>
+    /// Скачивание отмеченных строк, каждой со своего сервера. С одного сервера — прямо в папку,
+    /// с нескольких — каждый в свою подпапку, иначе одинаковые файлы затёрли бы друг друга.
+    /// Умный режим не спрашивает: на сервере ничего не меняется.
+    /// </summary>
+    public async Task<bool> RunDownloadAsync(bool notify = true)
+    {
+        if (CopyBatch.IsRunning)
+        {
+            AppLog.Warn("Скачивание уже идёт.", Title);
+            AppState.Current.RequestLog();
+            return false;
+        }
+
+        var picked = PickedDownloads.ToList();
+
+        if (picked.Count == 0)
+        {
+            return Refuse("скачивание", Downloads.Count == 0
+                ? "Список пуст — выберите файлы и папки кнопкой «Выбрать на сервере»."
+                : "Ни одна строка не отмечена — скачивать нечего.");
+        }
+
+        var gone = picked.Where(d => d.Server is null).ToList();
+
+        if (gone.Count > 0)
+        {
+            AppLog.Warn($"Строк, чей сервер удалён из списка, — {gone.Count}: они пропущены.", Title);
+        }
+
+        // по серверам; путь внутри другого из списка того же сервера скачался бы дважды
+        var plan = picked
+            .Where(d => d.Server is not null)
+            .GroupBy(d => d.Server!)
+            .ToDictionary(
+                g => g.Key,
+                g =>
+                {
+                    var paths = g.Select(d => d.Path.TrimEnd('/')).Where(p => p.Length > 0).Distinct().ToList();
+                    return paths.Where(p => !paths.Any(q => q != p && p.StartsWith(q + "/", StringComparison.Ordinal))).ToList();
+                });
+
+        if (plan.Count == 0)
+        {
+            return Refuse("скачивание", "Серверы отмеченных строк удалены из списка — скачивать не с чего.");
+        }
+
+        var folder = LocalFolder.Trim();
+
+        if (folder.Length == 0)
+        {
+            return Refuse("скачивание", "Не указана папка, куда скачивать.");
+        }
+
+        try
+        {
+            Directory.CreateDirectory(folder);
+        }
+        catch (Exception ex)
+        {
+            return Refuse("скачивание", $"Папку «{folder}» не создать: {ex.Message}");
+        }
+
+        await DownloadCoreAsync(plan, folder, CurrentOptions, VerifyChecksums);
+
+        if (notify)
+        {
+            AppState.Current.NotifyFinished(CopyBatch);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Скачивание — одно на всю программу: его зовут и «Скачивание», и «Проводник». С одного
+    /// сервера — прямо в папку, с нескольких — каждый в свою подпапку.
+    /// </summary>
+    public async Task DownloadCoreAsync(
+        IReadOnlyDictionary<ServerEntry, List<string>> plan,
+        string folder,
+        UploadOptions options,
+        bool verify)
+    {
+        var targets = plan.Keys.ToList();
+        var settings = AppState.Current.Settings;
+        var perServer = targets.Count > 1;
+        var gate = new Lock();
+        var receivedMax = 0;
+        var consideredMax = 0;
+
+        AppLog.Info($"Скачивание: путей {plan.Values.Sum(p => p.Count)} с {targets.Count} сервер(ов) в {folder}.", Title);
+
+        SetScope();
+        ShowStatus("выполняется", string.Empty, WorkspaceStatus.Running);
+        AppState.Current.RequestTerminal();
+        ShowResults(CopyBatch);
+
+        await CopyBatch.RunAsync(
+            Operation("Скачивание"),
+            targets,
+            async (server, result, ct) =>
+            {
+                result.Message = "скачивание…";
+
+                var root = perServer ? Path.Combine(folder, FolderName(server)) : folder;
+                result.Append("куда: " + root);
+
+                var stats = await DownloadService.DownloadAsync(
+                    server, settings, plan[server], root, options, verify, line => result.Append(line), ct, result.SetTransfer);
+
+                result.Append(
+                    $"итог: получено {stats.Received} ({TransferItem.Format(stats.Bytes)}) · такие же {stats.UpToDate}"
+                    + (stats.Skipped > 0 ? $" · уже были, не тронуты {stats.Skipped}" : string.Empty)
+                    + (stats.Dirs > 0 ? $" · папок создано {stats.Dirs}" : string.Empty));
+
+                lock (gate)
+                {
+                    receivedMax = Math.Max(receivedMax, stats.Received);
+                    consideredMax = Math.Max(consideredMax, stats.Received + stats.UpToDate + stats.Skipped);
+                }
+
+                if (stats.Mismatches > 0)
+                {
+                    result.Message = $"расхождений сумм: {stats.Mismatches}";
+                    result.Status = OperationStatus.Failed;
+                    return;
+                }
+
+                if (stats.Failed > 0)
+                {
+                    result.Message = $"не скачано {stats.Failed}, получено {stats.Received}";
+                    result.Status = OperationStatus.Failed;
+                    return;
+                }
+
+                result.Message = $"получено {stats.Received}, {TransferItem.Format(stats.Bytes)}"
+                    + (stats.UpToDate > 0 ? $" · такие же {stats.UpToDate}" : string.Empty);
+                result.Status = OperationStatus.Success;
+            },
+            settings.MaxParallel);
+
+        FinishStatus(
+            CopyBatch,
+            "скачано",
+            $"{receivedMax} из {consideredMax}",
+            receivedMax == 0 && CopyBatch.FailedCount == 0
+                ? "скачивать было нечего: здесь файлы такие же"
+                : null);
+    }
+
+    // ── связка «копирование → личные команды» ──────────────────────────────────
+
+    private string _afterCopyTabId = string.Empty;
+    private bool _afterCopyEnabled;
+
+    /// <summary>Личная командная вкладка этой вкладки копирования; пусто — её нет.</summary>
+    public string AfterCopyTabId => _afterCopyTabId;
+
+    public Workspace? Personal => _afterCopyTabId.Length == 0
+        ? null
+        : AppState.Current.CommandTabs.FirstOrDefault(t => t.Id == _afterCopyTabId);
+
+    public bool HasPersonal => Personal is not null;
+
+    /// <summary>Свитч на ярлыке: после удачного копирования выполнить личные команды.</summary>
+    public bool AfterCopyEnabled
+    {
+        get => _afterCopyEnabled;
+        set
+        {
+            if (Set(ref _afterCopyEnabled, value))
+            {
+                RaiseChain();
+                Save();
+            }
+        }
+    }
+
+    /// <summary>Окна личной вкладки — отрезки полоски на ярлыке копирования, пока свитч включён.</summary>
+    public ObservableCollection<CommandStep>? ChainSteps => _afterCopyEnabled ? Personal?.Steps : null;
+
+    /// <summary>Это вкладка раздела «Копирование» — у неё на ярлыке свитч личных команд.</summary>
+    public bool IsCopyTab => AppState.Current.Workspaces.Contains(this);
+
+    /// <summary>Память вкладки проводника: папки обеих панелей, курсор, сортировка. Правит её страница проводника.</summary>
+    public ExplorerTabState Explorer { get; set; } = new();
+
+    /// <summary>Сервер вкладки проводника — отмеченный в панели слева (в проводнике там всегда один).</summary>
+    public ServerEntry? ExplorerServer => CopyTargets.FirstOrDefault();
+
+    /// <summary>Открытая папка сервера сменилась — ярлык показывает её.</summary>
+    public void RaiseExplorerPath() => RaiseTabCounts();
+
+    public void LinkPersonal(Workspace personal)
+    {
+        _afterCopyTabId = personal.Id;
+        RaiseChain();
+        Save();
+    }
+
+    /// <summary>Личную вкладку закрыли: свитч гаснет, следующее включение создаст новую.</summary>
+    public void UnlinkPersonal()
+    {
+        _afterCopyTabId = string.Empty;
+        _afterCopyEnabled = false;
+        RaiseChain();
+        Save();
+    }
+
+    public void RaiseChain() => RaiseMany(
+        nameof(AfterCopyEnabled), nameof(Personal), nameof(HasPersonal), nameof(ChainSteps), nameof(IsCopyTab),
+        nameof(Notices), nameof(HasNotices));
+
+    /// <summary>
+    /// Плашка у пути на сервере: что мешает сделать то, о чём попросили, и требует внимания,
+    /// пока не устранено. Не всплывающие подсказки — висит, пока причина есть.
+    /// Сейчас — про личные команды после копирования, если их свитч включён.
+    /// </summary>
+    public IReadOnlyList<string> Notices
+    {
+        get
+        {
+            if (!_afterCopyEnabled || Personal is not { } personal)
+            {
+                return [];
+            }
+
+            if (personal.RunnableSteps(null, onlyThis: false).Count == 0)
+            {
+                return ["Вкладка команд пустая — после копирования выполнять нечего."];
+            }
+
+            var theirs = personal.CommandTargets;
+
+            if (theirs.Count == 0)
+            {
+                return ["На вкладке команд не выбран сервер — команды после копирования не выполнятся."];
+            }
+
+            var mine = CopyTargets;
+
+            if (!theirs.ToHashSet().SetEquals(mine))
+            {
+                return [$"Отличается выбор серверов у вкладки команд: там {string.Join(", ", theirs.Select(s => s.PaneLabel))}."];
+            }
+
+            return [];
+        }
+    }
+
+    public bool HasNotices => Notices.Count > 0;
+
+    /// <summary>Плашку пересчитать: у вкладки копирования — свою, у личной — её владельца.</summary>
+    private void RaiseNotices()
+    {
+        RaiseMany(nameof(Notices), nameof(HasNotices));
+
+        if (IsPersonal)
+        {
+            Owner?.RaiseNotices();
+        }
+    }
+
+    /// <summary>Текст первого окна — для всего, что знает только про одну команду.</summary>
     public string CommandText
     {
-        get => _commandText;
-        set { if (Set(ref _commandText, value)) { RaiseMany(nameof(CommandSizeInfo), nameof(TabCounts), nameof(TabTooltip)); Save(); } }
+        get => Steps[0].Text;
+        set => Steps[0].Text = value;
     }
 
     public bool UseSudo
     {
-        get => _useSudo;
-        set { if (Set(ref _useSudo, value)) { Save(); } }
+        get => Steps[0].UseSudo;
+        set => Steps[0].UseSudo = value;
+    }
+
+    /// <summary>Новое пустое окно сразу под <paramref name="after"/> (или в конце).</summary>
+    public CommandStep AddStep(CommandStep? after)
+    {
+        var step = new CommandStep();
+        var index = after is null ? Steps.Count : Steps.IndexOf(after) + 1;
+        Steps.Insert(Math.Clamp(index, 0, Steps.Count), step);
+        return step;
+    }
+
+    /// <summary>Убрать окно. Последнее оставшееся не убирается.</summary>
+    public bool RemoveStep(CommandStep step) => Steps.Count > 1 && Steps.Remove(step);
+
+    /// <summary>Заменить все окна набором — из избранного или из файла.</summary>
+    public void SetSteps(IEnumerable<SavedCommandStep> saved)
+    {
+        Steps.Clear();
+
+        foreach (var s in saved)
+        {
+            Steps.Add(CommandStep.From(s));
+        }
+
+        if (Steps.Count == 0)
+        {
+            Steps.Add(new CommandStep());
+        }
+    }
+
+    public List<SavedCommandStep> SaveSteps() => Steps.Select(s => s.ToSaved()).ToList();
+
+    /// <summary>
+    /// Рабочие окна вкладки, пока в её окнах правят запись избранного: на диск идут они,
+    /// а не правка, и вкладка ничего не выполняет.
+    /// </summary>
+    public List<SavedCommandStep>? HeldSteps { get; private set; }
+
+    /// <summary>Показать в окнах чужие команды (запись избранного), отложив свои.</summary>
+    public void HoldSteps(IEnumerable<SavedCommandStep> shown)
+    {
+        HeldSteps ??= SaveSteps();
+        SetSteps(shown);
+    }
+
+    /// <summary>Вернуть свои окна.</summary>
+    public void ReleaseSteps()
+    {
+        if (HeldSteps is not { } held)
+        {
+            return;
+        }
+
+        HeldSteps = null;
+        SetSteps(held);
+    }
+
+    /// <summary>Все окна одним текстом — чтобы узнать «ту же команду ещё раз».</summary>
+    public string StepsSignature => string.Join("\n\u241E\n", Steps.Select(s => s.Text.Trim()));
+
+    private void OnStepsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        foreach (var step in e.OldItems?.OfType<CommandStep>() ?? [])
+        {
+            step.Changed -= OnStepChanged;
+        }
+
+        foreach (var step in e.NewItems?.OfType<CommandStep>() ?? [])
+        {
+            step.Changed += OnStepChanged;
+        }
+
+        // Clear не присылает старые элементы — снимаем подписку со всех и вешаем заново
+        if (e.Action == NotifyCollectionChangedAction.Reset)
+        {
+            foreach (var step in Steps)
+            {
+                step.Changed -= OnStepChanged;
+                step.Changed += OnStepChanged;
+            }
+        }
+
+        for (var i = 0; i < Steps.Count; i++)
+        {
+            Steps[i].Place(i + 1, Steps.Count);
+        }
+
+        if (Steps.Count > 0)
+        {
+            OnStepChanged();
+        }
+    }
+
+    private void OnStepChanged()
+    {
+        RaiseMany(nameof(CommandText), nameof(UseSudo), nameof(CommandSizeInfo), nameof(TabCounts), nameof(TabTooltip));
+        RaiseNotices();
+
+        if (!_restoring)
+        {
+            Save();
+        }
     }
 
     private static IReadOnlyList<ServerEntry> Picked(IEnumerable<ServerCheck> set) => set
@@ -505,7 +1028,13 @@ public sealed class Workspace : ObservableObject
     public string PaneTitle => "Целевые сервера";
 
     public string SelectionInfo =>
-        (CommandSet ? "для команды" : "для копирования")
+        AppState.Current.Section switch
+        {
+            AppSection.Command => "для команды",
+            AppSection.Download => "для скачивания",
+            AppSection.Explorer => "для проводника",
+            _ => "для копирования",
+        }
         + $" · всего: {Servers.Count} · отмечено: {SelectedServers.Count}";
 
     public Visibility PaneEmptyHintVisibility =>
@@ -545,15 +1074,17 @@ public sealed class Workspace : ObservableObject
     {
         get
         {
-            var text = CommandText ?? string.Empty;
+            var filled = Steps.Where(s => s.Text.Length > 0).ToList();
 
-            if (text.Length == 0)
+            if (filled.Count == 0)
             {
                 return string.Empty;
             }
 
-            var lines = text.Split('\n').Length;
-            return $"символов: {text.Length} · строк: {lines}";
+            var chars = filled.Sum(s => s.Text.Length);
+            var lines = filled.Sum(s => s.Text.Split('\n').Length);
+            var windows = Steps.Count > 1 ? $"окон: {Steps.Count} · " : string.Empty;
+            return $"{windows}символов: {chars} · строк: {lines}";
         }
     }
 
@@ -605,6 +1136,12 @@ public sealed class Workspace : ObservableObject
                 // а не по содержимому — поэтому нейтральное «отмечено»
                 AppSection.Files =>
                     $"Отмечено: {Items.Count(i => i.IsSelected)} · Серверов: {SelectedServers.Count}",
+                AppSection.Download =>
+                    $"Отмечено: {PickedDownloads.Count()} · Серверов: {PickedDownloads.Select(d => d.ServerId).Distinct().Count()}",
+                AppSection.Explorer => ExplorerServer is { } server
+                    ? $"{server.PaneLabel} · {(Explorer.Remote.Path.Length > 0 ? Explorer.Remote.Path : "~")}"
+                    : "сервер не выбран",
+                AppSection.Command when Steps.Count > 1 => $"{servers} · окон {Steps.Count}",
                 AppSection.Command => string.IsNullOrWhiteSpace(CommandText)
                     ? $"{servers} · нет команды"
                     : $"{servers} · {CommandText.Trim().Length} симв.",
@@ -629,6 +1166,8 @@ public sealed class Workspace : ObservableObject
     /// <summary>Подсказка на ярлыке: пока висит статус — он, в остальное время — что можно сделать.</summary>
     public string TabTooltip => HasStatus
         ? $"{Title} · {StatusTooltip}"
+        : IsPersonal
+            ? $"{Title} — команды после копирования этой вкладки. {TabCounts}"
         : IsMain
             ? $"{Title} — {TabCounts}. Первая вкладка: её нельзя закрыть и переставить"
             : $"{Title} — {TabCounts}. Перетащите мышью, чтобы поменять вкладки местами";
@@ -868,7 +1407,8 @@ public sealed class Workspace : ObservableObject
     /// <param name="notify">
     /// Сообщить об окончании (автокопия вывода). «Выполнить везде» сообщает само — один раз по сводке.
     /// </param>
-    public async Task<bool> RunCopyAsync(bool notify = true)
+    /// <param name="approved">Умный режим уже спросил («Выполнить везде» спрашивает за все вкладки разом).</param>
+    public async Task<bool> RunCopyAsync(bool notify = true, bool approved = false)
     {
         if (CopyBatch.IsRunning)
         {
@@ -903,9 +1443,17 @@ public sealed class Workspace : ObservableObject
         }
 
         // умный режим: сервер непривычный для этой вкладки — сначала спросить
-        if (!RunHistory.ApproveCopy(this, targets))
+        if (!approved)
         {
-            return false;
+            // связка — одним вопросом и до начала копирования: после заливки человек мог уже отойти
+            var check = RunHistory.CheckCopy(this, targets).With(ChainCheck(targets));
+
+            if (!RunHistory.Confirm(check))
+            {
+                return false;
+            }
+
+            RunHistory.Commit(check);
         }
 
         var settings = AppState.Current.Settings;
@@ -938,6 +1486,43 @@ public sealed class Workspace : ObservableObject
             + (options.MatchByHash ? ", только отличающиеся по контрольной сумме" : string.Empty)
             + (options.MatchByDate && !options.MatchByHash ? ", только отличающиеся по дате" : string.Empty)
             + (verify ? ", с проверкой копий" : string.Empty), Title);
+
+        await UploadCoreAsync(payload, remotePath, targets, options, verify);
+
+        // с галочкой «+ команды» автокопия ждёт личные команды: отчёт один, копирование и команды
+        var together = _afterCopyEnabled && Personal is not null && AppState.Current.Settings.CopyWithChain;
+
+        if (notify && !together)
+        {
+            AppState.Current.NotifyFinished(CopyBatch);
+        }
+
+        await RunChainAsync(notifyCommands: !together);
+
+        if (notify && together)
+        {
+            AppState.Current.NotifyFinished(CopyBatch);
+        }
+
+        return true;
+    }
+
+    /// <summary>Параметры переноса этой вкладки — те, что выставлены в блоке параметров.</summary>
+    public UploadOptions CurrentOptions => new(OverwriteFiles, PreserveTimestamps, MatchByDate, MatchByHash, ExcludeMasks);
+
+    /// <summary>
+    /// Заливка — одна на всю программу: её зовут и «Копирование», и «Проводник». Подключение
+    /// к каждому серверу, отправка, сверка, строка времени, полоса передачи, статус на ярлыке.
+    /// Всё, что улучшается в копировании, достаётся обоим разделам сразу.
+    /// </summary>
+    public async Task UploadCoreAsync(
+        IReadOnlyList<TransferItem> payload,
+        string remotePath,
+        IReadOnlyList<ServerEntry> targets,
+        UploadOptions options,
+        bool verify)
+    {
+        var settings = AppState.Current.Settings;
 
         SetScope();
         ShowStatus(StepConnecting, string.Empty, WorkspaceStatus.Running);
@@ -1000,7 +1585,8 @@ public sealed class Workspace : ObservableObject
 
                         result.Message = text + "…";
                         Step((int)step, text);
-                    });
+                    },
+                    result.SetTransfer);
 
                 var seen = stats.FilesSent + stats.FilesUpToDate + stats.FilesSkipped;
 
@@ -1033,19 +1619,33 @@ public sealed class Workspace : ObservableObject
                 result.Append($"всего рассмотрено файлов: {stats.FilesSent + stats.FilesUpToDate + stats.FilesSkipped}");
 
                 // отправленное — отдельным списком в самом низу: в ходе копирования эти строки
-                // теряются среди пропусков и замен
-                if (stats.Files.Count > 0)
+                // теряются среди пропусков и замен. Сверка и время — над ним, а не под
+                // тысячами строк, где их не найти
+                void AppendFiles()
                 {
-                    result.Append($"── скопированы файлы ({stats.Files.Count}) ──");
-
-                    foreach (var file in stats.Files)
+                    if (stats.CreatedDirs.Count > 0)
                     {
-                        result.Append($"→ {file.RemotePath}  ({TransferItem.Format(file.Size)})");
+                        result.Append($"── созданы папки ({stats.CreatedDirs.Count}) ──");
+
+                        foreach (var dir in stats.CreatedDirs)
+                        {
+                            result.Append($"→ {dir}/");
+                        }
                     }
-                }
-                else
-                {
-                    result.Append("── скопированных файлов нет ──");
+
+                    if (stats.Files.Count > 0)
+                    {
+                        result.Append($"── скопированы файлы ({stats.Files.Count}, {TransferItem.Format(stats.BytesSent)}) ──");
+
+                        foreach (var file in stats.Files)
+                        {
+                            result.Append($"→ {file.RemotePath}  ({TransferItem.Format(file.Size)})");
+                        }
+                    }
+                    else
+                    {
+                        result.Append("── скопированных файлов нет ──");
+                    }
                 }
 
                 var summary =
@@ -1058,11 +1658,19 @@ public sealed class Workspace : ObservableObject
                     result.Message = StepVerifying + "…";
                     Step(StepVerifyingOrder, StepVerifying);
 
+                    // передача кончилась — полоса ушла бы стоять на 100%, пока идёт сверка
+                    result.SetTransfer(0, 0);
+                    stats.Clock.Restart();
+
                     var mismatches = await SshService.VerifyChecksumsAsync(
                         server, settings, stats.Files, _localHashes, line => result.Append(line), ct);
 
+                    stats.Clock.Mark("сверка после");
+                    result.Append("время: " + stats.Clock);
+
                     if (mismatches > 0)
                     {
+                        AppendFiles();
                         result.Message = summary + $", РАСХОЖДЕНИЙ: {mismatches}";
                         result.Status = OperationStatus.Failed;
                         return;
@@ -1071,7 +1679,12 @@ public sealed class Workspace : ObservableObject
                     result.Append($"контрольные суммы совпали: {stats.Files.Count} файл(ов)");
                     summary += ", суммы сошлись";
                 }
+                else
+                {
+                    result.Append("время: " + stats.Clock);
+                }
 
+                AppendFiles();
                 result.Message = summary;
                 result.Status = OperationStatus.Success;
             },
@@ -1088,20 +1701,155 @@ public sealed class Workspace : ObservableObject
             sentMax == 0 && CopyBatch.FailedCount == 0
                 ? "отправлять было нечего: на серверах файлы такие же или свежее"
                 : null);
-
-        if (notify)
-        {
-            AppState.Current.NotifyFinished(CopyBatch);
-        }
-
-        return true;
     }
 
-    /// <summary>Выполнение команды этой вкладки на её отмеченных серверах.</summary>
+    /// <summary>Проверка умного режима для личных команд — если они выполнятся после копирования.</summary>
+    private RunHistory.SmartCheck? ChainCheck(IReadOnlyList<ServerEntry> targets)
+    {
+        if (!_afterCopyEnabled || Personal is not { } personal || personal.HeldSteps is not null)
+        {
+            return null;
+        }
+
+        var steps = personal.RunnableSteps(null, onlyThis: false);
+        var servers = personal.CommandTargets;
+        return steps.Count == 0 || servers.Count == 0 ? null : RunHistory.CheckCommands(personal, personal.Numbered(steps), servers);
+    }
+
+    /// <summary>
+    /// Личные команды после копирования — только на тех серверах, где копирование
+    /// (и сверка сумм, если она включена) прошло. Умный режим уже спросил до копирования.
+    /// </summary>
+    /// <param name="notifyCommands">Сообщить об окончании команд отдельно (иначе — вместе с копированием).</param>
+    private async Task RunChainAsync(bool notifyCommands)
+    {
+        if (!_afterCopyEnabled || Personal is not { } personal)
+        {
+            return;
+        }
+
+        if (personal.CommandBatch.IsRunning)
+        {
+            ChainSkipped("на личной вкладке команды ещё выполняются");
+            return;
+        }
+
+        // свитч включён не просто так: чего не хватает, говорим прямо там, где идёт вывод копирования
+        var missing = personal.RunnableSteps(null, onlyThis: false).Count == 0
+            ? "в личной вкладке команд нет ни одной команды — впишите её"
+            : personal.CommandTargets.Count == 0
+                ? "в личной вкладке команд не отмечен ни один сервер — отметьте его в панели «Целевые сервера»"
+                : null;
+
+        if (missing is not null)
+        {
+            ChainSkipped($"{missing} (или выключите свитч на ярлыке «{Title}»)");
+            return;
+        }
+
+        var failed = CopyBatch.Results
+            .Where(r => r.Status != OperationStatus.Success)
+            .Select(r => r.Server)
+            .ToHashSet();
+
+        // у личной вкладки свои отметки; сервер, где копирование не прошло, из них выпадает
+        var targets = personal.CommandTargets.Where(s => !failed.Contains(s)).ToList();
+
+        if (CopyBatch.SuccessCount == 0 || targets.Count == 0)
+        {
+            ChainSkipped(CopyBatch.SuccessCount == 0
+                ? "копирование не прошло ни на одном сервере"
+                : "на отмеченных серверах личной вкладки копирование не прошло");
+
+            foreach (var step in personal.Steps)
+            {
+                step.Clear();
+            }
+
+            return;
+        }
+
+        if (failed.Count > 0)
+        {
+            AppLog.Info($"Команды после копирования — на {targets.Count} сервере(ах); где копирование не прошло, пропущено.", Title);
+        }
+
+        await personal.RunCommandAsync(notify: notifyCommands, approved: true, servers: targets);
+    }
+
+    /// <summary>
+    /// Почему личные команды не пошли — в конец вывода копирования каждого сервера, там,
+    /// куда человек смотрит после копирования; в журнале — та же строка для истории.
+    /// </summary>
+    private void ChainSkipped(string reason)
+    {
+        var line = "Команды после копирования не запущены: " + reason + ".";
+
+        foreach (var result in CopyBatch.Results)
+        {
+            result.Append(Views.Controls.OutputColoring.WarningMark + line + " —");
+        }
+
+        AppLog.Warn(line, Title);
+    }
+
+    /// <summary>
+    /// Окна, которые пойдут в прогон: с <paramref name="from"/> (или с первого) и ниже,
+    /// либо одно это окно. Пустые окна пропускаются.
+    /// </summary>
+    private List<CommandStep> RunnableSteps(CommandStep? from, bool onlyThis)
+    {
+        var start = from is null ? 0 : Math.Max(0, Steps.IndexOf(from));
+        var chosen = onlyThis ? Steps.Skip(start).Take(1) : Steps.Skip(start);
+        return chosen.Where(s => !string.IsNullOrWhiteSpace(s.Text)).ToList();
+    }
+
+    /// <summary>Номера окон для умного режима и вывода: при одном окне номер не нужен.</summary>
+    private IEnumerable<(int Number, string Text)> Numbered(IEnumerable<CommandStep> steps) =>
+        steps.Select(s => (Steps.Count > 1 ? s.Number : 0, s.Text));
+
+    /// <summary>
+    /// Для «Выполнить везде»: проверка умного режима без вопроса. null — вкладка всё равно
+    /// не запустится (нет команды или серверов) и откажет сама, с причиной на ярлыке.
+    /// </summary>
+    public RunHistory.SmartCheck? PrecheckCommand()
+    {
+        var steps = RunnableSteps(null, onlyThis: false);
+        var targets = CommandTargets;
+
+        return steps.Count == 0 || targets.Count == 0 || CommandBatch.IsRunning || HeldSteps is not null
+            ? null
+            : RunHistory.CheckCommands(this, Numbered(steps), targets);
+    }
+
+    /// <summary>То же для копирования.</summary>
+    public RunHistory.SmartCheck? PrecheckCopy()
+    {
+        var targets = CopyTargets;
+
+        return !Items.Any(i => i.IsSelected) || targets.Count == 0 || CopyBatch.IsRunning
+            ? null
+            : RunHistory.CheckCopy(this, targets).With(ChainCheck(targets));
+    }
+
+    /// <summary>
+    /// Выполнение команд этой вкладки на её отмеченных серверах. Окон несколько — цепочкой:
+    /// на каждом сервере следующее окно начинается после успешного предыдущего, не дожидаясь
+    /// остальных серверов. Встало на сервере — дальше на нём не идёт.
+    /// </summary>
     /// <param name="notify">
     /// Сообщить об окончании (автокопия вывода). «Выполнить везде» сообщает само — один раз по сводке.
     /// </param>
-    public async Task<bool> RunCommandAsync(bool notify = true)
+    /// <param name="from">С какого окна (по умолчанию с первого).</param>
+    /// <param name="onlyThis">Только окно <paramref name="from"/>, без нижних.</param>
+    /// <param name="approved">Умный режим уже спросил.</param>
+    /// <param name="servers">Свои серверы вместо отмеченных — для команд после копирования.</param>
+    public async Task<bool> RunCommandAsync(
+        bool notify = true,
+        CommandStep? from = null,
+        bool onlyThis = false,
+        bool approved = false,
+        IReadOnlyList<ServerEntry>? servers = null)
     {
         if (CommandBatch.IsRunning)
         {
@@ -1110,34 +1858,72 @@ public sealed class Workspace : ObservableObject
             return false;
         }
 
-        var command = (CommandText ?? string.Empty).Trim();
-
-        if (string.IsNullOrWhiteSpace(command))
+        // в окнах сейчас запись избранного, а не команды вкладки (в том числе для команд после копирования)
+        if (HeldSteps is not null)
         {
-            return Refuse("команда", "Команда пустая.");
+            return Refuse("команда", "Идёт правка избранного в окнах этой вкладки — сначала сохраните или отмените её.");
         }
 
-        var targets = CommandTargets;
+        var steps = RunnableSteps(from, onlyThis);
+
+        if (steps.Count == 0)
+        {
+            return Refuse("команда", onlyThis || Steps.Count == 1 ? "Команда пустая." : "Во всех окнах пусто.");
+        }
+
+        var targets = servers ?? CommandTargets;
 
         if (targets.Count == 0)
         {
             return Refuse("команда", "Не отмечено ни одного сервера для команды.");
         }
 
-        // умный режим: сервер непривычный для этой команды — сначала спросить
-        if (!RunHistory.ApproveCommand(this, command, targets))
+        // умный режим: сервер непривычный для этих команд — сначала спросить, одним окном на все
+        if (!approved)
         {
-            return false;
+            var check = RunHistory.CheckCommands(this, Numbered(steps), targets);
+
+            if (!RunHistory.Confirm(check))
+            {
+                return false;
+            }
+
+            RunHistory.Commit(check);
         }
 
         var settings = AppState.Current.Settings;
-        settings.PushHistory(settings.CommandHistory, command);
+
+        // первое окно — наверху истории
+        foreach (var step in Enumerable.Reverse(steps))
+        {
+            settings.PushHistory(settings.CommandHistory, step.Text.Trim());
+        }
+
         AppState.Current.SaveSettings();
 
-        var useSudo = UseSudo;
+        // цепочка: ненулевой код останавливает её на сервере. Одиночная команда — как в терминале:
+        // что она вернула — её дело, а не ошибка программы
+        var chain = steps.Count > 1;
+        var numbered = Steps.Count > 1;
 
-        AppLog.Info($"Команда ({command.Length} символов)" + (useSudo ? ", через sudo" : string.Empty)
-            + ": " + Preview(command), Title);
+        AppLog.Info(
+            chain
+                ? $"Цепочка из {steps.Count} окон: " + string.Join(" → ", steps.Select(s => $"#{s.Number} {Preview(s.Text)}"))
+                : $"Команда ({steps[0].Text.Length} символов)" + (steps[0].UseSudo ? ", через sudo" : string.Empty)
+                    + ": " + Preview(steps[0].Text),
+            Title);
+
+        foreach (var step in Steps)
+        {
+            if (steps.Contains(step))
+            {
+                step.Begin(targets.Count);
+            }
+            else
+            {
+                step.Clear();
+            }
+        }
 
         SetScope();
         ShowStatus("выполняется", string.Empty, WorkspaceStatus.Running);
@@ -1145,82 +1931,186 @@ public sealed class Workspace : ObservableObject
         ShowResults(CommandBatch);
 
         // Ctrl+C посылается отдельным подключением, и под sudo процессы команды принадлежат root
-        CommandBatch.UsedSudo = useSudo;
+        CommandBatch.UsedSudo = steps.Any(s => s.UseSudo);
+
+        // где цепочка встала на каждом сервере: повтор продолжает с этого окна,
+        // уже выполненное на сервере второй раз не запускается
+        var resume = new ConcurrentDictionary<ServerEntry, int>();
+        var retrying = false;
+
+        void BeforeRetry(IReadOnlyList<ServerEntry> again)
+        {
+            retrying = true;
+
+            for (var i = 0; i < steps.Count; i++)
+            {
+                var reaching = again.Count(s => resume.GetValueOrDefault(s) <= i);
+
+                if (reaching > 0)
+                {
+                    steps[i].Resume(reaching);
+                }
+            }
+
+            ShowStatus("выполняется", string.Empty, WorkspaceStatus.Running);
+        }
+
+        void Finish()
+        {
+            foreach (var step in steps)
+            {
+                step.End();
+            }
+
+            var passed = steps.Count(s => s.State == StepState.Ok);
+
+            FinishStatus(
+                CommandBatch,
+                "команда",
+                chain
+                    ? $"выполнено {passed} из {steps.Count}"
+                    : CommandBatch.SuccessCount == 0 ? "не выполнено" : "выполнено");
+        }
 
         await CommandBatch.RunAsync(
-            Operation("Выполнение команды"),
+            Operation(chain ? "Выполнение цепочки команд" : "Выполнение команды"),
             targets,
             async (server, result, ct) =>
             {
-                result.Message = "выполняется…";
+                var index = retrying ? resume.GetValueOrDefault(server) : 0;
+                var open = false;
 
-                foreach (var line in command.Replace("\r\n", "\n").Split('\n'))
+                // окно на этом сервере закончилось — в счёт окна
+                void Close(bool ok)
                 {
-                    result.Append("$ " + line);
+                    steps[index].ServerFinished(ok);
+                    open = false;
                 }
 
-                var outcome = await SshService.RunScriptAsync(
-                    server,
-                    settings,
-                    command,
-                    useSudo,
-                    line => result.Append(line),
-                    ct,
-                    (pid, group) =>
+                try
+                {
+                    for (; index < steps.Count; index++)
                     {
-                        result.RemotePid = pid;
-                        result.RemoteGroup = group;
-                    },
-                    input => result.Input = input,
-                    waiting =>
-                    {
-                        result.IsWaitingInput = waiting;
-                        result.Message = waiting ? "ждёт ответа" : "выполняется…";
+                        var step = steps[index];
+                        var label = numbered ? $"#{step.Number} " : string.Empty;
+                        var clock = System.Diagnostics.Stopwatch.StartNew();
 
-                        if (waiting)
+                        // процесс прошлого окна уже кончился — Ctrl+C не должен уйти в него
+                        result.ResetJob();
+                        step.ServerStarted();
+                        open = true;
+
+                        if (numbered)
                         {
-                            AppLog.Warn(
-                                $"{server.PaneLabel} ждёт ответа — введите его в строке под выводом в терминале",
-                                Title);
+                            result.Append($"───── #{step.Number} · {DateTime.Now:HH:mm:ss} ─────");
                         }
-                    },
-                    tail => result.SetTail(tail));
 
-                // Ошибка — это когда команду не удалось выполнить: не достучались, оборвало,
-                // не дождались. Что команда написала в вывод и чем закончилась — её дело:
-                // терминал за это красным не красит, и мы не красим.
-                // оборвали нашей же кнопкой — это не ошибка, а выполненная просьба.
-                // Проверяется до всего прочего: после kill сервер может и не успеть
-                // сообщить, каким сигналом всё закончилось
-                if (result.Interrupted && !outcome.TimedOut)
-                {
-                    result.Append("— команда прервана —");
-                    result.Message = "прервано";
-                    result.Status = OperationStatus.Cancelled;
-                    AppLog.Warn("команда прервана", server.Display);
-                    return;
+                        foreach (var line in step.Text.Replace("\r\n", "\n").Split('\n'))
+                        {
+                            result.Append("$ " + line);
+                        }
+
+                        result.Message = label + "выполняется…";
+
+                        var outcome = await SshService.RunScriptAsync(
+                            server,
+                            settings,
+                            step.Text,
+                            step.UseSudo,
+                            line => result.Append(line),
+                            ct,
+                            (pid, group) =>
+                            {
+                                result.RemotePid = pid;
+                                result.RemoteGroup = group;
+                            },
+                            input => result.Input = input,
+                            waiting =>
+                            {
+                                result.IsWaitingInput = waiting;
+                                result.Message = label + (waiting ? "ждёт ответа" : "выполняется…");
+
+                                if (waiting)
+                                {
+                                    AppLog.Warn(
+                                        $"{server.PaneLabel} ждёт ответа — введите его в строке под выводом в терминале",
+                                        Title);
+                                }
+                            },
+                            tail => result.SetTail(tail));
+
+                        // оборвали нашей же кнопкой — это не ошибка, а выполненная просьба.
+                        // Проверяется до всего прочего: после kill сервер может и не успеть
+                        // сообщить, каким сигналом всё закончилось
+                        if (result.Interrupted && !outcome.TimedOut)
+                        {
+                            result.Append("— команда прервана —");
+                            result.Message = label + "прервано";
+                            result.Status = OperationStatus.Cancelled;
+                            AppLog.Warn(label + "команда прервана", server.Display);
+                            Close(false);
+                            return;
+                        }
+
+                        // Ошибка — это когда команду не удалось выполнить: не достучались, оборвало,
+                        // не дождались. Что команда написала в вывод — её дело
+                        if (outcome.Interruption is { } trouble)
+                        {
+                            result.Append("— " + trouble + " —");
+                            result.Message = label + (outcome.TimedOut
+                                ? $"не дождались ответа ({settings.CommandTimeoutSeconds} с)"
+                                : trouble);
+                            result.Status = OperationStatus.Failed;
+                            AppLog.Error(result.Message, server.Display);
+                            Close(false);
+                            return;
+                        }
+
+                        if (chain && outcome.ExitCode is int code && code != 0)
+                        {
+                            var last = index == steps.Count - 1;
+                            result.Append(last
+                                ? $"— #{step.Number} завершилась с кодом {code} —"
+                                : $"— #{step.Number} завершилась с кодом {code}: следующие окна на этом сервере не запускаются —");
+                            result.Message = $"#{step.Number}: код {code}";
+                            result.Status = OperationStatus.Failed;
+                            AppLog.Error(result.Message, server.Display);
+                            Close(false);
+                            return;
+                        }
+
+                        Close(true);
+
+                        if (numbered)
+                        {
+                            result.Append($"— #{step.Number} ок · {clock.Elapsed:m\\:ss} —");
+                        }
+                    }
+
+                    result.Message = string.Empty;
+                    result.Status = OperationStatus.Success;
                 }
-
-                if (outcome.Interruption is { } trouble)
+                finally
                 {
-                    result.Append("— " + trouble + " —");
-                    result.Message = outcome.TimedOut
-                        ? $"не дождались ответа ({settings.CommandTimeoutSeconds} с)"
-                        : trouble;
-                    result.Status = OperationStatus.Failed;
-                    AppLog.Error(result.Message, server.Display);
-                    return;
-                }
+                    // сбой подключения или отмена посреди окна: окно не прошло, нижние не начинались
+                    if (open)
+                    {
+                        steps[index].ServerFinished(false);
+                    }
 
-                result.Message = string.Empty;
-                result.Status = OperationStatus.Success;
+                    for (var rest = index + 1; rest < steps.Count; rest++)
+                    {
+                        steps[rest].ServerSkipped();
+                    }
+
+                    resume[server] = index;
+                }
             },
-            settings.MaxParallel);
+            settings.MaxParallel,
+            BeforeRetry,
+            Finish);
 
-        FinishStatus(
-            CommandBatch,
-            "команда",
-            CommandBatch.SuccessCount == 0 ? "не выполнено" : "выполнено");
+        Finish();
 
         if (notify)
         {
@@ -1329,6 +2219,12 @@ public sealed class Workspace : ObservableObject
     {
         Id = Id,
         Title = Title,
+        AfterCopyTabId = _afterCopyTabId,
+        AfterCopyEnabled = _afterCopyEnabled,
+        OwnerCopyTabId = OwnerCopyTabId,
+        Downloads = Downloads.Select(d => d.ToSaved()).ToList(),
+        LocalFolder = LocalFolder,
+        Explorer = Explorer.Clone(),
         IsMain = IsMain,
         SelectedServerIds = CopyServers.Where(c => c.IsSelected).Select(c => c.Server.Id).ToList(),
         CommandServerIds = CommandServers.Where(c => c.IsSelected).Select(c => c.Server.Id).ToList(),
@@ -1343,6 +2239,7 @@ public sealed class Workspace : ObservableObject
         MatchByHash = MatchByHash,
         CommandText = CommandText,
         UseSudo = UseSudo,
+        Commands = HeldSteps?.ToList() ?? SaveSteps(),
         PaneSetId = _paneSetId,
         PaneAllSets = _paneAllSets,
         PaneScopes = _scopes.Values.Select(v => v.Clone()).ToList(),
@@ -1361,8 +2258,32 @@ public sealed class Workspace : ObservableObject
         _excludeMasks = state.ExcludeMasks ?? string.Empty;
         _matchByDate = state.MatchByDate;
         _matchByHash = state.MatchByHash;
-        _commandText = state.CommandText ?? string.Empty;
-        _useSudo = state.UseSudo;
+        _afterCopyTabId = state.AfterCopyTabId ?? string.Empty;
+        _afterCopyEnabled = state.AfterCopyEnabled && _afterCopyTabId.Length > 0;
+        OwnerCopyTabId = state.OwnerCopyTabId ?? string.Empty;
+
+        _localFolder = state.LocalFolder ?? string.Empty;
+        Explorer = state.Explorer?.Clone() ?? new ExplorerTabState();
+
+        _restoring = true;
+
+        try
+        {
+            Downloads.Clear();
+
+            foreach (var saved in state.Downloads ?? [])
+            {
+                Downloads.Add(DownloadItem.From(saved));
+            }
+
+            SetSteps(state.Commands is { Count: > 0 }
+                ? state.Commands
+                : [new SavedCommandStep { Text = state.CommandText ?? string.Empty, UseSudo = state.UseSudo }]);
+        }
+        finally
+        {
+            _restoring = false;
+        }
         _paneSetId = state.PaneSetId ?? string.Empty;
         _paneAllSets = state.PaneAllSets;
         _paneShowIp = state.PaneShowIp ?? false;
@@ -1627,7 +2548,8 @@ public sealed class Workspace : ObservableObject
 
     /// <summary>Одиночный выбор действует на «Команде» и «Копировании»; на «Серверах» галочки обычные.</summary>
     public bool IsPaneSingleSelect =>
-        SingleSelect && AppState.Current.Section is AppSection.Command or AppSection.Files;
+        AppState.Current.Section == AppSection.Explorer
+        || (SingleSelect && AppState.Current.Section is AppSection.Command or AppSection.Files or AppSection.Download);
 
     /// <summary>Отметки, которые сейчас в панели: команды на «Команде», иначе копирования.</summary>
     private ObservableCollection<ServerCheck> PaneChecks =>
@@ -1673,18 +2595,27 @@ public sealed class Workspace : ObservableObject
 
     private void RaiseCopyInfo() => RaiseMany(
         nameof(TargetsInfo),
+        nameof(DownloadInfo),
         nameof(AllItemsSelected),
         nameof(TabCounts),
         nameof(TabTooltip));
 
-    private void RaiseSelectionInfo() => RaiseMany(
+    private void RaiseSelectionInfo()
+    {
+        RaiseSelectionCounts();
+        RaiseNotices();
+    }
+
+    private void RaiseSelectionCounts() => RaiseMany(
         nameof(SelectionInfo),
         nameof(PaneAllChecked),
         nameof(PaneTitle),
         nameof(PaneEmptyHintVisibility),
         nameof(TargetsInfo),
+        nameof(DownloadInfo),
         nameof(CommandTargetsInfo),
         nameof(AllServersSelected),
+        nameof(ExplorerServer),
         nameof(TabCounts),
         nameof(TabTooltip));
 

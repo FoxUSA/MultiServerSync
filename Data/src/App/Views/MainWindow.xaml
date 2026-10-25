@@ -21,9 +21,11 @@
   WindowStartupLocation="CenterScreen">
 
   <ui:FluentWindow.Resources>
-    <!--  ярлык рабочего стола: размер фиксирован, чтобы вкладки не скакали от статусов  -->
+    <!--  ярлык рабочего стола: размер фиксирован, чтобы вкладки не скакали от статусов.
+          Зазор везде один — 4, как между страницей и нижней панелью: вбок, между рядами,
+          у кнопок слева, до краёв окна и до страницы  -->
     <Style x:Key="WorkspaceTabStyle" TargetType="ListBoxItem">
-      <Setter Property="Margin" Value="0,0,6,0" />
+      <Setter Property="Margin" Value="0,2,4,2" />
       <Setter Property="Padding" Value="0" />
       <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
       <!--  на «Команде» всё, кроме основной, потушено и не принимает щелчок  -->
@@ -32,26 +34,37 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ListBoxItem">
-            <Border
-              x:Name="Bd"
-              Background="{DynamicResource ControlFillColorDefaultBrush}"
-              BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-              BorderThickness="1"
-              CornerRadius="5,5,0,0">
-              <ContentPresenter />
-            </Border>
+            <!--  выбранная вкладка — не заливкой, а рамкой: на яркой заливке терялись огонёк
+                  работы, полоска команд и цвет статуса. Рамка лежит поверх и размер не меняет  -->
+            <Grid>
+              <Border
+                x:Name="Bd"
+                Background="{DynamicResource ControlFillColorDefaultBrush}"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8" />
+              <ContentPresenter Margin="1" />
+              <Border
+                x:Name="Ring"
+                BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
+                BorderThickness="2"
+                CornerRadius="8"
+                IsHitTestVisible="False"
+                Visibility="Collapsed" />
+            </Grid>
             <ControlTemplate.Triggers>
-              <!--  краткий кирпичик не стоит на линии ленты — скруглён со всех сторон  -->
+              <!--  краткий кирпичик мельче — и скругление мельче  -->
               <DataTrigger Binding="{Binding DataContext.State.CompactTabs, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
-                <Setter TargetName="Bd" Property="CornerRadius" Value="4" />
+                <Setter TargetName="Bd" Property="CornerRadius" Value="6" />
+                <Setter TargetName="Ring" Property="CornerRadius" Value="6" />
               </DataTrigger>
               <Trigger Property="IsMouseOver" Value="True">
                 <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource TextFillColorDisabledBrush}" />
               </Trigger>
               <Trigger Property="IsSelected" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
-                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
-                <Setter Property="Foreground" Value="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                <Setter TargetName="Ring" Property="Visibility" Value="Visible" />
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -59,7 +72,7 @@
       </Setter>
       <Style.Triggers>
         <DataTrigger Binding="{Binding DataContext.State.CompactTabs, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
-          <Setter Property="Margin" Value="0,2,6,2" />
+          <Setter Property="VerticalAlignment" Value="Top" />
         </DataTrigger>
       </Style.Triggers>
     </Style>
@@ -204,8 +217,10 @@
       </Setter>
     </Style>
 
-    <!--  мелкие кнопки в углах ярлыка вкладки  -->
+    <!--  мелкие кнопки в углах ярлыка вкладки: появляются под мышью и у выбранной вкладки,
+          в покое ярлык чистый. Скрывают их шаблоны (первая, личная) — это сильнее стиля  -->
     <Style x:Key="TabIconButtonStyle" TargetType="Button">
+      <Setter Property="Visibility" Value="Hidden" />
       <Setter Property="Width" Value="18" />
       <Setter Property="Height" Value="18" />
       <Setter Property="Padding" Value="0" />
@@ -225,7 +240,8 @@
                 x:Name="Glyph"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center"
-                FontSize="10"
+                FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                FontSize="11"
                 Foreground="{TemplateBinding Foreground}"
                 Text="{TemplateBinding Content}" />
             </Border>
@@ -238,6 +254,14 @@
           </ControlTemplate>
         </Setter.Value>
       </Setter>
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+          <Setter Property="Visibility" Value="Visible" />
+        </DataTrigger>
+        <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+          <Setter Property="Visibility" Value="Visible" />
+        </DataTrigger>
+      </Style.Triggers>
     </Style>
 
     <Style
@@ -255,9 +279,10 @@
                 x:Name="Glyph"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center"
-                FontSize="10"
+                FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                FontSize="9"
                 Foreground="{TemplateBinding Foreground}"
-                Text="&#x2715;" />
+                Text="&#xE711;" />
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
@@ -271,9 +296,152 @@
       </Setter>
     </Style>
 
+    <!--
+      Свитч «команды после копирования» на ярлыке: нарисован мелко, но ловит щелчок
+      всей зоной 32×22, чтобы попадать с первого раза.
+    -->
+    <Style x:Key="TabSwitchStyle" TargetType="ToggleButton">
+      <Setter Property="Width" Value="32" />
+      <Setter Property="Height" Value="22" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ToggleButton">
+            <Border Background="Transparent">
+              <Border
+                x:Name="Track"
+                Width="26"
+                Height="14"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Background="Transparent"
+                BorderBrush="{DynamicResource TextFillColorSecondaryBrush}"
+                BorderThickness="1"
+                CornerRadius="7">
+                <Ellipse
+                  x:Name="Knob"
+                  Width="8"
+                  Height="8"
+                  Margin="2,0"
+                  HorizontalAlignment="Left"
+                  VerticalAlignment="Center"
+                  Fill="{DynamicResource TextFillColorSecondaryBrush}" />
+              </Border>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Setter TargetName="Knob" Property="Fill" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Track" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                <Setter TargetName="Track" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                <Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right" />
+                <Setter TargetName="Knob" Property="Width" Value="10" />
+                <Setter TargetName="Knob" Property="Height" Value="10" />
+                <Setter TargetName="Knob" Property="Fill" Value="White" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!--  стрелка перехода между вкладкой копирования и её личными командами  -->
+    <Style x:Key="TabArrowButtonStyle" TargetType="Button">
+      <Setter Property="Width" Value="22" />
+      <Setter Property="Height" Value="22" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" />
+      <Setter Property="Opacity" Value="0.8" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Bd"
+              Background="{TemplateBinding Background}"
+              CornerRadius="4">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Opacity" Value="1" />
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!--
+      Полоска личных команд на ярлыке копирования: сколько окон — столько ровных отрезков.
+      Серый — ещё не дошло, синий с пульсом — идёт, зелёный — прошло, красный — встало.
+      Серый — цветом третичного текста: бледная обводка элементов на ярлыке была не видна.
+      Синий свой, не акцентный: акцентом обведена выбранная вкладка, и полоска с ней сливалась.
+    -->
+    <DataTemplate x:Key="ChainSegmentTemplate">
+      <Border
+        x:Name="Seg"
+        Margin="1,0"
+        Background="{DynamicResource TextFillColorTertiaryBrush}"
+        CornerRadius="2">
+        <TextBlock
+          x:Name="Num"
+          HorizontalAlignment="Center"
+          VerticalAlignment="Center"
+          FontSize="8"
+          FontWeight="Bold"
+          Foreground="White"
+          Text="{Binding Number}"
+          Visibility="Collapsed" />
+      </Border>
+      <DataTemplate.Triggers>
+        <DataTrigger Binding="{Binding State}" Value="Running">
+          <Setter TargetName="Seg" Property="Background" Value="#3B8EEA" />
+          <Setter TargetName="Num" Property="Visibility" Value="Visible" />
+          <DataTrigger.EnterActions>
+            <BeginStoryboard x:Name="SegPulse">
+              <Storyboard>
+                <DoubleAnimation
+                  AutoReverse="True"
+                  RepeatBehavior="Forever"
+                  Storyboard.TargetName="Seg"
+                  Storyboard.TargetProperty="Opacity"
+                  From="1"
+                  To="0.45"
+                  Duration="0:0:0.6" />
+              </Storyboard>
+            </BeginStoryboard>
+          </DataTrigger.EnterActions>
+          <DataTrigger.ExitActions>
+            <StopStoryboard BeginStoryboardName="SegPulse" />
+          </DataTrigger.ExitActions>
+        </DataTrigger>
+        <DataTrigger Binding="{Binding State}" Value="Ok">
+          <Setter TargetName="Seg" Property="Background" Value="#3FB950" />
+          <Setter TargetName="Num" Property="Visibility" Value="Visible" />
+        </DataTrigger>
+        <DataTrigger Binding="{Binding State}" Value="Failed">
+          <Setter TargetName="Seg" Property="Background" Value="#E0574A" />
+          <Setter TargetName="Num" Property="Visibility" Value="Visible" />
+        </DataTrigger>
+        <DataTrigger Binding="{Binding State}" Value="Skipped">
+          <Setter TargetName="Seg" Property="Opacity" Value="0.4" />
+        </DataTrigger>
+        <!--  последним: перекрывает показ цифр из триггеров выше  -->
+        <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType=ItemsControl}}" Value="NoNumbers">
+          <Setter TargetName="Num" Property="Visibility" Value="Collapsed" />
+        </DataTrigger>
+      </DataTemplate.Triggers>
+    </DataTemplate>
+
     <!--  вкладки нижней панели: Терминал и Журнал  -->
     <Style x:Key="PanelTabStyle" TargetType="RadioButton">
-      <Setter Property="Margin" Value="0,0,2,0" />
+      <Setter Property="Margin" Value="0,0,4,0" />
       <Setter Property="Padding" Value="14,4" />
       <Setter Property="FontSize" Value="12" />
       <Setter Property="Cursor" Value="Hand" />
@@ -305,13 +473,14 @@
     </Style>
 
     <!--  Краткие ярлыки: кирпичики в два ряда. Раскладка по столбцам — первый сверху, второй
-          под ним, — и лента так же листается вбок. Ряд — 38 точек: 32 самого ярлыка, рамка и отступы.
+          под ним, — и лента так же листается вбок. Ряд — 45 точек: 39 самого ярлыка, рамка 2 и отступы
+          2 + 2. Два ряда — 90, ровно как полный ярлык (84 + 2 + 2 + 2): лента не дёргается при смене вида.
           Высота ряда задана жёстко: при масштабе экрана 150% рамка округляется до пикселя, кирпичик
           выходит на долю точки выше, и по своему размеру второй ряд уже не влезал.  -->
     <ItemsPanelTemplate x:Key="CompactTabsPanel">
       <WrapPanel
-        Height="76"
-        ItemHeight="38"
+        Height="90"
+        ItemHeight="45"
         Orientation="Vertical" />
     </ItemsPanelTemplate>
 
@@ -320,52 +489,114 @@
     <DataTemplate x:Key="CompactTabTemplate">
       <Grid
         Width="140"
-        Height="32"
+        Height="39"
         ToolTip="{Binding TabTooltip}">
-        <StackPanel Margin="20,0,20,0" VerticalAlignment="Center">
-          <TextBlock
-            HorizontalAlignment="Center"
-            FontSize="12"
-            Text="{Binding Title}"
-            TextTrimming="CharacterEllipsis" />
+        <!--  нижний ряд — только полоска личных команд: текст и кнопки на неё не заходят  -->
+        <Grid.RowDefinitions>
+          <RowDefinition Height="*" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <!--  на ярлыках текст не обрезается: что не влезло в строку — чуть ужимается (Viewbox)  -->
+        <StackPanel
+          x:Name="Texts"
+          Margin="20,0,20,0"
+          VerticalAlignment="Center">
+          <Viewbox HorizontalAlignment="Center" StretchDirection="DownOnly">
+            <TextBlock
+              FontSize="12"
+              FontWeight="SemiBold"
+              Text="{Binding Title}" />
+          </Viewbox>
           <!--  одна строка статуса: если есть ошибки — «Ошибок N», иначе итог  -->
-          <TextBlock
-            x:Name="BadgeText"
-            HorizontalAlignment="Center"
-            FontSize="10"
-            FontWeight="Bold"
-            Text="{Binding StatusBadge}"
-            TextTrimming="CharacterEllipsis"
-            Visibility="Collapsed" />
-          <TextBlock
-            x:Name="CaptionText"
-            HorizontalAlignment="Center"
-            FontSize="10"
-            FontWeight="Bold"
-            Text="{Binding StatusCaption}"
-            TextTrimming="CharacterEllipsis"
-            Visibility="Collapsed" />
+          <Viewbox HorizontalAlignment="Center" StretchDirection="DownOnly">
+            <Grid>
+              <TextBlock
+                x:Name="BadgeText"
+                FontSize="11"
+                FontWeight="SemiBold"
+                Text="{Binding StatusBadge}"
+                Visibility="Collapsed" />
+              <TextBlock
+                x:Name="CaptionText"
+                FontSize="11"
+                FontWeight="SemiBold"
+                Text="{Binding StatusCaption}"
+                Visibility="Collapsed" />
+            </Grid>
+          </Viewbox>
         </StackPanel>
+
+        <!--  копирование: свитч личных команд слева; личная команда — стрелка назад  -->
+        <ToggleButton
+          x:Name="Switch"
+          Margin="1,0,0,0"
+          HorizontalAlignment="Left"
+          VerticalAlignment="Center"
+          Click="OnAfterCopySwitch"
+          IsChecked="{Binding AfterCopyEnabled, Mode=TwoWay}"
+          Style="{StaticResource TabSwitchStyle}"
+          ToolTip="Команды после копирования: выполнить личные команды этой вкладки на серверах, где копирование прошло"
+          Visibility="Collapsed" />
+        <Button
+          x:Name="Back"
+          Margin="2,0,0,0"
+          HorizontalAlignment="Left"
+          VerticalAlignment="Center"
+          Click="OnGoOwner"
+          Style="{StaticResource TabArrowButtonStyle}"
+          ToolTip="Личные команды вкладки копирования — перейти к ней"
+          Visibility="Collapsed">
+          <ui:SymbolIcon FontSize="14" Symbol="ArrowLeft24" />
+        </Button>
 
         <Ellipse
           x:Name="BusyDot"
-          Width="7"
-          Height="7"
-          Margin="7,0,0,0"
+          Width="6"
+          Height="6"
+          Margin="3,3,0,0"
           HorizontalAlignment="Left"
-          VerticalAlignment="Center"
+          VerticalAlignment="Top"
           Fill="#3FB950"
           IsHitTestVisible="False"
           Visibility="Collapsed" />
 
-        <Button
-          x:Name="Close"
+        <StackPanel
           Margin="0,0,2,0"
           HorizontalAlignment="Right"
           VerticalAlignment="Center"
-          Click="OnCloseTab"
-          Style="{StaticResource TabCloseButtonStyle}"
-          ToolTip="Закрыть вкладку (Ctrl+W)" />
+          Orientation="Horizontal">
+          <Button
+            x:Name="Forward"
+            Click="OnGoPersonal"
+            Style="{StaticResource TabArrowButtonStyle}"
+            ToolTip="Перейти в личные команды этой вкладки"
+            Visibility="Collapsed">
+            <ui:SymbolIcon FontSize="14" Symbol="ArrowRight24" />
+          </Button>
+          <Button
+            x:Name="Close"
+            VerticalAlignment="Center"
+            Click="OnCloseTab"
+            Style="{StaticResource TabCloseButtonStyle}"
+            ToolTip="Закрыть вкладку (Ctrl+W)" />
+        </StackPanel>
+
+        <!--  над рамкой выбранной вкладки с зазором, а не под ней  -->
+        <ItemsControl
+          Grid.Row="1"
+          Height="3"
+          Tag="NoNumbers"
+          Margin="8,0,8,4"
+          VerticalAlignment="Bottom"
+          IsHitTestVisible="False"
+          ItemTemplate="{StaticResource ChainSegmentTemplate}"
+          ItemsSource="{Binding ChainSteps}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <UniformGrid Rows="1" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+        </ItemsControl>
       </Grid>
 
       <DataTemplate.Triggers>
@@ -399,6 +630,18 @@
         <DataTrigger Binding="{Binding CanClose}" Value="False">
           <Setter TargetName="Close" Property="Visibility" Value="Collapsed" />
         </DataTrigger>
+        <DataTrigger Binding="{Binding IsCopyTab}" Value="True">
+          <Setter TargetName="Switch" Property="Visibility" Value="Visible" />
+          <Setter TargetName="Texts" Property="Margin" Value="32,0,22,0" />
+        </DataTrigger>
+        <DataTrigger Binding="{Binding HasPersonal}" Value="True">
+          <Setter TargetName="Forward" Property="Visibility" Value="Visible" />
+          <Setter TargetName="Texts" Property="Margin" Value="32,0,42,0" />
+        </DataTrigger>
+        <DataTrigger Binding="{Binding IsPersonal}" Value="True">
+          <Setter TargetName="Back" Property="Visibility" Value="Visible" />
+          <Setter TargetName="Texts" Property="Margin" Value="26,0,20,0" />
+        </DataTrigger>
       </DataTemplate.Triggers>
     </DataTemplate>
 
@@ -406,15 +649,18 @@
     <DataTemplate x:Key="CompactSetTemplate">
       <Grid
         Width="140"
-        Height="32"
+        Height="39"
         ToolTip="{Binding TabTooltip}">
-        <TextBlock
+        <Viewbox
           Margin="20,0,20,0"
           HorizontalAlignment="Center"
           VerticalAlignment="Center"
-          FontSize="12"
-          Text="{Binding Title}"
-          TextTrimming="CharacterEllipsis" />
+          StretchDirection="DownOnly">
+          <TextBlock
+            FontSize="12"
+            FontWeight="SemiBold"
+            Text="{Binding Title}" />
+        </Viewbox>
 
         <Button
           x:Name="Close"
@@ -473,6 +719,16 @@
             Icon="{ui:SymbolIcon Globe24}"
             ToolTip="https://byfox.dev/multiserversync/ — страница утилиты" />
 
+          <ui:Button
+            Height="28"
+            Margin="8,0,0,0"
+            Padding="10,0"
+            Appearance="Transparent"
+            Click="OnOpenSettings"
+            Content="Настройки"
+            Icon="{ui:SymbolIcon Settings24}"
+            ToolTip="Настройки программы" />
+
           <!--  крестик окна прячет программу в трей, выход — только здесь и в меню значка  -->
           <Button
             Height="28"
@@ -523,12 +779,14 @@
 
     <!--  У каждого раздела свои вкладки: на «Серверах» — наборы серверов, на «Копировании» —
           рабочие столы копирования. На «Команде» и в «Настройках» ряда нет совсем.  -->
+    <!--  мелкий жирный текст ярлыков («9 из 9») в режиме Ideal размывается сглаживанием;
+          Display рисует его по пиксельной сетке, округление раскладки не ставит строку между пикселями  -->
     <Border
       x:Name="TabStripArea"
       Grid.Row="1"
-      Padding="12,2,12,0"
-      BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-      BorderThickness="0,0,0,1"
+      Padding="4,2,4,1"
+      TextOptions.TextFormattingMode="Display"
+      UseLayoutRounding="True"
       Visibility="{Binding State.ShowsTabStrip, Converter={StaticResource BoolToVis}}">
       <!--  правый щелчок по ряду: краткие ярлыки — то же, что кнопка слева; у каждого раздела свой выбор  -->
       <Border.ContextMenu>
@@ -544,15 +802,16 @@
           <ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
-        <!--  столбиком: доска вкладок, краткий вид, плюс. Три кнопки по высоте ровно с полный ярлык  -->
+        <!--  столбиком: доска вкладок, краткий вид, плюс. 3 × 26 + 2 × 4 = 86 — ровно по ярлыкам,
+              зазоры те же 4, что между ярлыками  -->
         <StackPanel
           Grid.Column="0"
-          Margin="0,0,8,6"
-          VerticalAlignment="Bottom">
+          Margin="0,2,4,2"
+          VerticalAlignment="Top">
           <ui:Button
             Width="44"
-            Height="24"
-            Margin="0,0,0,2"
+            Height="26"
+            Margin="0,0,0,4"
             Padding="0"
             HorizontalContentAlignment="Center"
             Click="OnOpenBoard"
@@ -567,8 +826,8 @@
           <ui:Button
             x:Name="CompactButton"
             Width="44"
-            Height="24"
-            Margin="0,0,0,2"
+            Height="26"
+            Margin="0,0,0,4"
             Padding="0"
             HorizontalContentAlignment="Center"
             Click="OnToggleCompactTabs">
@@ -596,7 +855,7 @@
 
           <ui:Button
             Width="44"
-            Height="24"
+            Height="26"
             Padding="0"
             HorizontalContentAlignment="Center"
             Click="OnAddTab"
@@ -618,6 +877,7 @@
           Visibility="{Binding State.ShowsServerSetTabs, Converter={StaticResource BoolToVis}}">
           <ListBox
             x:Name="SetStrip"
+            Padding="0"
             Background="Transparent"
             BorderThickness="0"
             ItemContainerStyle="{StaticResource ServerSetTabStyle}"
@@ -635,21 +895,24 @@
               <DataTemplate>
                 <Grid
                   Width="164"
-                  Height="76"
+                  Height="84"
                   ToolTip="{Binding TabTooltip}">
                   <StackPanel Margin="20,0,20,0" VerticalAlignment="Center">
                     <TextBlock
                       HorizontalAlignment="Center"
+                      FontWeight="SemiBold"
                       Text="{Binding Title}"
                       TextAlignment="Center"
-                      TextTrimming="CharacterEllipsis" />
-                    <TextBlock
-                      Margin="-10,2,-10,0"
+                      TextWrapping="Wrap" />
+                    <Viewbox
+                      Margin="-10,3,-10,0"
                       HorizontalAlignment="Center"
-                      FontSize="11"
-                      Opacity="0.75"
-                      Text="{Binding TabCounts}"
-                      TextTrimming="CharacterEllipsis" />
+                      StretchDirection="DownOnly">
+                      <TextBlock
+                        FontSize="11"
+                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                        Text="{Binding TabCounts}" />
+                    </Viewbox>
                   </StackPanel>
 
                   <Button
@@ -666,7 +929,7 @@
                     HorizontalAlignment="Right"
                     VerticalAlignment="Bottom"
                     Click="OnRenameTabClick"
-                    Content="&#x270E;"
+                    Content="&#xE70F;"
                     Style="{StaticResource TabIconButtonStyle}"
                     ToolTip="Переименовать набор (или двойной щелчок по ярлыку)" />
                 </Grid>
@@ -691,6 +954,7 @@
           Visibility="{Binding State.ShowsWorkspaceTabs, Converter={StaticResource BoolToVis}}">
           <ListBox
             x:Name="TabStrip"
+            Padding="0"
             Background="Transparent"
             BorderThickness="0"
             ItemContainerStyle="{StaticResource WorkspaceTabStyle}"
@@ -699,9 +963,10 @@
             PreviewMouseRightButtonDown="OnTabStripRightDown"
             RequestBringIntoView="OnTabStripBringIntoView"
             SelectionChanged="OnTabSelected">
+            <!--  личные вкладки команд — у правого края; лента растянута на ширину окна из кода  -->
             <ListBox.ItemsPanel>
               <ItemsPanelTemplate>
-                <StackPanel Orientation="Horizontal" />
+                <controls:SplitTabsPanel />
               </ItemsPanelTemplate>
             </ListBox.ItemsPanel>
             <ListBox.ItemTemplate>
@@ -710,15 +975,21 @@
                 <Grid
                   x:Name="Root"
                   Width="164"
-                  Height="76"
+                  Height="84"
                   ToolTip="{Binding TabTooltip}">
-                  <StackPanel Margin="20,0,20,0" VerticalAlignment="Center">
+                  <StackPanel
+                    x:Name="Texts"
+                    Margin="20,0,20,0"
+                    VerticalAlignment="Center">
+                    <!--  на ярлыках текст не обрезается: длинное название — в две строки,
+                          остальное при нехватке места чуть ужимается (Viewbox)  -->
                     <TextBlock
                       x:Name="TitleText"
                       HorizontalAlignment="Center"
+                      FontWeight="SemiBold"
                       Text="{Binding Title}"
                       TextAlignment="Center"
-                      TextTrimming="CharacterEllipsis" />
+                      TextWrapping="Wrap" />
 
                     <!--  Итог висит до следующей операции, поэтому название остаётся на месте:
                           цветной плашки нет, статус выделен только жирным.
@@ -726,47 +997,83 @@
                           но не настолько, чтобы залезть под крестик в углу.  -->
                     <StackPanel
                       x:Name="StatusPanel"
-                      Margin="-8,1,-8,0"
+                      Margin="-8,2,-8,0"
                       Visibility="Collapsed">
-                      <TextBlock
+                      <Viewbox HorizontalAlignment="Center" StretchDirection="DownOnly">
+                        <TextBlock
+                          FontSize="12"
+                          FontWeight="SemiBold"
+                          Text="{Binding StatusBadge}" />
+                      </Viewbox>
+                      <Viewbox
                         HorizontalAlignment="Center"
-                        FontSize="11"
-                        FontWeight="Bold"
-                        Text="{Binding StatusBadge}"
-                        TextAlignment="Center"
-                        TextTrimming="CharacterEllipsis" />
-                      <TextBlock
-                        HorizontalAlignment="Center"
-                        FontSize="11"
-                        FontWeight="Bold"
-                        Text="{Binding StatusCaption}"
-                        TextTrimming="CharacterEllipsis"
-                        Visibility="{Binding StatusCaptionVisibility}" />
+                        StretchDirection="DownOnly"
+                        Visibility="{Binding StatusCaptionVisibility}">
+                        <TextBlock
+                          FontSize="12"
+                          FontWeight="SemiBold"
+                          Text="{Binding StatusCaption}" />
+                      </Viewbox>
                     </StackPanel>
 
                     <!--  что на вкладке отмечено — зависит от открытого раздела.
                           Отступ отрицательный по той же причине, что и у статуса:
                           строке нужно больше места, чем названию, иначе она обрезается  -->
-                    <TextBlock
-                      Margin="-10,2,-10,0"
+                    <Viewbox
+                      Margin="-10,3,-10,0"
                       HorizontalAlignment="Center"
-                      FontSize="11"
-                      Opacity="0.75"
-                      Text="{Binding TabCounts}"
-                      TextTrimming="CharacterEllipsis" />
+                      StretchDirection="DownOnly">
+                      <TextBlock
+                        FontSize="11"
+                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                        Text="{Binding TabCounts}" />
+                    </Viewbox>
                   </StackPanel>
 
-                  <!--  огонёк «идёт работа»: виден, пока на вкладке копирование или команда, потом гаснет  -->
+                  <!--  огонёк «идёт работа»: виден, пока на вкладке копирование или команда, потом гаснет.
+                        Стоит на месте крестика: под мышью уступает место ему  -->
                   <Ellipse
                     x:Name="BusyDot"
                     Width="7"
                     Height="7"
-                    Margin="7,7,0,0"
-                    HorizontalAlignment="Left"
+                    Margin="0,7,7,0"
+                    HorizontalAlignment="Right"
                     VerticalAlignment="Top"
                     Fill="#3FB950"
                     IsHitTestVisible="False"
                     Visibility="Collapsed" />
+
+                  <!--  левый верхний угол: у копирования — свитч личных команд и стрелка к ним,
+                        у личной команды — стрелка назад к своей вкладке копирования  -->
+                  <StackPanel
+                    Margin="2,1,0,0"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    Orientation="Horizontal">
+                    <ToggleButton
+                      x:Name="Switch"
+                      Click="OnAfterCopySwitch"
+                      IsChecked="{Binding AfterCopyEnabled, Mode=TwoWay}"
+                      Style="{StaticResource TabSwitchStyle}"
+                      ToolTip="Команды после копирования: выполнить личные команды этой вкладки на серверах, где копирование прошло"
+                      Visibility="Collapsed" />
+                    <Button
+                      x:Name="Forward"
+                      Click="OnGoPersonal"
+                      Style="{StaticResource TabArrowButtonStyle}"
+                      ToolTip="Перейти в личные команды этой вкладки"
+                      Visibility="Collapsed">
+                      <ui:SymbolIcon FontSize="14" Symbol="ArrowRight24" />
+                    </Button>
+                    <Button
+                      x:Name="Back"
+                      Click="OnGoOwner"
+                      Style="{StaticResource TabArrowButtonStyle}"
+                      ToolTip="Личные команды вкладки копирования — перейти к ней"
+                      Visibility="Collapsed">
+                      <ui:SymbolIcon FontSize="14" Symbol="ArrowLeft24" />
+                    </Button>
+                  </StackPanel>
 
                   <Button
                     x:Name="Close"
@@ -778,18 +1085,49 @@
                     ToolTip="Закрыть вкладку (Ctrl+W)" />
 
                   <Button
+                    x:Name="Pencil"
                     Margin="0,0,2,2"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Bottom"
                     Click="OnRenameTabClick"
-                    Content="&#x270E;"
+                    Content="&#xE70F;"
                     Style="{StaticResource TabIconButtonStyle}"
                     ToolTip="Переименовать вкладку (или двойной щелчок по ярлыку)" />
+
+                  <!--  полоска личных команд по самому низу ярлыка  -->
+                  <ItemsControl
+                    x:Name="Chain"
+                    Height="10"
+                    Margin="6,0,24,3"
+                    VerticalAlignment="Bottom"
+                    IsHitTestVisible="False"
+                    ItemTemplate="{StaticResource ChainSegmentTemplate}"
+                    ItemsSource="{Binding ChainSteps}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <UniformGrid Rows="1" />
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                  </ItemsControl>
                 </Grid>
 
                 <DataTemplate.Triggers>
                   <DataTrigger Binding="{Binding HasStatus}" Value="True">
                     <Setter TargetName="StatusPanel" Property="Visibility" Value="Visible" />
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding IsCopyTab}" Value="True">
+                    <Setter TargetName="Switch" Property="Visibility" Value="Visible" />
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding HasPersonal}" Value="True">
+                    <Setter TargetName="Forward" Property="Visibility" Value="Visible" />
+                  </DataTrigger>
+                  <!--  полоска занимает низ — текст чуть приподнимается, чтобы не наезжать  -->
+                  <DataTrigger Binding="{Binding AfterCopyEnabled}" Value="True">
+                    <Setter TargetName="Texts" Property="Margin" Value="20,6,20,10" />
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding IsPersonal}" Value="True">
+                    <Setter TargetName="Back" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="Pencil" Property="Visibility" Value="Collapsed" />
                   </DataTrigger>
                   <DataTrigger Binding="{Binding Status}" Value="Running">
                     <Setter TargetName="BusyDot" Property="Visibility" Value="Visible" />
@@ -810,6 +1148,18 @@
                     <DataTrigger.ExitActions>
                       <StopStoryboard BeginStoryboardName="BusyPulse" />
                     </DataTrigger.ExitActions>
+                  </DataTrigger>
+                  <!--  пока идёт работа, угол занят огоньком: крестик — только под мышью,
+                        и тогда огонёк прячется, чтобы они не лезли друг на друга  -->
+                  <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                      <Condition Binding="{Binding Status}" Value="Running" />
+                      <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="False" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter TargetName="Close" Property="Visibility" Value="Collapsed" />
+                  </MultiDataTrigger>
+                  <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                    <Setter TargetName="BusyDot" Property="Visibility" Value="Collapsed" />
                   </DataTrigger>
                   <DataTrigger Binding="{Binding CanClose}" Value="False">
                     <Setter TargetName="Close" Property="Visibility" Value="Collapsed" />
@@ -922,6 +1272,16 @@
             <ui:SymbolIcon Symbol="Server24" />
           </ui:NavigationViewItem.Icon>
         </ui:NavigationViewItem>
+        <!--  две панели: этот компьютер и сервер, как в WinSCP; свои вкладки  -->
+        <ui:NavigationViewItem
+          Content="Проводник"
+          NavigationCacheMode="Enabled"
+          PreviewMouseLeftButtonDown="OnNavItemMouseDown"
+          TargetPageType="{x:Type pages:ExplorerPage}">
+          <ui:NavigationViewItem.Icon>
+            <ui:SymbolIcon Symbol="Folder24" />
+          </ui:NavigationViewItem.Icon>
+        </ui:NavigationViewItem>
         <!--  двойной щелчок по пункту меню возвращает на первую вкладку; подсказка не нужна  -->
         <ui:NavigationViewItem
           Content="Команда"
@@ -939,6 +1299,16 @@
           TargetPageType="{x:Type pages:FilesPage}">
           <ui:NavigationViewItem.Icon>
             <ui:SymbolIcon Symbol="ArrowUpload24" />
+          </ui:NavigationViewItem.Icon>
+        </ui:NavigationViewItem>
+        <!--  зеркало копирования: с серверов сюда, свои вкладки  -->
+        <ui:NavigationViewItem
+          Content="Скачивание"
+          NavigationCacheMode="Enabled"
+          PreviewMouseLeftButtonDown="OnNavItemMouseDown"
+          TargetPageType="{x:Type pages:DownloadPage}">
+          <ui:NavigationViewItem.Icon>
+            <ui:SymbolIcon Symbol="ArrowDownload24" />
           </ui:NavigationViewItem.Icon>
         </ui:NavigationViewItem>
         <!--  список серверов сразу под основными пунктами: галочки текущей вкладки, не уходя со страницы  -->
@@ -1148,10 +1518,12 @@
             </ItemsControl>
           </StackPanel>
         </Border>
+        <!--  открывается кнопкой в шапке; пункт скрыт, но нужен навигации как адрес страницы  -->
         <ui:NavigationViewItem
           Content="Настройки"
           NavigationCacheMode="Enabled"
-          TargetPageType="{x:Type pages:SettingsPage}">
+          TargetPageType="{x:Type pages:SettingsPage}"
+          Visibility="Collapsed">
           <ui:NavigationViewItem.Icon>
             <ui:SymbolIcon Symbol="Settings24" />
           </ui:NavigationViewItem.Icon>
@@ -1176,13 +1548,16 @@
       ResizeBehavior="PreviousAndNext"
       ResizeDirection="Rows" />
 
-    <!--  нижняя панель: слева таблица серверов, справа вывод; вторая вкладка — журнал  -->
+    <!--  нижняя панель: слева таблица серверов, справа вывод; вторая вкладка — журнал.
+          Карточка с зазором 4 от стен окна — тот же, что между страницей и панелью  -->
     <Border
       x:Name="BottomPanel"
       Grid.Row="4"
+      Margin="4,0,4,4"
       Background="{DynamicResource ControlFillColorDefaultBrush}"
       BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-      BorderThickness="0,1,0,0">
+      BorderThickness="1"
+      CornerRadius="8">
       <Grid>
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
@@ -1191,7 +1566,7 @@
 
         <StackPanel
           Grid.Row="0"
-          Margin="10,4,10,0"
+          Margin="12,12,12,0"
           Orientation="Horizontal">
           <RadioButton
             x:Name="TerminalTab"
@@ -1206,7 +1581,7 @@
             Style="{StaticResource PanelTabStyle}" />
         </StackPanel>
 
-        <Grid Grid.Row="1" Margin="10,4,10,8">
+        <Grid Grid.Row="1" Margin="12,4,12,12">
           <controls:ResultsView x:Name="Terminal" DataContext="{Binding State.ActiveWorkspace.ResultsBatch}" />
           <controls:LogPanel x:Name="Log" Visibility="Collapsed" />
         </Grid>

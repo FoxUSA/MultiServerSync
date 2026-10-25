@@ -1,0 +1,237 @@
+<Page
+  x:Class="MultiServerSync.Views.Pages.DownloadPage"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:controls="clr-namespace:MultiServerSync.Views.Controls"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+  Title="Скачивание"
+  ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
+  ui:Design.Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  ScrollViewer.CanContentScroll="False">
+
+  <Page.Resources>
+    <Style
+      x:Key="ToolButtonStyle"
+      BasedOn="{StaticResource {x:Type ui:Button}}"
+      TargetType="ui:Button">
+      <Setter Property="Height" Value="28" />
+      <Setter Property="Padding" Value="10,0" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Margin" Value="0,0,4,0" />
+    </Style>
+  </Page.Resources>
+
+  <Grid Margin="12">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" MinHeight="120" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <TextBlock
+      Grid.Row="0"
+      Margin="0,0,0,4"
+      FontSize="12"
+      Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+      Text="{Binding DownloadInfo}" />
+
+    <StackPanel Grid.Row="1" Orientation="Horizontal">
+      <ui:Button
+        Click="OnBrowseAdd"
+        Content="Выбрать на сервере"
+        Icon="{ui:SymbolIcon FolderOpen24}"
+        Style="{StaticResource ToolButtonStyle}"
+        ToolTip="Обзор сервера: выделите файлы и папки (Ctrl, Shift) и нажмите «Выбрать». Ничего не выделено — берётся открытая папка" />
+      <ui:Button
+        Click="OnExcludes"
+        Content="{Binding ExcludeCaption}"
+        Icon="{ui:SymbolIcon Filter24}"
+        Style="{StaticResource ToolButtonStyle}"
+        ToolTip="Что не скачивать: маски вроде *.log, node_modules, .git" />
+      <ui:Button
+        Click="OnRemoveSelected"
+        Content="Убрать строки"
+        Icon="{ui:SymbolIcon Subtract24}"
+        Style="{StaticResource ToolButtonStyle}"
+        ToolTip="Убрать выделенные пути из списка" />
+      <ui:Button
+        Click="OnClear"
+        Content="Очистить"
+        Icon="{ui:SymbolIcon Delete24}"
+        Style="{StaticResource ToolButtonStyle}" />
+    </StackPanel>
+
+    <!--  таблица того же вида, что список файлов на «Копировании»: строка — файл или папка
+          на своём сервере, выбранные обзором; качаются строки с галочкой  -->
+    <Grid Grid.Row="2" Margin="0,4,0,0">
+      <DataGrid
+        x:Name="PathsList"
+        CellStyle="{StaticResource AppDataGridCellStyle}"
+        ColumnHeaderStyle="{StaticResource AppColumnHeaderStyle}"
+        ItemsSource="{Binding Downloads}"
+        MouseDoubleClick="OnRowDoubleClick"
+        RowStyle="{StaticResource AppDataGridRowStyle}"
+        Style="{StaticResource AppDataGridStyle}"
+        VerticalScrollBarVisibility="Auto">
+        <DataGrid.Columns>
+          <DataGridTemplateColumn
+            Width="40"
+            CellStyle="{StaticResource FirstColumnCellStyle}"
+            HeaderStyle="{StaticResource FirstColumnHeaderStyle}">
+            <DataGridTemplateColumn.Header>
+              <CheckBox
+                MinWidth="0"
+                MinHeight="0"
+                Margin="0"
+                Padding="0"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Click="OnToggleAll"
+                IsChecked="{Binding DataContext.AllDownloadsSelected, RelativeSource={RelativeSource AncestorType=DataGrid}, Mode=OneWay}"
+                IsThreeState="True"
+                ToolTip="Отметить или снять все строки" />
+            </DataGridTemplateColumn.Header>
+            <DataGridTemplateColumn.CellTemplate>
+              <DataTemplate>
+                <CheckBox
+                  MinWidth="0"
+                  MinHeight="0"
+                  Margin="0"
+                  Padding="0"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+              </DataTemplate>
+            </DataGridTemplateColumn.CellTemplate>
+          </DataGridTemplateColumn>
+
+          <!--  всё по содержимому, а путь забирает остаток ширины  -->
+          <DataGridTextColumn
+            Width="Auto"
+            MaxWidth="220"
+            Binding="{Binding ServerLabel}"
+            Header="Сервер" />
+          <DataGridTextColumn
+            Width="Auto"
+            Binding="{Binding Kind}"
+            Header="Тип" />
+          <DataGridTextColumn
+            Width="Auto"
+            MaxWidth="360"
+            Binding="{Binding Name}"
+            Header="Имя" />
+          <!--  показывают надпись, а сортируются по значению — иначе даты по дню, а размеры по первой цифре  -->
+          <DataGridTextColumn
+            Width="Auto"
+            Binding="{Binding SizeText}"
+            Header="Размер"
+            SortMemberPath="SizeBytes" />
+          <DataGridTextColumn
+            Width="Auto"
+            Binding="{Binding ModifiedText}"
+            Header="Дата изменения"
+            SortMemberPath="Modified" />
+          <DataGridTextColumn
+            Width="*"
+            MinWidth="150"
+            Binding="{Binding Path}"
+            Header="Путь на сервере">
+            <DataGridTextColumn.ElementStyle>
+              <Style TargetType="TextBlock">
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+              </Style>
+            </DataGridTextColumn.ElementStyle>
+          </DataGridTextColumn>
+        </DataGrid.Columns>
+      </DataGrid>
+
+      <TextBlock
+        HorizontalAlignment="Center"
+        VerticalAlignment="Center"
+        FontSize="12"
+        Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+        IsHitTestVisible="False"
+        Text="Что скачивать — выберите файлы и папки кнопкой «Выбрать на сервере».">
+        <TextBlock.Style>
+          <Style TargetType="TextBlock">
+            <Setter Property="Visibility" Value="Collapsed" />
+            <Style.Triggers>
+              <DataTrigger Binding="{Binding Downloads.Count}" Value="0">
+                <Setter Property="Visibility" Value="Visible" />
+              </DataTrigger>
+            </Style.Triggers>
+          </Style>
+        </TextBlock.Style>
+      </TextBlock>
+    </Grid>
+
+    <Grid Grid.Row="3" Margin="0,4,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <TextBlock
+        Grid.Column="0"
+        Margin="0,0,4,0"
+        VerticalAlignment="Center"
+        FontSize="12"
+        Text="Куда скачать:" />
+      <ui:TextBox
+        Grid.Column="1"
+        FontSize="12"
+        PlaceholderText="папка на этом компьютере"
+        Text="{Binding LocalFolder, UpdateSourceTrigger=PropertyChanged}" />
+      <ui:Button
+        Grid.Column="2"
+        Margin="4,0,0,0"
+        Height="Auto"
+        VerticalAlignment="Stretch"
+        Click="OnPickFolder"
+        Content="Обзор…"
+        Icon="{ui:SymbolIcon FolderOpen24}"
+        Style="{StaticResource ToolButtonStyle}" />
+      <ui:Button
+        Grid.Column="3"
+        Margin="4,0,0,0"
+        Height="Auto"
+        VerticalAlignment="Stretch"
+        Click="OnOpenFolder"
+        Content="Открыть"
+        Icon="{ui:SymbolIcon Open24}"
+        Style="{StaticResource ToolButtonStyle}"
+        ToolTip="Открыть папку в проводнике" />
+    </Grid>
+
+    <!--  параметры — общий блок для «Копирования», «Скачивания» и «Проводника»  -->
+    <controls:TransferOptionsPanel Grid.Row="4" Margin="0,4,0,0" Direction="Download" />
+
+    <StackPanel
+      Grid.Row="5"
+      Margin="0,4,0,0"
+      Orientation="Horizontal">
+      <ui:Button
+        Margin="0,0,4,0"
+        Appearance="Primary"
+        Click="OnDownload"
+        Content="Выполнить тут"
+        Icon="{ui:SymbolIcon ArrowDownload24}"
+        IsEnabled="{Binding CopyBatch.IsIdle}"
+        ToolTip="Пути этой вкладки с её отмеченных серверов" />
+
+      <ui:Button
+        Appearance="Danger"
+        Click="OnDownloadEverywhere"
+        Content="Выполнить везде"
+        Icon="{ui:SymbolIcon ArrowDownload24}"
+        IsEnabled="{Binding CopyBatch.IsIdle}"
+        ToolTip="Запускает скачивание сразу во всех вкладках — каждая со своими путями, папкой и серверами. Итог по каждой видно на её ярлыке." />
+    </StackPanel>
+  </Grid>
+</Page>

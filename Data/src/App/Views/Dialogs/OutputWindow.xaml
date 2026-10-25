@@ -32,6 +32,7 @@
       <RowDefinition Height="*" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
     <ui:TitleBar
@@ -43,6 +44,7 @@
     <Grid Grid.Row="1" Margin="12,2,12,6">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="Auto" />
@@ -77,8 +79,13 @@
         IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=KeepOutputLog, Mode=TwoWay}"
         ToolTip="Отмечено — следующий прогон дописывается к этому выводу через отбивку. Снято — вывод каждый раз начинается заново." />
 
-      <ui:Button
+      <controls:OutputZoom
         Grid.Column="3"
+        Margin="0,0,6,0"
+        VerticalAlignment="Center" />
+
+      <ui:Button
+        Grid.Column="4"
         Margin="0,0,6,0"
         Padding="9,2"
         Click="OnCopy"
@@ -91,7 +98,7 @@
       </ui:Button>
 
       <ui:Button
-        Grid.Column="4"
+        Grid.Column="5"
         Padding="9,2"
         Click="OnClear"
         Content="Очистить"
@@ -114,10 +121,10 @@
         Background="Transparent"
         BorderThickness="0"
         FontFamily="Consolas"
-        FontSize="12"
+        FontSize="{Binding Source={x:Static services:AppState.Current}, Path=OutputFontSize}"
         HorizontalScrollBarVisibility="Disabled"
         IsReadOnly="True"
-        controls:OutputColoring.Text="{Binding Output, Mode=OneWay}"
+        controls:OutputFeed.Result="{Binding Mode=OneWay}"
         VerticalScrollBarVisibility="Auto">
         <!--
           Тема подменяет фон поля под мышью и в фокусе — на выводе это выглядит как мигание.
@@ -133,15 +140,21 @@
     </Border>
 
     <!--  строка ответа команде этого сервера — та же, что под выводом в главном окне  -->
+    <!--  сколько передано — только пока идёт копирование или скачивание  -->
+    <controls:TransferStrip
+      Grid.Row="3"
+      Margin="12,4,12,0"
+      Visibility="{Binding HasTransfer, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}" />
+
     <controls:AnswerBar
       x:Name="Answer"
-      Grid.Row="3"
+      Grid.Row="4"
       Margin="12,0,12,12" />
 
     <!--  строка состояния: слева — выбранный сервер, справа — весь прогон  -->
     <Border
       x:Name="StatusHost"
-      Grid.Row="4"
+      Grid.Row="5"
       Padding="12,4"
       Background="{DynamicResource ControlFillColorDefaultBrush}"
       BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
@@ -170,31 +183,10 @@
             Text="{Binding StatusText}" />
         </StackPanel>
 
-        <!--
-          Оборвать команду на сервере можно только сигналом её процессам: стандартный ввод
-          закрыт сразу после передачи скрипта, и без терминала Ctrl+C туда не передать.
-        -->
-        <StackPanel
+        <controls:StopButton
           Grid.Column="1"
           Margin="12,0,0,0"
-          Orientation="Horizontal"
-          Visibility="{Binding IsRunning, Converter={StaticResource BoolToVis}}">
-          <ui:Button
-            Margin="0,0,6,0"
-            Padding="8,2"
-            Click="OnInterrupt"
-            Content="Ctrl+C"
-            FontSize="11"
-            Icon="{ui:SymbolIcon Keyboard24}"
-            ToolTip="Послать команде Ctrl+C (сигнал INT) — то же, что нажать Ctrl+C в терминале: команда получает прерывание и сворачивается сама вместе со своими потомками" />
-          <ui:Button
-            Padding="8,2"
-            Click="OnKill"
-            Content="Снять"
-            FontSize="11"
-            Icon="{ui:SymbolIcon Prohibited24}"
-            ToolTip="Снять команду принудительно (сигнал KILL) — для того, что после Ctrl+C не отпускает. Сохранить свою работу команда уже не успеет" />
-        </StackPanel>
+          Visibility="{Binding IsRunning, Converter={StaticResource BoolToVis}}" />
 
         <!--  итог по всему прогону: по нему видно, что команда уже закончилась  -->
         <TextBlock

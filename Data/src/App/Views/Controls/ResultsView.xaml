@@ -55,7 +55,7 @@
     </Grid.RowDefinitions>
 
     <!--  одна строка на всё: прогресс слева, действия справа  -->
-    <Grid Grid.Row="0" Margin="0,0,0,6">
+    <Grid Grid.Row="0" Margin="0,0,0,4">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="Auto" />
@@ -64,8 +64,6 @@
       <Grid Grid.Column="0" Visibility="{Binding IsRunning, Converter={StaticResource BoolToVis}}">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="*" MaxWidth="320" />
-          <ColumnDefinition Width="Auto" />
-          <ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
@@ -78,49 +76,16 @@
           Value="{Binding ProgressPercent, Mode=OneWay}" />
         <TextBlock
           Grid.Column="1"
-          Margin="10,0"
+          Margin="4,0"
           VerticalAlignment="Center"
           FontSize="11"
           Text="{Binding ProgressText}" />
-        <!--
-          Оборвать команду на сервере можно только сигналом её процессам: стандартный ввод
-          закрыт сразу после передачи скрипта, и без терминала Ctrl+C туда не передать.
-          «Отменить» — про нашу сторону: перестаём ждать ответ и закрываем канал.
-        -->
-        <ui:Button
-          Grid.Column="2"
-          Margin="0,0,6,0"
-          Padding="8,2"
-          Click="OnInterrupt"
-          Content="Ctrl+C"
-          FontSize="11"
-          Icon="{ui:SymbolIcon Keyboard24}"
-          ToolTip="Послать команде Ctrl+C (сигнал INT) — то же, что нажать Ctrl+C в терминале: команда получает прерывание и сворачивается сама вместе со своими потомками" />
-
-        <ui:Button
-          Grid.Column="3"
-          Margin="0,0,6,0"
-          Padding="8,2"
-          Click="OnKill"
-          Content="Снять"
-          FontSize="11"
-          Icon="{ui:SymbolIcon Prohibited24}"
-          ToolTip="Снять команду принудительно (сигнал KILL) — для того, что после Ctrl+C не отпускает. Сохранить свою работу команда уже не успеет" />
-
-        <ui:Button
-          Grid.Column="4"
-          Padding="8,2"
-          Appearance="Danger"
-          Click="OnCancel"
-          Content="Отменить"
-          FontSize="11"
-          Icon="{ui:SymbolIcon Stop24}"
-          ToolTip="Перестать ждать ответ и закрыть канал. Сама команда на сервере при этом может продолжать работать — её обрывают Ctrl+C или «Снять»" />
+        <controls:StopButton Grid.Column="2" />
       </Grid>
 
       <StackPanel Grid.Column="1" Orientation="Horizontal">
         <ui:Button
-          Margin="0,0,6,0"
+          Margin="0,0,4,0"
           Padding="9,2"
           Click="OnCopyAll"
           Content="Копировать. Все сервера"
@@ -134,14 +99,14 @@
         <CheckBox
           MinWidth="0"
           MinHeight="0"
-          Margin="0,0,14,0"
+          Margin="0,0,4,0"
           VerticalAlignment="Center"
           Content="{Binding Source={x:Static services:AppState.Current}, Path=AutoCopyWhen}"
           FontSize="11"
           IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=AutoCopyAll, Mode=TwoWay}"
           ToolTip="Операция закончилась на всех серверах — вывод всех серверов сам копируется в буфер обмена. У команд и у копирования галочки свои. Буфер один, поэтому соседняя галочка при этом снимается" />
         <ui:Button
-          Margin="0,0,6,0"
+          Margin="0,0,4,0"
           Padding="9,2"
           Click="OnCopyOne"
           Content="Копировать. Текущее окно"
@@ -154,12 +119,22 @@
         <CheckBox
           MinWidth="0"
           MinHeight="0"
-          Margin="0,0,14,0"
+          Margin="0,0,4,0"
           VerticalAlignment="Center"
           Content="{Binding Source={x:Static services:AppState.Current}, Path=AutoCopyWhen}"
           FontSize="11"
           IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=AutoCopyCurrent, Mode=TwoWay}"
           ToolTip="Операция закончилась — вывод сервера, выбранного в таблице слева, сам копируется в буфер обмена. У команд и у копирования галочки свои. Буфер один, поэтому соседняя галочка при этом снимается" />
+        <CheckBox
+          MinWidth="0"
+          MinHeight="0"
+          Margin="0,0,4,0"
+          VerticalAlignment="Center"
+          Content="+ команды"
+          FontSize="11"
+          IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=CopyWithChain, Mode=TwoWay}"
+          ToolTip="Копировать вместе с выводом личных команд вкладки: в буфере один отчёт — сначала копирование, потом команды. Автокопия тогда ждёт, пока команды закончатся"
+          Visibility="{Binding Source={x:Static services:AppState.Current}, Path=ChainCopyVisibility}" />
         <ui:Button
           Padding="9,2"
           Click="OnRetry"
@@ -174,7 +149,7 @@
     <Grid Grid.Row="1">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="1*" MinWidth="220" />
-        <ColumnDefinition Width="6" />
+        <ColumnDefinition Width="4" />
         <ColumnDefinition Width="1*" MinWidth="260" />
       </Grid.ColumnDefinitions>
 
@@ -274,7 +249,7 @@
 
       <GridSplitter
         Grid.Column="1"
-        Width="6"
+        Width="4"
         HorizontalAlignment="Stretch"
         Background="Transparent" />
 
@@ -286,6 +261,7 @@
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
 
@@ -303,6 +279,7 @@
               <Grid>
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
                   <ColumnDefinition Width="Auto" />
                   <ColumnDefinition Width="Auto" />
                   <ColumnDefinition Width="Auto" />
@@ -344,8 +321,13 @@
                   IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=KeepOutputLog, Mode=TwoWay}"
                   ToolTip="Отмечено — следующий прогон дописывается к этому выводу через отбивку. Снято — вывод каждый раз начинается заново." />
 
-                <Button
+                <controls:OutputZoom
                   Grid.Column="2"
+                  Margin="0,0,4,0"
+                  VerticalAlignment="Center" />
+
+                <Button
+                  Grid.Column="3"
                   VerticalAlignment="Center"
                   Click="OnClearOutput"
                   Style="{StaticResource OutputIconStyle}"
@@ -355,7 +337,7 @@
 
                 <Button
                   x:Name="DetachButton"
-                  Grid.Column="3"
+                  Grid.Column="4"
                   VerticalAlignment="Center"
                   Click="OnDetach"
                   Style="{StaticResource OutputIconStyle}"
@@ -373,10 +355,10 @@
               Background="Transparent"
               BorderThickness="0"
               FontFamily="Consolas"
-              FontSize="12"
+              FontSize="{Binding Source={x:Static services:AppState.Current}, Path=OutputFontSize}"
               HorizontalScrollBarVisibility="Disabled"
               IsReadOnly="True"
-              controls:OutputColoring.Text="{Binding SelectedItem.Output, ElementName=ResultsGrid, Mode=OneWay}"
+              controls:OutputFeed.Result="{Binding SelectedItem, ElementName=ResultsGrid, Mode=OneWay}"
               VerticalScrollBarVisibility="Auto">
               <!--
                 Тема подменяет фон поля под мышью и в фокусе — на выводе это выглядит как мигание.
@@ -407,6 +389,13 @@
             x:Name="Answer"
             Grid.Row="2"
             DataContext="{Binding SelectedItem, ElementName=ResultsGrid}" />
+
+          <!--  сколько передано у выбранного сервера — только пока идёт копирование или скачивание  -->
+          <controls:TransferStrip
+            Grid.Row="3"
+            Margin="4"
+            DataContext="{Binding SelectedItem, ElementName=ResultsGrid}"
+            Visibility="{Binding HasTransfer, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}" />
         </Grid>
       </Border>
     </Grid>

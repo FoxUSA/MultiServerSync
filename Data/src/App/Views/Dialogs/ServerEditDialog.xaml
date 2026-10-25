@@ -130,6 +130,15 @@
         Margin="0,6,0,0"
         Content="Показывать заметку под именем сервера в панели слева" />
 
+      <TextBlock
+        Margin="0,12,0,4"
+        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+        Text="Через сервер" />
+      <ComboBox
+        x:Name="JumpBox"
+        DisplayMemberPath="Label"
+        ToolTip="Промежуточный сервер (jump host, как ProxyJump у ssh): подключение к этому серверу идёт через него" />
+
       <!--  запомненный ключ сервера: забыть или принять новый, если сервер переустановили  -->
       <Grid
         x:Name="HostKeyPanel"
@@ -183,7 +192,6 @@
       Orientation="Horizontal">
       <ui:Button
         Margin="0,0,8,0"
-        Appearance="Primary"
         Click="OnSave"
         Content="Сохранить"
         Icon="{ui:SymbolIcon Save24}"
