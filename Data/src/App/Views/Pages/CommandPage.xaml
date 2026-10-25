@@ -296,13 +296,22 @@
 
       <StackPanel Grid.Column="0" Orientation="Horizontal">
         <ui:Button
-          Margin="0,0,18,0"
+          Margin="0,0,10,0"
           Appearance="Primary"
           Click="OnRun"
-          Content="Выполнить"
+          Content="Выполнить тут"
           Icon="{ui:SymbolIcon Play24}"
           IsEnabled="{Binding CommandBatch.IsIdle}"
-          ToolTip="Команда на отмеченных серверах (Ctrl+Enter в поле ввода)" />
+          ToolTip="Команда этой вкладки на её отмеченных серверах (Ctrl+Enter в поле ввода)" />
+
+        <ui:Button
+          Margin="0,0,18,0"
+          Appearance="Danger"
+          Click="OnRunEverywhere"
+          Content="Выполнить везде"
+          Icon="{ui:SymbolIcon Play24}"
+          IsEnabled="{Binding CommandBatch.IsIdle}"
+          ToolTip="Запускает команды сразу во всех командных вкладках — каждая со своей командой и серверами. Итог по каждой видно на её ярлыке." />
 
         <CheckBox
           VerticalAlignment="Center"

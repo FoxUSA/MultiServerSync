@@ -1085,7 +1085,10 @@ public sealed class Workspace : ObservableObject
     }
 
     /// <summary>Выполнение команды этой вкладки на её отмеченных серверах.</summary>
-    public async Task<bool> RunCommandAsync()
+    /// <param name="notify">
+    /// Сообщить об окончании (автокопия вывода). «Выполнить везде» сообщает само — один раз по сводке.
+    /// </param>
+    public async Task<bool> RunCommandAsync(bool notify = true)
     {
         if (CommandBatch.IsRunning)
         {
@@ -1206,7 +1209,10 @@ public sealed class Workspace : ObservableObject
             "команда",
             CommandBatch.SuccessCount == 0 ? "не выполнено" : "выполнено");
 
-        AppState.Current.NotifyFinished(CommandBatch);
+        if (notify)
+        {
+            AppState.Current.NotifyFinished(CommandBatch);
+        }
 
         return true;
     }

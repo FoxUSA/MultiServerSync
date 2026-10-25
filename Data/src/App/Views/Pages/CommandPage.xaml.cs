@@ -375,6 +375,62 @@ public partial class CommandPage : Page
         }
     }
 
+    /// <summary>
+    /// «Выполнить везде» — команды запускаются во всех командных вкладках сразу, каждая со своей
+    /// командой и серверами. Кнопка есть на любой вкладке; сводка показывается на той, с которой нажали.
+    /// </summary>
+    private async void OnRunEverywhere(object sender, RoutedEventArgs e)
+    {
+        if (Workspace is not { } workspace)
+        {
+            return;
+        }
+
+        var all = AppState.Current.CommandTabs.ToList();
+
+        // широкое действие: команды уходят со всех вкладок сразу — сначала спросить.
+        // По умолчанию фокус на «Отмене»
+        if (!ConfirmDialog.Ask(
+                Window.GetWindow(this),
+                $"Запустить команды на всех вкладках ({all.Count})?",
+                string.Empty,
+                "Выполнить везде"))
+        {
+            AppLog.Info("«Выполнить везде» отменено.");
+            return;
+        }
+
+        if (all.Count <= 1)
+        {
+            await workspace.RunCommandAsync();
+            return;
+        }
+
+        AppLog.Info($"«Выполнить везде» — команды запускаются во всех вкладках: {all.Count}.");
+
+        // операции стартуют синхронно, поэтому строки уже созданы и попадут в сводку
+        var running = all.Select(w => w.RunCommandAsync(notify: false)).ToList();
+
+        // вкладка, которая отказалась (нет команды или серверов), в сводку не идёт:
+        // её отказ уже виден на ярлыке и в журнале
+        var started = all.Where((_, i) => !(running[i].IsCompletedSuccessfully && !running[i].Result)).ToList();
+
+        if (started.Count == 0)
+        {
+            AppLog.Warn("Команда не запущена ни на одной вкладке — причины выше.");
+            await Task.WhenAll(running);
+            return;
+        }
+
+        // сводка только в терминале: на ярлыке первой вкладки — её собственная работа
+        workspace.ShowSummary(started.Select(w => w.CommandBatch).ToList(), "команда");
+
+        await Task.WhenAll(running);
+
+        // автокопия — по сводке, когда закончили все вкладки, а не по первой закончившей
+        AppState.Current.NotifyFinished(workspace.SummaryBatch);
+    }
+
     /// <summary>Сколько после окончания команды её повтор считается случайным двойным нажатием.</summary>
     private static readonly TimeSpan RepeatGuard = TimeSpan.FromSeconds(3);
 

@@ -29,6 +29,13 @@ Check the servers — and push files or run a command on all of them with one cl
 <a href="images/multiserversync-tabs.png"><img src="images/multiserversync-tabs.png" height="140" alt="All tabs"></a>
 </p>
 
+## What it's for
+
+- **Hundreds of routes, one click.** A tab is a scenario: "this folder → there, on these servers", "that file → elsewhere". **Run everywhere** fires every tab at once.
+- **Commands in parallel.** Command tabs run side by side — even different commands on the same server: logs in one, restart in another.
+- **Fast copy, verified twice.** SHA‑256 before sending — identical files stay put; after — proof everything arrived intact.
+- **No wrong server.** Smart mode remembers where each command and tab usually goes and asks before an unusual target.
+
 Add your servers once. After that: check the ones you need, pick files or type a command, press **Run**.
 
 - **Copy to every server** — files and folders go to the checked servers in parallel. A dropped connection never leaves a truncated file: each file is swapped in whole. Failed servers are retried in one click.

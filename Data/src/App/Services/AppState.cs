@@ -398,9 +398,9 @@ public sealed class AppState : ObservableObject
 
     public void NotifyFinished(OperationBatch batch) => OperationFinished?.Invoke(batch);
 
-    /// <summary>Это вывод команды, а не копирования или проверки связи.</summary>
+    /// <summary>Это вывод команды — одной вкладки или сводка «Выполнить везде», а не копирования или проверки связи.</summary>
     public bool IsCommandBatch(OperationBatch batch) =>
-        CommandTabs.Any(w => ReferenceEquals(w.CommandBatch, batch));
+        CommandTabs.Any(w => ReferenceEquals(w.CommandBatch, batch) || ReferenceEquals(w.SummaryBatch, batch));
 
     /// <summary>Это вывод копирования — одной вкладки или сводка «Выполнить везде».</summary>
     public bool IsCopyBatch(OperationBatch batch) =>
