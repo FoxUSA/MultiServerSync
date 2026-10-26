@@ -99,6 +99,13 @@ public partial class MainWindow : FluentWindow
 
         SetupTabReorder();
         SetupTabView();
+
+        // срок жизни вывода: окошко отсчитывает, на нуле терминал вкладки очищается
+        _ = new System.Windows.Threading.DispatcherTimer(
+            TimeSpan.FromSeconds(1),
+            System.Windows.Threading.DispatcherPriority.Background,
+            (_, _) => State.TickOutputLife(),
+            Dispatcher);
         SetupTray();
 
         AppState.Current.OperationFinished += OnOperationFinished;

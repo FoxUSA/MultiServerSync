@@ -58,12 +58,32 @@
           «Терминал / Журнал» — отступ слева под них ставит окно (AlignToolbar)  -->
     <Grid x:Name="ToolBar" Grid.Row="0" Margin="0,0,0,4">
       <Grid.ColumnDefinitions>
+        <!--  до правой границы таблицы слева: ширину ставит код, границу двигает разделитель  -->
+        <ColumnDefinition x:Name="LeftToolsColumn" Width="Auto" />
+        <ColumnDefinition Width="4" />
         <ColumnDefinition Width="*" />
-        <ColumnDefinition Width="Auto" />
       </Grid.ColumnDefinitions>
 
+      <DockPanel Grid.Column="0" LastChildFill="True">
+        <!--  срок жизни вывода и «Сохранять лог» — у правой границы таблицы, над ней  -->
+        <StackPanel
+          x:Name="LeftTools"
+          VerticalAlignment="Center"
+          DockPanel.Dock="Right"
+          Orientation="Horizontal">
+          <controls:OutputLife />
+          <CheckBox
+            MinWidth="0"
+            MinHeight="0"
+            Margin="10,0,6,0"
+            VerticalAlignment="Center"
+            Content="Сохранять лог"
+            FontSize="11"
+            IsChecked="{Binding KeepLog, Mode=TwoWay}"
+            ToolTip="Своя у каждой вкладки. Отмечено — терминал вкладки хранит все запуски, пока галочку не снять. Снято — запуск позже срока «Хранить лог» после окончания прошлого начинает терминал заново." />
+        </StackPanel>
+
       <Grid
-        Grid.Column="0"
         Margin="12,0,12,0"
         VerticalAlignment="Center"
         Visibility="{Binding IsRunning, Converter={StaticResource BoolToVis}}">
@@ -87,9 +107,11 @@
           Text="{Binding ProgressText}" />
         <controls:StopButton Grid.Column="2" />
       </Grid>
+      </DockPanel>
 
       <StackPanel
-        Grid.Column="1"
+        Grid.Column="2"
+        HorizontalAlignment="Right"
         VerticalAlignment="Center"
         Orientation="Horizontal">
         <ui:Button
@@ -162,7 +184,9 @@
       </Grid.ColumnDefinitions>
 
       <Border
+        x:Name="TablePane"
         Grid.Column="0"
+        SizeChanged="OnTablePaneSized"
         Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
         BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
         BorderThickness="1"
@@ -331,16 +355,7 @@
                     ToolTip="Сколько выполняется команда на выбранном сервере" />
                 </Grid>
 
-                <CheckBox
-                  Grid.Column="1"
-                  MinHeight="0"
-                  Margin="8,0,6,0"
-                  VerticalAlignment="Center"
-                  Content="Сохранять лог"
-                  FontSize="11"
-                  IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=KeepOutputLog, Mode=TwoWay}"
-                  ToolTip="Отмечено — следующий прогон дописывается к этому выводу через отбивку. Снято — вывод каждый раз начинается заново." />
-
+                <!--  «Сохранять лог» переехала в строку «Терминал / Журнал», к правой границе таблицы  -->
                 <controls:OutputZoom
                   Grid.Column="2"
                   Margin="0,0,4,0"

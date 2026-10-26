@@ -16,6 +16,8 @@
   ui:Design.Foreground="{DynamicResource TextFillColorPrimaryBrush}"
   ExtendsContentIntoTitleBar="True"
   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  TextOptions.TextFormattingMode="Display"
+  UseLayoutRounding="True"
   ShowInTaskbar="True"
   WindowBackdropType="None"
   WindowCornerPreference="Round"
@@ -76,8 +78,8 @@
         VerticalAlignment="Center"
         Content="Сохранять лог"
         FontSize="11"
-        IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=KeepOutputLog, Mode=TwoWay}"
-        ToolTip="Отмечено — следующий прогон дописывается к этому выводу через отбивку. Снято — вывод каждый раз начинается заново." />
+        IsChecked="{Binding DataContext.KeepLog, ElementName=StatusHost, Mode=TwoWay}"
+        ToolTip="Своя у каждой вкладки. Отмечено — терминал вкладки хранит все запуски, пока галочку не снять. Снято — запуск позже срока «Хранить лог» после окончания прошлого начинает терминал заново." />
 
       <controls:OutputZoom
         Grid.Column="3"

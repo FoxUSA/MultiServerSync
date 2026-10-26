@@ -40,6 +40,114 @@ public sealed class OperationBatch : ObservableObject
 
     public ObservableCollection<OperationResult> Results { get; } = new();
 
+    /// <summary>Вкладка, чей это прогон: у неё своя галочка «Сохранять лог».</summary>
+    public Workspace? Owner { get; set; }
+
+    /// <summary>
+    /// «Сохранять лог» вкладки: отмечено — вкладка хранит весь вывод, пока галочку не снимут,
+    /// новый прогон дописывается к строкам тех же серверов через отбивку. Снято — прогоны
+    /// копятся строками по времени запуска, пока между ними не больше срока жизни вывода.
+    /// Сводный прогон — галочка всех вкладок, из которых он собран.
+    /// </summary>
+    public bool KeepLog
+    {
+        get => _sources.Count > 0 ? _sources.All(s => s.KeepLog) : Owner?.KeepOutputLog == true;
+        set
+        {
+            if (_sources.Count > 0)
+            {
+                foreach (var source in _sources)
+                {
+                    source.KeepLog = value;
+                }
+            }
+            else if (Owner is { } owner)
+            {
+                owner.KeepOutputLog = value;
+            }
+
+            Raise();
+        }
+    }
+
+    internal void RaiseKeepLog()
+    {
+        // «Сохранять лог» сняли — отсчёт срока с начала, а не стирать накопленное в ту же секунду
+        if (!KeepLog && !IsRunning && _lifeFrom is not null)
+        {
+            _lifeFrom = DateTime.Now;
+        }
+
+        RaiseMany(nameof(KeepLog), nameof(LifeText), nameof(LifeExpired));
+    }
+
+    /// <summary>
+    /// Срок поменяли кнопками — отсчёт с начала нового срока, если в терминале уже есть вывод,
+    /// даже когда он дошёл до нуля: следующий запуск снова допишется ниже.
+    /// </summary>
+    public void RestartLife()
+    {
+        foreach (var source in _sources)
+        {
+            source.RestartLife();
+        }
+
+        if (!IsRunning && Results.Count > 0 && _lifeFrom is not null)
+        {
+            _lifeFrom = DateTime.Now;
+        }
+
+        RaiseMany(nameof(LifeText), nameof(LifeExpired));
+    }
+
+    /// <summary>С какого момента идёт срок жизни вывода: окончание последнего запуска. Null — отсчёта нет.</summary>
+    private DateTime? _lifeFrom;
+
+    /// <summary>Сколько осталось, пока новый запуск ещё дописывается ниже; null — отсчёта нет (идёт работа, пусто или «Сохранять лог»).</summary>
+    private TimeSpan? LifeLeft =>
+        _sources.Count == 0 && !KeepLog && !IsRunning && Results.Count > 0 && _lifeFrom is { } from
+            ? AppState.Current.OutputLife - (DateTime.Now - from)
+            : null;
+
+    /// <summary>Окошко срока: «04:37» — сколько осталось, без отсчёта — сам срок.</summary>
+    public string LifeText
+    {
+        get
+        {
+            var shown = LifeLeft ?? AppState.Current.OutputLife;
+            var seconds = Math.Max(0, (int)Math.Ceiling(shown.TotalSeconds));
+            return $"{seconds / 60:00}:{seconds % 60:00}";
+        }
+    }
+
+    /// <summary>Отсчёт дошёл до нуля: следующий запуск начнёт терминал заново — окошко оранжевое.</summary>
+    public bool LifeExpired =>
+        _sources.Count > 0
+            ? _sources.Any(s => s.LifeExpired)
+            : LifeLeft is { } left && left <= TimeSpan.Zero;
+
+    /// <summary>
+    /// Раз в секунду — отсчёт в окошке. На нуле ничего не стирается: срок лишь решает, что сделает
+    /// следующий запуск — до нуля допишет свои строки ниже, после нуля начнёт терминал заново.
+    /// </summary>
+    internal void TickLife() => RaiseMany(nameof(LifeText), nameof(LifeExpired));
+
+    /// <summary>Строки последнего прогона: повтор упавших — только среди них, у прошлых прогонов была своя работа.</summary>
+    private IReadOnlyList<OperationResult> _lastRun = [];
+
+    /// <summary>Строки последнего прогона — к ним терминал прокручивается при запуске.</summary>
+    public IReadOnlyList<OperationResult> LastRun => _lastRun;
+
+    /// <summary>
+    /// Счёт последнего запуска — для итога на ярлыке и решений после него: таблица могла накопить
+    /// и прошлые запуски. У сводного прогона — его общий счёт.
+    /// </summary>
+    public int RunTotal => _sources.Count > 0 ? Total : _lastRun.Count;
+
+    public int RunSuccess => _sources.Count > 0 ? SuccessCount : _lastRun.Count(r => r.Status == OperationStatus.Success);
+
+    public int RunFailed => _sources.Count > 0 ? FailedCount : _lastRun.Count(r => r.Status is OperationStatus.Failed or OperationStatus.Cancelled);
+
     /// <summary>Название вкладки, из которой запущена операция — попадает в строки результатов.</summary>
     public string? Scope { get; set; }
 
@@ -100,7 +208,7 @@ public sealed class OperationBatch : ObservableObject
         private set { if (Set(ref _failed, value)) { RaiseMany(nameof(CanRetry), nameof(SummaryText)); } }
     }
 
-    public bool CanRetry => !IsRunning && FailedCount > 0;
+    public bool CanRetry => !IsRunning && (_sources.Count > 0 ? FailedCount > 0 : _lastRun.Any(r => r.Status is OperationStatus.Failed or OperationStatus.Cancelled));
 
     public double ProgressPercent => Total == 0 ? 0 : Done * 100.0 / Total;
 
@@ -406,32 +514,25 @@ public sealed class OperationBatch : ObservableObject
         _beforeRetry = beforeRetry;
         _afterRetry = afterRetry;
 
-        // «Сохранять лог»: строки прошлого прогона по тем же серверам остаются вместе со своим
-        // выводом, новый прогон дописывается под отбивкой. Серверы, которых в этом прогоне нет,
-        // из таблицы уходят — в ней всегда ровно то, что выполняется сейчас.
-        var carried = AppState.Current.KeepOutputLog ? Results.ToList() : new List<OperationResult>();
-        var header = RunHeader(operationName);
+        // Прогоны копятся строками в порядке запуска, сверху вниз, — хоть сто подряд: видно всё,
+        // что запущено, и чем кончилось. «Сохранять лог» у вкладки — не стирается ничего, пока
+        // галочку не снимут. Без неё прошлые строки уходят, только если новый прогон начат позже
+        // срока «Хранить лог» после окончания прошлого (пока что-то идёт, сюда не попасть).
+        var life = AppState.Current.OutputLife;
 
-        Results.Clear();
-
-        foreach (var s in servers)
+        if (!KeepLog && (_lifeFrom is not { } last || DateTime.Now - last > life))
         {
-            var kept = carried.FirstOrDefault(r => ReferenceEquals(r.Server, s));
-
-            if (kept is null)
-            {
-                Results.Add(new OperationResult(s, Scope));
-                continue;
-            }
-
-            // вкладку могли переименовать между прогонами — заголовок строки берём свежий
-            kept.Scope = Scope ?? string.Empty;
-            kept.ResetJob();
-            kept.StartNextRun(header);
-            Results.Add(kept);
+            Results.Clear();
         }
 
-        await ExecuteAsync(Results.ToList(), work, maxParallel);
+        var run = servers.Select(s => new OperationResult(s, Scope)).ToList();
+
+        foreach (var row in run)
+        {
+            Results.Add(row);
+        }
+
+        await ExecuteAsync(run, work, maxParallel);
     }
 
     public async Task RetryFailedAsync(int maxParallel)
@@ -448,7 +549,7 @@ public sealed class OperationBatch : ObservableObject
             return;
         }
 
-        var failed = Results.Where(r => r.Status is OperationStatus.Failed or OperationStatus.Cancelled).ToList();
+        var failed = _lastRun.Where(r => r.Status is OperationStatus.Failed or OperationStatus.Cancelled).ToList();
         if (failed.Count == 0)
         {
             return;
@@ -462,7 +563,7 @@ public sealed class OperationBatch : ObservableObject
         {
             r.ResetJob();
 
-            if (AppState.Current.KeepOutputLog)
+            if (KeepLog)
             {
                 r.StartNextRun(header);
             }
@@ -522,11 +623,19 @@ public sealed class OperationBatch : ObservableObject
             AppLog.Section = section;
         }
 
+        // счёт — по всей таблице: прошлые прогоны в ней уже закончены, «готово 3 из 4» видно сразу
+        var earlier = Results.Where(r => !targets.Contains(r)).ToList();
+
+        if (!ReferenceEquals(targets, _lastRun) && !targets.All(_lastRun.Contains))
+        {
+            _lastRun = targets.ToList();
+        }
+
         IsRunning = true;
-        Total = targets.Count;
-        Done = 0;
-        SuccessCount = 0;
-        FailedCount = 0;
+        Total = Results.Count;
+        Done = earlier.Count;
+        SuccessCount = earlier.Count(r => r.Status == OperationStatus.Success);
+        FailedCount = Done - SuccessCount;
 
         AppLog.Debug($"«{_operationName}» — старт на {Total} сервере(ах), одновременно до {maxParallel}.");
 
@@ -620,7 +729,7 @@ public sealed class OperationBatch : ObservableObject
                 }
 
                 // с одним сервером его итог и есть итог операции — он придёт ниже, один раз
-                if (Total > 1)
+                if (targets.Count > 1)
                 {
                     AppLog.ServerLine(LevelOf(result), Outcome(result), result.Server.Display);
                 }
@@ -632,6 +741,7 @@ public sealed class OperationBatch : ObservableObject
         await Task.WhenAll(tasks);
 
         _finishedAt = DateTime.Now;
+        _lifeFrom = _finishedAt;
         IsRunning = false;
         Raise(nameof(CanRetry));
 
@@ -640,17 +750,22 @@ public sealed class OperationBatch : ObservableObject
             var only = targets[0];
             AppLog.Write(LevelOf(only), $"{_operationName}: {Outcome(only)}", only.Server.Display);
         }
-        else if (FailedCount == 0)
-        {
-            AppLog.Success($"{_operationName}: все {SuccessCount} сервер(ов) — успешно.");
-        }
         else
         {
-            var bad = Results
+            // итог — про этот прогон, а не про всю накопленную таблицу
+            var bad = targets
                 .Where(r => r.Status is OperationStatus.Failed or OperationStatus.Cancelled)
-                .Select(r => r.Server.PaneLabel);
+                .Select(r => r.Server.PaneLabel)
+                .ToList();
 
-            AppLog.Error($"{_operationName}: успешно {SuccessCount} из {Total}. Не прошли: {string.Join(", ", bad)}.");
+            if (bad.Count == 0)
+            {
+                AppLog.Success($"{_operationName}: все {targets.Count} сервер(ов) — успешно.");
+            }
+            else
+            {
+                AppLog.Error($"{_operationName}: успешно {targets.Count - bad.Count} из {targets.Count}. Не прошли: {string.Join(", ", bad)}.");
+            }
         }
     }
 

@@ -16,6 +16,9 @@ public sealed class WorkspaceState
     /// <summary>Ярлык убран в архив под «+». Сама вкладка та же: меняется только, где лежит ярлык.</summary>
     public bool IsArchived { get; set; }
 
+    /// <summary>«Сохранять лог» вкладки. Null — сохранено до того, как галочка стала своей у вкладки.</summary>
+    public bool? KeepOutputLog { get; set; }
+
     /// <summary>Серверы, отмеченные в разделе «Копирование».</summary>
     public List<string> SelectedServerIds { get; set; } = new();
 

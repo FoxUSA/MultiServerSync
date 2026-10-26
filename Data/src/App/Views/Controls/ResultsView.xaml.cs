@@ -56,6 +56,22 @@ public partial class ResultsView : UserControl
     {
         ToolBar.Margin = new Thickness(indent, 0, 0, 4);
         ToolBar.MinHeight = height;
+        _toolIndent = indent;
+        FitLeftTools();
+    }
+
+    private double _toolIndent;
+
+    private void OnTablePaneSized(object sender, SizeChangedEventArgs e) => FitLeftTools();
+
+    /// <summary>
+    /// «Хранить лог» и «Сохранять лог» стоят у правой границы таблицы слева: левая часть строки
+    /// кнопок — ровно до неё (строка начинается правее ярлыков «Терминал / Журнал»).
+    /// </summary>
+    private void FitLeftTools()
+    {
+        LeftTools.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        LeftToolsColumn.Width = new GridLength(Math.Max(LeftTools.DesiredSize.Width, TablePane.ActualWidth - _toolIndent));
     }
 
     /// <summary>Команды после копирования показанного прогона; null — их нет.</summary>
@@ -175,14 +191,16 @@ public partial class ResultsView : UserControl
         }
 
         var picked = ResultsGrid.SelectedItem;
-        var fresh = _chain.StartedAt is { } chainStart && shown.StartedAt is { } copyStart && chainStart >= copyStart;
+
+        // проверено выше: без команд после копирования сюда не доходит
+        OperationBatch following = _chain;
 
         _rows.Clear();
         _heads.Clear();
         _queue.Clear();
 
         var pairs = shown.Results
-            .Select(row => (row, after: fresh ? _chain.Results.FirstOrDefault(c => ReferenceEquals(c.Server, row.Server)) : null))
+            .Select(row => (row, after: AppState.AfterRowOf(shown, row, following)))
             .ToList();
 
         // связки заполняются раньше строк: таблица ставит строку на место уже при добавлении
@@ -240,7 +258,45 @@ public partial class ResultsView : UserControl
             ResultsGrid.SelectedItem = batch.Results[0];
         }
 
+        if (e.Action == NotifyCollectionChangedAction.Add)
+        {
+            FollowNewRun();
+        }
+
         FitServerColumn();
+    }
+
+    private bool _following;
+
+    /// <summary>
+    /// Прогоны копятся сверху вниз — терминал сам идёт за новым: его первая строка выбирается
+    /// (справа её вывод), строки встают в видимую часть. Строки прогона добавляются по одной —
+    /// переход один, после последней.
+    /// </summary>
+    private void FollowNewRun()
+    {
+        if (_following)
+        {
+            return;
+        }
+
+        _following = true;
+
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            _following = false;
+
+            if (Batch is not { LastRun: { Count: > 0 } run } || !ResultsGrid.Items.Contains(run[0]))
+            {
+                return;
+            }
+
+            ResultsGrid.SelectedItem = run[0];
+
+            // сначала последняя, потом первая: видна первая строка прогона и сколько влезет следом
+            ResultsGrid.ScrollIntoView(run[^1]);
+            ResultsGrid.ScrollIntoView(run[0]);
+        }), System.Windows.Threading.DispatcherPriority.Background);
     }
 
     /// <summary>
@@ -405,7 +461,7 @@ public partial class ResultsView : UserControl
         // «+ команды»: следом вывод личных команд этого же сервера
         if (batch is not null
             && AppState.Current.ChainFor(batch) is { } chain
-            && chain.Results.FirstOrDefault(r => ReferenceEquals(r.Server, result.Server)) is { } after
+            && AppState.AfterRowOf(batch, result, chain) is { } after
             && after.Output.TrimEnd() is { Length: > 0 } afterText)
         {
             text = "═════ Копирование ═════" + Environment.NewLine + text + Environment.NewLine + Environment.NewLine

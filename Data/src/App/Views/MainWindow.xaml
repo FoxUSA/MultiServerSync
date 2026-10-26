@@ -1286,10 +1286,14 @@
 
     <!--  нижняя панель: слева таблица серверов, справа вывод; вторая вкладка — журнал.
           Карточка с зазором 4 от стен окна — тот же, что между страницей и панелью  -->
+    <!--  мелкий текст терминала и журнала — по пиксельной сетке, как на ярлыках вкладок: в режиме
+          Ideal подписи 11 точек выходили размытыми, а соседние — разными по резкости  -->
     <Border
       x:Name="BottomPanel"
       Grid.Row="5"
       Margin="4,0,4,4"
+      TextOptions.TextFormattingMode="Display"
+      UseLayoutRounding="True"
       Background="{DynamicResource SolidBackgroundFillColorQuarternaryBrush}"
       BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
       BorderThickness="1"

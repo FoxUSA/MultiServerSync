@@ -274,24 +274,41 @@ public sealed class AppState : ObservableObject
 
     public AppSettings Settings { get; private set; } = new();
 
-    /// <summary>
-    /// Галочка «Сохранять лог» из панели вывода. Хранится в настройках, но привязана сразу
-    /// к двум окнам — панели внизу и отдельному окну вывода, поэтому стоит здесь:
-    /// снятая в одном месте, она сразу снята и в другом.
-    /// </summary>
-    public bool KeepOutputLog
-    {
-        get => Settings.KeepOutputLog;
-        set
-        {
-            if (Settings.KeepOutputLog == value)
-            {
-                return;
-            }
+    private const int MaxOutputLife = 99 * 60;
 
-            Settings.KeepOutputLog = value;
-            Raise();
-            SaveSettings();
+    /// <summary>Срок жизни вывода в терминале: общий для всех вкладок, кнопками у терминала.</summary>
+    public TimeSpan OutputLife => TimeSpan.FromSeconds(Math.Clamp(Settings.OutputLifeSeconds, 0, MaxOutputLife));
+
+    /// <summary>
+    /// «−» и «+» у срока: по 30 секунд, а у нуля мельче — ниже 30 секунд по 10, ниже 10 по 5,
+    /// ниже 5 по одной. Вверх — те же ступени обратно; потолок — 99 минут.
+    /// </summary>
+    public void StepOutputLife(int direction)
+    {
+        var s = (int)OutputLife.TotalSeconds;
+
+        s = direction > 0
+            ? s + (s < 5 ? 1 : s < 10 ? 5 : s < 30 ? 10 : 30)
+            : s - (s <= 5 ? 1 : s <= 10 ? 5 : s <= 30 ? 10 : 30);
+
+        s = Math.Clamp(s, 0, MaxOutputLife);
+
+        if (Settings.OutputLifeSeconds == s)
+        {
+            return;
+        }
+
+        Settings.OutputLifeSeconds = s;
+        SaveSettings();
+        TickOutputLife();
+    }
+
+    /// <summary>Раз в секунду: окошки срока отсчитывают, у кого вышло — терминал вкладки очищается.</summary>
+    public void TickOutputLife()
+    {
+        foreach (var workspace in AllWorkspaces)
+        {
+            workspace.TickOutputLife();
         }
     }
 
@@ -435,6 +452,30 @@ public sealed class AppState : ObservableObject
     /// Личные команды строки копирования — для поля вывода, которое показывает их следом:
     /// галочка «+ команды» стоит и у вкладки включены команды после копирования. Иначе null.
     /// </summary>
+    /// <summary>
+    /// Строка команд после копирования, что шла следом за этой строкой копирования. Прогоны
+    /// копятся, у сервера строк бывает несколько: подходит строка команд того же сервера,
+    /// появившаяся после этой строки и раньше следующей строки копирования этого сервера.
+    /// </summary>
+    public static OperationResult? AfterRowOf(OperationBatch copy, OperationResult row, OperationBatch chain)
+    {
+        var next = copy.Results
+            .Where(r => ReferenceEquals(r.Server, row.Server) && r.Created > row.Created)
+            .Select(r => (DateTime?)r.Created)
+            .Min();
+
+        return chain.Results.LastOrDefault(c => ReferenceEquals(c.Server, row.Server)
+            && c.Created >= row.Created
+            && (next is null || c.Created < next));
+    }
+
+    /// <summary>То же по одной строке копирования: её вкладка и команды после копирования находятся сами.</summary>
+    public OperationResult? AfterRowOf(OperationResult copyRow) =>
+        ChainBatchOf(copyRow) is { } chain
+        && Workspaces.FirstOrDefault(w => w.CopyBatch.Results.Contains(copyRow)) is { } owner
+            ? AfterRowOf(owner.CopyBatch, copyRow, chain)
+            : null;
+
     public OperationBatch? ChainBatchOf(OperationResult copyRow)
     {
         if (!Settings.CopyWithChain)
@@ -1307,6 +1348,9 @@ public sealed class AppState : ObservableObject
         {
             var file = ReadJson<WorkspacesFile>(AppPaths.WorkspacesFile);
             var states = file?.Workspaces ?? new List<WorkspaceState>();
+
+            // вкладки, сохранённые при общей галочке «Сохранять лог», берут её значение себе
+            Workspace.LegacyKeepLog = Settings.KeepOutputLog;
 
             if (states.Count == 0)
             {

@@ -68,6 +68,12 @@ public sealed class Workspace : ObservableObject
         Steps.Add(new CommandStep());
 
         Downloads.CollectionChanged += OnDownloadsChanged;
+
+        // у прогонов вкладки — её галочка «Сохранять лог»
+        foreach (var batch in OwnBatches)
+        {
+            batch.Owner = this;
+        }
     }
 
     public string Id { get; }
@@ -395,6 +401,43 @@ public sealed class Workspace : ObservableObject
 
     /// <summary>«Сравнить» в проводнике: подробный отчёт — в терминал вкладки, а не плашкой.</summary>
     public OperationBatch CompareBatch { get; } = new();
+
+    private IEnumerable<OperationBatch> OwnBatches => [CopyBatch, CommandBatch, CheckBatch, SummaryBatch, CompareBatch];
+
+    /// <summary>Отсчёт срока жизни вывода у всех прогонов вкладки.</summary>
+    internal void TickOutputLife()
+    {
+        foreach (var batch in OwnBatches)
+        {
+            batch.TickLife();
+        }
+    }
+
+    /// <summary>Общая галочка «Сохранять лог» прежних версий — для вкладок, сохранённых до того, как она стала своей.</summary>
+    internal static bool LegacyKeepLog { get; set; }
+
+    private bool _keepOutputLog;
+
+    /// <summary>
+    /// «Сохранять лог» этой вкладки: отмечено — терминал вкладки хранит все прогоны, пока галочку
+    /// не снимут; снято — прошлые строки уходят после срока жизни вывода.
+    /// </summary>
+    public bool KeepOutputLog
+    {
+        get => _keepOutputLog;
+        set
+        {
+            if (Set(ref _keepOutputLog, value))
+            {
+                foreach (var batch in OwnBatches)
+                {
+                    batch.RaiseKeepLog();
+                }
+
+                Save();
+            }
+        }
+    }
 
     /// <summary>
     /// Сравнение двух файлов проводника строкой сервера в терминале: <paramref name="work"/>
@@ -913,7 +956,7 @@ public sealed class Workspace : ObservableObject
             CopyBatch,
             "скачано",
             $"{receivedMax} из {consideredMax}",
-            receivedMax == 0 && CopyBatch.FailedCount == 0
+            receivedMax == 0 && CopyBatch.RunFailed == 0
                 ? "скачивать было нечего: здесь файлы такие же"
                 : null);
     }
@@ -1888,7 +1931,7 @@ public sealed class Workspace : ObservableObject
             CopyBatch,
             "скопировано",
             $"{sentMax} из {considered}",
-            sentMax == 0 && CopyBatch.FailedCount == 0
+            sentMax == 0 && CopyBatch.RunFailed == 0
                 ? "отправлять было нечего: на серверах файлы такие же или свежее"
                 : null);
     }
@@ -1937,7 +1980,8 @@ public sealed class Workspace : ObservableObject
             return;
         }
 
-        var failed = CopyBatch.Results
+        // только последний запуск: таблица копирования могла накопить и прошлые
+        var failed = CopyBatch.LastRun
             .Where(r => r.Status != OperationStatus.Success)
             .Select(r => r.Server)
             .ToHashSet();
@@ -1945,9 +1989,9 @@ public sealed class Workspace : ObservableObject
         // у личной вкладки свои отметки; сервер, где копирование не прошло, из них выпадает
         var targets = personal.CommandTargets.Where(s => !failed.Contains(s)).ToList();
 
-        if (CopyBatch.SuccessCount == 0 || targets.Count == 0)
+        if (CopyBatch.RunSuccess == 0 || targets.Count == 0)
         {
-            ChainSkipped(CopyBatch.SuccessCount == 0
+            ChainSkipped(CopyBatch.RunSuccess == 0
                 ? "копирование не прошло ни на одном сервере"
                 : "на отмеченных серверах личной вкладки копирование не прошло");
 
@@ -1975,7 +2019,7 @@ public sealed class Workspace : ObservableObject
     {
         var line = "Команды после копирования не запущены: " + reason + ".";
 
-        foreach (var result in CopyBatch.Results)
+        foreach (var result in CopyBatch.LastRun)
         {
             result.Append(Views.Controls.OutputColoring.WarningMark + line + " —");
         }
@@ -2158,7 +2202,7 @@ public sealed class Workspace : ObservableObject
                 "команда",
                 chain
                     ? $"выполнено {passed} из {steps.Count}"
-                    : CommandBatch.SuccessCount == 0 ? "не выполнено" : "выполнено");
+                    : CommandBatch.RunSuccess == 0 ? "не выполнено" : "выполнено");
         }
 
         await CommandBatch.RunAsync(
@@ -2358,7 +2402,7 @@ public sealed class Workspace : ObservableObject
         FinishStatus(
             CheckBatch,
             "связь",
-            CheckBatch.SuccessCount == 0 ? "связи нет" : "связь есть");
+            CheckBatch.RunSuccess == 0 ? "связи нет" : "связь есть");
 
         return true;
     }
@@ -2413,6 +2457,7 @@ public sealed class Workspace : ObservableObject
         Explorer = Explorer.Clone(),
         IsMain = IsMain,
         IsArchived = IsArchived,
+        KeepOutputLog = KeepOutputLog,
         SelectedServerIds = CopyServers.Where(c => c.IsSelected).Select(c => c.Server.Id).ToList(),
         CommandServerIds = CommandServers.Where(c => c.IsSelected).Select(c => c.Server.Id).ToList(),
         CopyList = Items.Select(i => new SavedTransferItem { Path = i.FullPath, IsSelected = i.IsSelected }).ToList(),
@@ -2450,6 +2495,7 @@ public sealed class Workspace : ObservableObject
         _afterCopyTabId = state.AfterCopyTabId ?? string.Empty;
         _afterCopyEnabled = state.AfterCopyEnabled && _afterCopyTabId.Length > 0;
         _isArchived = state.IsArchived && !IsMain;
+        _keepOutputLog = state.KeepOutputLog ?? LegacyKeepLog;
         OwnerCopyTabId = state.OwnerCopyTabId ?? string.Empty;
 
         _localFolder = state.LocalFolder ?? string.Empty;
@@ -2579,9 +2625,9 @@ public sealed class Workspace : ObservableObject
     /// <param name="note">Хвост подсказки: подробность, которую стоит пояснить.</param>
     private void FinishStatus(OperationBatch batch, string what, string badge, string? note = null)
     {
-        var total = batch.Total;
-        var ok = batch.SuccessCount;
-        var failed = batch.FailedCount;
+        var total = batch.RunTotal;
+        var ok = batch.RunSuccess;
+        var failed = batch.RunFailed;
 
         if (total == 0)
         {

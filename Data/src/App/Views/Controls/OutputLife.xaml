@@ -1,0 +1,99 @@
+<UserControl
+  x:Class="MultiServerSync.Views.Controls.OutputLife"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+
+  <!--
+    «Хранить лог − 05:00 +»: новый запуск раньше этого срока после окончания последнего
+    дописывается ниже, позже — начинает терминал заново. Окошко отсчитывает срок; на нуле ничего
+    не стирается. «−» и «+» — по 30 секунд, у нуля мельче: 10, 5, 1. С «Сохранять лог» вкладка
+    хранит всё — окошко серое.
+    DataContext — показанный прогон.
+  -->
+  <UserControl.Resources>
+    <Style x:Key="LifeButtonStyle" TargetType="Button">
+      <Setter Property="Width" Value="22" />
+      <Setter Property="Height" Value="22" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Bd"
+              Background="{TemplateBinding Background}"
+              CornerRadius="4"
+              TextElement.Foreground="{TemplateBinding Foreground}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </UserControl.Resources>
+
+  <StackPanel
+    x:Name="Root"
+    VerticalAlignment="Center"
+    Orientation="Horizontal"
+    ToolTip="Новый запуск, пока отсчёт не дошёл до нуля, дописывается в терминал ниже. После нуля — начинает терминал заново. Само по себе ничего не стирается. С «Сохранять лог» вкладка хранит всё">
+    <TextBlock
+      Margin="0,0,4,0"
+      VerticalAlignment="Center"
+      FontSize="11"
+      Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+      Text="Хранить лог" />
+
+    <Button
+      Click="OnLess"
+      Style="{StaticResource LifeButtonStyle}"
+      ToolTip="Меньше: по 30 с, у нуля — по 10, 5 и 1 с">
+      <ui:SymbolIcon FontSize="12" Symbol="Subtract24" />
+    </Button>
+
+    <!--
+      окошко с цифрами: только рамка — фон и шрифт те же, что у всей строки. Дошло до нуля —
+      оранжевое: следующий запуск очистит терминал. Новый срок кнопками снимает оранжевый.
+    -->
+    <Border
+      Margin="2,0"
+      Padding="7,1,7,2"
+      VerticalAlignment="Center"
+      BorderThickness="1"
+      CornerRadius="4">
+      <Border.Style>
+        <Style TargetType="Border">
+          <Setter Property="Background" Value="Transparent" />
+          <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+          <Setter Property="TextElement.Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+          <Style.Triggers>
+            <DataTrigger Binding="{Binding LifeExpired}" Value="True">
+              <!--  приглушённо: уведомление не тревожное  -->
+              <Setter Property="Background" Value="#38E07A1F" />
+              <Setter Property="BorderBrush" Value="#80E07A1F" />
+              <Setter Property="ToolTip" Value="Следующий вывод очистит лог. Задайте срок заново — отсчёт пойдёт снова" />
+            </DataTrigger>
+          </Style.Triggers>
+        </Style>
+      </Border.Style>
+      <TextBlock FontSize="11" Text="{Binding LifeText, FallbackValue='05:00'}" />
+    </Border>
+
+    <Button
+      Click="OnMore"
+      Style="{StaticResource LifeButtonStyle}"
+      ToolTip="Больше: по 30 с, у нуля — по 1, 5 и 10 с; до 99 минут">
+      <ui:SymbolIcon FontSize="12" Symbol="Add24" />
+    </Button>
+  </StackPanel>
+</UserControl>

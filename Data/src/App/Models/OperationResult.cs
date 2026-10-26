@@ -53,6 +53,12 @@ public sealed class OperationResult : ObservableObject
 
     public ServerEntry Server { get; }
 
+    /// <summary>
+    /// Когда строка появилась. Прогоны копятся, у сервера строк может быть несколько — по этому
+    /// времени строка команд после копирования находит своё копирование.
+    /// </summary>
+    public DateTime Created { get; } = DateTime.Now;
+
     /// <summary>Вкладка, из которой запущена операция. Пусто, когда вкладка одна.</summary>
     public string Scope
     {

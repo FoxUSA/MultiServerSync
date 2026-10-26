@@ -127,7 +127,7 @@ public sealed class OutputFeed
         if (_chain is not null)
         {
             _chain.Results.CollectionChanged += OnChainResults;
-            _after = _chain.Results.FirstOrDefault(r => ReferenceEquals(r.Server, _row!.Server));
+            _after = AppState.Current.AfterRowOf(_row!);
 
             if (_after is not null)
             {
