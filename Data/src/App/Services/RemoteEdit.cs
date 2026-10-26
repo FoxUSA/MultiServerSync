@@ -36,7 +36,7 @@ public static class RemoteEdit
             var dir = Path.Combine(Root, Safe(server.Id), Hash(parent));
             Directory.CreateDirectory(dir);
 
-            AppLog.Info($"Открывается {entry.FullPath} …", server.Display);
+            AppLog.Hint($"Открывается {entry.FullPath} …");
 
             var stats = await DownloadService.DownloadAsync(
                 server,

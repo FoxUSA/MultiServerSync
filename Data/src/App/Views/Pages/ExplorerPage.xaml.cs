@@ -12,8 +12,8 @@ using MultiServerSync.Views.Dialogs;
 namespace MultiServerSync.Views.Pages;
 
 /// <summary>
-/// «Проводник»: слева этот компьютер, справа сервер вкладки (он отмечен в панели «Целевые
-/// сервера»). Перенос между ними — та же заливка и то же скачивание, что у «Копирования»
+/// «Проводник»: слева этот компьютер, справа сервер вкладки (выбирается из названия правой
+/// панели). Перенос между ними — та же заливка и то же скачивание, что у «Копирования»
 /// и «Скачивания», с теми же параметрами; внутри одной стороны — копирование и перенос на месте.
 /// </summary>
 public partial class ExplorerPage : Page
@@ -54,6 +54,11 @@ public partial class ExplorerPage : Page
             pane.StateChanged += OnPaneState;
         }
 
+        LocalPane.ShowTransfer(toRight: true, "Отмеченное — в открытую справа папку сервера. F5 — то же, а без галочек — строку под курсором");
+        RemotePane.ShowTransfer(toRight: false, "Отмеченное — в открытую слева папку компьютера. F5 — то же, а без галочек — строку под курсором");
+        RemotePane.EnableTitlePicker("Сменить сервер");
+        RemotePane.TitleClicked += OnRemoteTitleClicked;
+
         LocalPane.List.SelectionChanged += (_, _) => UpdateTransferButtons();
         RemotePane.List.SelectionChanged += (_, _) => UpdateTransferButtons();
 
@@ -62,6 +67,23 @@ public partial class ExplorerPage : Page
         AppState.Current.ActiveWorkspaceChanged += workspace =>
         {
             if (IsVisible && AppState.Current.ExplorerTabs.Contains(workspace))
+            {
+                _ = AttachAsync(workspace);
+            }
+        };
+
+        // вкладку открыли снаружи («Проводник» в «Серверах») — папки у неё могли смениться,
+        // даже если она и так открыта: перечитать при показе
+        AppState.Current.TabShowRequested += workspace =>
+        {
+            if (!AppState.Current.ExplorerTabs.Contains(workspace))
+            {
+                return;
+            }
+
+            _reattach = true;
+
+            if (IsVisible && ReferenceEquals(workspace, _tab))
             {
                 _ = AttachAsync(workspace);
             }
@@ -76,18 +98,22 @@ public partial class ExplorerPage : Page
 
             AppState.Current.Section = AppSection.Explorer;
 
-            if (!ReferenceEquals(_tab, AppState.Current.ActiveWorkspace))
+            if (_reattach || !ReferenceEquals(_tab, AppState.Current.ActiveWorkspace))
             {
                 _ = AttachAsync(AppState.Current.ActiveWorkspace);
             }
         };
     }
 
+    /// <summary>Вкладку открыли снаружи — при показе перечитать её папки.</summary>
+    private bool _reattach;
+
     // ── вкладка и сервер ──────────────────────────────────────────────────────
 
     private async Task AttachAsync(Workspace tab)
     {
         var version = ++_attachVersion;
+        _reattach = false;
 
         if (_tab is not null)
         {
@@ -113,7 +139,7 @@ public partial class ExplorerPage : Page
         }
     }
 
-    /// <summary>Сервер сменили в панели слева — правая половина переключается на него.</summary>
+    /// <summary>Сервер сменили — правая половина переключается на него.</summary>
     private void OnTabChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(Workspace.ExplorerServer) && sender is Workspace tab && ReferenceEquals(tab, _tab)
@@ -131,7 +157,7 @@ public partial class ExplorerPage : Page
         {
             ReleaseRemote();
             RemotePane.ShowEmpty("Сервер", ShellIcons.Server,
-                "Отметьте сервер в панели «Целевые сервера» слева — здесь откроются его папки.");
+                "Выберите сервер кнопкой «Сервер» слева от пути — здесь откроются его папки.");
             UpdateTransferButtons();
             return;
         }
@@ -209,16 +235,26 @@ public partial class ExplorerPage : Page
 
     private void UpdateTransferButtons()
     {
-        UploadButton.IsEnabled = _remote is not null && LocalPane.SelectedEntries.Count > 0;
-        DownloadButton.IsEnabled = _remote is not null && RemotePane.SelectedEntries.Count > 0
+        LocalPane.CanTransfer = _remote is not null && LocalPane.SelectedEntries.Count > 0;
+        RemotePane.CanTransfer = _remote is not null && RemotePane.SelectedEntries.Count > 0
             && LocalPane.CurrentPath.Length > 0;
     }
 
+    // ── сервер правой панели ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Серверы — списком из названия правой панели: панели «Целевые сервера» у «Проводника»
+    /// нет, всё место отдано файлам. Наборов несколько — серверы под названием своего набора.
+    /// </summary>
+    private void OnRemoteTitleClicked(FilePane pane, FrameworkElement anchor)
+    {
+        if (_tab is { } tab)
+        {
+            ServerMenu.Show(anchor, tab.ExplorerServer, tab.PickExplorerServer);
+        }
+    }
+
     // ── перенос ───────────────────────────────────────────────────────────────
-
-    private void OnUpload(object sender, RoutedEventArgs e) => _ = TransferAsync(LocalPane, LocalPane.SelectedEntries, RemotePane.CurrentPath);
-
-    private void OnDownload(object sender, RoutedEventArgs e) => _ = TransferAsync(RemotePane, RemotePane.SelectedEntries, LocalPane.CurrentPath);
 
     /// <summary>
     /// Между компьютером и сервером — общей заливкой и общим скачиванием с параметрами вкладки:
@@ -236,26 +272,24 @@ public partial class ExplorerPage : Page
 
         if (from.Source is RemoteSource && targetDir.Length == 0)
         {
-            AppLog.Warn("Слева открыт «Этот компьютер» — откройте папку, куда скачивать.", tab.Title);
-            AppState.Current.RequestLog();
+            AppLog.Hint("Слева открыт «Этот компьютер» — откройте папку, куда скачивать.", LogLevel.Warning);
             return Task.CompletedTask;
         }
 
         if (_remote is not { } remote)
         {
-            AppLog.Warn("Сервер не выбран — отметьте его в панели «Целевые сервера» слева.", tab.Title);
-            AppState.Current.RequestLog();
+            AppLog.Hint("Сервер не выбран — выберите его кнопкой слева от пути в правой панели.", LogLevel.Warning);
             return Task.CompletedTask;
         }
 
         if (move)
         {
-            AppLog.Info("Между компьютером и сервером только копирование: исходные файлы остаются на месте.", tab.Title);
+            AppLog.Hint("Между компьютером и сервером только копирование: исходные файлы остаются на месте.");
         }
 
         if (tab.CopyBatch.IsRunning)
         {
-            AppLog.Info("Копирование встало в очередь — начнётся, когда закончится текущее.", tab.Title);
+            AppLog.Hint("Копирование встало в очередь — начнётся, когда закончится текущее.");
         }
 
         var server = remote.Server;
@@ -265,24 +299,67 @@ public partial class ExplorerPage : Page
 
         return Enqueue(tab, async () =>
         {
+            AppLog.Section = AppSection.Explorer;
+            ConfirmReplace ask = (_, paths) => AskReplace(tab, paths, targetDir);
+
             if (from.Source is LocalSource)
             {
-                AppLog.Info($"На {server.PaneLabel}: {Count(items)} в {targetDir}", tab.Title);
+                AppLog.Info($"Копирование на сервер: {Count(items)} → {targetDir}", server.Display);
                 var payload = items.Select(i => new TransferItem(i.FullPath)).ToList();
-                await tab.UploadCoreAsync(payload, targetDir, [server], options, verify);
+                await tab.UploadCoreAsync(payload, targetDir, [server], options, verify, ask);
                 remote.Invalidate(targetDir);
             }
             else
             {
-                AppLog.Info($"С {server.PaneLabel}: {Count(items)} в {targetDir}", tab.Title);
+                AppLog.Info($"Копирование с сервера: {Count(items)} → {targetDir}", server.Display);
                 var plan = new Dictionary<ServerEntry, List<string>> { [server] = items.Select(i => i.FullPath).ToList() };
-                await tab.DownloadCoreAsync(plan, targetDir, options, verify);
+                await tab.DownloadCoreAsync(plan, targetDir, options, verify, ask);
             }
 
             AppState.Current.NotifyFinished(tab.CopyBatch);
             await RefreshShowingAsync(to, targetDir, names);
         });
     }
+
+    /// <summary>
+    /// Копирование перезапишет файлы в назначении — сначала спросить. Одинаковые при сверке
+    /// по дате или сумме сюда не попадают: их копирование и так не трогает.
+    /// </summary>
+    private ReplaceChoice AskReplace(Workspace tab, IReadOnlyList<string> paths, string targetDir) =>
+        Dispatcher.Invoke(() =>
+        {
+            if (tab.ReplaceWithoutAsking)
+            {
+                return ReplaceChoice.Replace;
+            }
+
+            // пути — от папки назначения: полный путь в окне не читается
+            var root = targetDir.TrimEnd('/', '\\');
+            var names = paths.Take(10).Select(p => p.Length > root.Length + 1 && p.StartsWith(root, StringComparison.OrdinalIgnoreCase) ? p[(root.Length + 1)..] : p);
+            var list = string.Join("\n", names) + (paths.Count > 10 ? $"\nи ещё {paths.Count - 10}" : string.Empty);
+
+            var choice = ConfirmDialog.Choose(
+                Window.GetWindow(this) ?? Application.Current.MainWindow,
+                $"Заменить файлов: {paths.Count}?",
+                $"{list}\n\nВ папке назначения они уже есть и будут перезаписаны.",
+                "Заменить",
+                "Пропустить их",
+                "Больше не спрашивать, заменять сразу",
+                out var dontAsk);
+
+            if (choice == 1 && dontAsk)
+            {
+                tab.ReplaceWithoutAsking = true;
+                AppLog.Hint("Замена без вопроса: вернуть вопрос — снять «не спрашивать перед заменой» в параметрах копирования.");
+            }
+
+            return choice switch
+            {
+                1 => ReplaceChoice.Replace,
+                2 => ReplaceChoice.Skip,
+                _ => ReplaceChoice.Cancel,
+            };
+        });
 
     private static Task Enqueue(Workspace tab, Func<Task> work)
     {
@@ -306,7 +383,10 @@ public partial class ExplorerPage : Page
         }
     }
 
-    /// <summary>Панель показывает папку, куда только что положили файлы, — перечитать и выделить их.</summary>
+    /// <summary>
+    /// Панель показывает папку, куда только что положили файлы, — перечитать. Выделение
+    /// не трогается: галочки ставит человек.
+    /// </summary>
     private static async Task RefreshShowingAsync(FilePane pane, string dir, IReadOnlyCollection<string> names)
     {
         if (pane.Source is null || !string.Equals(pane.Source.Normalize(pane.CurrentPath), pane.Source.Normalize(dir), StringComparison.OrdinalIgnoreCase))
@@ -315,7 +395,6 @@ public partial class ExplorerPage : Page
         }
 
         await pane.RefreshAsync();
-        pane.SelectNames(names);
     }
 
     private static string Count(IReadOnlyList<FsEntry> items)
@@ -333,9 +412,11 @@ public partial class ExplorerPage : Page
             return;
         }
 
+        AppLog.Section = AppSection.Explorer;
+
         if (!source.IsRemote && targetDir.Length == 0)
         {
-            AppLog.Warn("В «Этот компьютер» вставить нельзя — откройте папку.");
+            AppLog.Hint("В «Этот компьютер» вставить нельзя — откройте папку.", LogLevel.Warning);
             return;
         }
 
@@ -351,7 +432,11 @@ public partial class ExplorerPage : Page
             var taken = there.Select(e => e.Name).ToHashSet(StringComparer.Ordinal);
             var clashes = items.Where(i => taken.Contains(i.Name) && source.Parent(i.FullPath) != target).ToList();
 
-            if (clashes.Count > 0)
+            if (clashes.Count > 0 && _tab is { ReplaceWithoutAsking: true })
+            {
+                replace = true;
+            }
+            else if (clashes.Count > 0)
             {
                 var list = string.Join("\n", clashes.Take(10).Select(c => c.Name)) + (clashes.Count > 10 ? $"\nи ещё {clashes.Count - 10}" : string.Empty);
                 var choice = ConfirmDialog.Choose(
@@ -455,7 +540,10 @@ public partial class ExplorerPage : Page
 
     private async Task RunCommandAsync(FilePane pane, PaneCommand command)
     {
-        var picked = pane.SelectedEntries;
+        AppLog.Section = AppSection.Explorer;
+
+        // отмеченное галочками, без них — строка под курсором; из меню правой кнопки — то, по чему щёлкнули
+        var picked = pane.TargetEntries;
         var focused = pane.FocusedEntry;
 
         switch (command)
@@ -485,7 +573,7 @@ public partial class ExplorerPage : Page
                     }
                 }
 
-                AppLog.Info($"{(command == PaneCommand.Cut ? "Вырезано" : "Скопировано")} в буфер: {Count(picked)}");
+                AppLog.Hint($"{(command == PaneCommand.Cut ? "Вырезано" : "Скопировано")} в буфер: {Count(picked)}");
                 break;
 
             case PaneCommand.Paste:
@@ -494,6 +582,10 @@ public partial class ExplorerPage : Page
 
             case PaneCommand.TransferToOther:
                 await TransferAsync(pane, picked, Other(pane).CurrentPath);
+                break;
+
+            case PaneCommand.TransferOptions when _tab is { } tab:
+                TransferOptionsDialog.Open(Window.GetWindow(this), tab);
                 break;
 
             case PaneCommand.Open:
@@ -534,13 +626,12 @@ public partial class ExplorerPage : Page
                 break;
 
             case PaneCommand.Run when pane.Source is RemoteSource remote && focused is { IsDirectory: false }:
-                OpenCommandTab(remote.Server, $"{focused.Name}",
+                OpenCommand(remote.Server,
                     $"cd {SshService.ShellQuote(remote.Parent(focused.FullPath) ?? "/")} && ./{SshService.ShellQuote(focused.Name)}");
                 break;
 
             case PaneCommand.CommandTabHere when pane.Source is RemoteSource remote:
-                OpenCommandTab(remote.Server, Path.GetFileName(pane.CurrentPath.TrimEnd('/')) is { Length: > 0 } n ? n : "/",
-                    $"cd {SshService.ShellQuote(pane.CurrentPath)} && ");
+                OpenCommand(remote.Server, $"cd {SshService.ShellQuote(pane.CurrentPath)} && ");
                 break;
 
             case PaneCommand.SendToCopy when pane.Source is RemoteSource:
@@ -550,10 +641,13 @@ public partial class ExplorerPage : Page
                 AppLog.Success($"Путь назначения вкладки «{copyTab.Title}» в «Копировании»: {dir}");
                 break;
 
+            // строки встают ниже уже имеющихся в списке
             case PaneCommand.SendToDownload when pane.Source is RemoteSource remote && picked.Count > 0:
-                var downloadTab = AppState.Current.ActiveDownloadTab;
+                var downloadTab = AppState.Current.MainDownloadTab;
                 var added = downloadTab.AddDownloads(remote.Server, picked.Select(p => (p.FullPath, p.IsDirectory, p.Length, p.Modified)));
-                AppLog.Success($"В список вкладки «{downloadTab.Title}» в «Скачивании» добавлено: {added}");
+                AppLog.Success(added > 0
+                    ? $"В список основной вкладки «{downloadTab.Title}» в «Скачивании» добавлено: {added}"
+                    : $"Всё выбранное уже есть в списке «{downloadTab.Title}» в «Скачивании».");
                 break;
         }
     }
@@ -607,7 +701,10 @@ public partial class ExplorerPage : Page
         }
     }
 
-    /// <summary>Два файла — по одному в каждой панели: размер, дата и SHA-256, итог плашкой.</summary>
+    /// <summary>
+    /// Два файла — по одному в каждой панели. Подробный отчёт (пути, размер, дата, SHA-256,
+    /// в чём разница) — в терминал внизу, строкой сервера; в журнал — только итог.
+    /// </summary>
     private async Task CompareAsync(FilePane pane)
     {
         var mine = pane.FocusedEntry;
@@ -615,31 +712,63 @@ public partial class ExplorerPage : Page
 
         if (mine is not { IsDirectory: false } || theirs is not { IsDirectory: false } || pane.Source is null || Other(pane).Source is null)
         {
-            AppLog.Warn("Для сравнения выделите по файлу в каждой панели.");
-            AppState.Current.RequestLog();
+            AppLog.Hint("Для сравнения поставьте курсор на файл в каждой панели.", LogLevel.Warning);
             return;
         }
 
-        AppLog.Info($"Сравниваю {mine.Name} и {theirs.Name} …");
-
-        var a = pane.Source.HashAsync(mine.FullPath, CancellationToken.None);
-        var b = Other(pane).Source!.HashAsync(theirs.FullPath, CancellationToken.None);
-        var (ha, hb) = (await a, await b);
-
-        if (string.Equals(ha, hb, StringComparison.OrdinalIgnoreCase))
+        if (_tab is not { } tab || _remote is not { } remote)
         {
-            AppLog.Success($"Файлы одинаковые: {mine.Name} = {theirs.Name} (SHA-256 {ha[..12]}…)");
+            AppLog.Hint("Сервер не выбран — выберите его кнопкой слева от пути в правой панели.", LogLevel.Warning);
+            return;
         }
-        else
+
+        // слева в отчёте всегда компьютер, справа сервер — как панели на экране
+        var (local, localSource, server, serverSource) = pane.Source is LocalSource
+            ? (mine, pane.Source, theirs, Other(pane).Source!)
+            : (theirs, Other(pane).Source!, mine, pane.Source);
+
+        await tab.CompareAsync(remote.Server, async (result, ct) =>
         {
-            AppLog.Warn($"Файлы отличаются: {mine.Name} ({TransferItem.Format(mine.Length)}, {mine.Modified:dd.MM.yyyy HH:mm}) "
-                + $"и {theirs.Name} ({TransferItem.Format(theirs.Length)}, {theirs.Modified:dd.MM.yyyy HH:mm})");
-        }
+            result.Message = "сравнение…";
+            result.Append($"Сравнение файлов");
+            result.Append($"  компьютер: {local.FullPath}");
+            result.Append($"             {TransferItem.Format(local.Length)} · {local.Modified:dd.MM.yyyy HH:mm:ss}");
+            result.Append($"  сервер:    {server.FullPath}");
+            result.Append($"             {TransferItem.Format(server.Length)} · {server.Modified:dd.MM.yyyy HH:mm:ss}");
+
+            var a = localSource.HashAsync(local.FullPath, ct);
+            var b = serverSource.HashAsync(server.FullPath, ct);
+            var (ha, hb) = (await a, await b);
+
+            result.Append($"  SHA-256 компьютер: {ha}");
+            result.Append($"  SHA-256 сервер:    {hb}");
+
+            var same = string.Equals(ha, hb, StringComparison.OrdinalIgnoreCase);
+            var differences = new List<string>();
+
+            if (local.Length != server.Length)
+            {
+                differences.Add($"размер на {TransferItem.Format(Math.Abs(local.Length - server.Length))}");
+            }
+
+            if (Math.Abs((local.Modified - server.Modified).TotalSeconds) >= 2)
+            {
+                differences.Add(local.Modified > server.Modified ? "на компьютере новее" : "на сервере новее");
+            }
+
+            result.Append(same
+                ? $"Итог: одинаковые по содержимому{(differences.Count > 0 ? " (" + string.Join(", ", differences) + ")" : string.Empty)}"
+                : $"Итог: отличаются по содержимому{(differences.Count > 0 ? " — " + string.Join(", ", differences) : string.Empty)}");
+
+            result.Message = same ? "одинаковые" : "отличаются";
+            AppLog.Info($"Сравнение {local.Name} и {server.Name}: {(same ? "одинаковые" : "отличаются")}", remote.Server.Display);
+        });
     }
 
-    private static void OpenCommandTab(ServerEntry server, string title, string command)
+    /// <summary>Команда — в основную вкладку «Команды» с этим сервером, и туда же переход.</summary>
+    private static void OpenCommand(ServerEntry server, string command)
     {
-        var tab = AppState.Current.AddCommandTab(title, command, server);
+        var tab = AppState.Current.CommandFor(server, command);
         AppState.Current.ShowTab(tab);
     }
 }

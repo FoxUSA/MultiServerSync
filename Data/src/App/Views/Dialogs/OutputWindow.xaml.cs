@@ -70,7 +70,7 @@ public partial class OutputWindow : FluentWindow
             }
 
             OpenChanged?.Invoke();
-            AppLog.Info("Окно вывода закрыто — вывод вернулся в панель главного окна.");
+            AppLog.Hint("Окно вывода закрыто — вывод вернулся в панель главного окна.");
         };
 
         window.ShowBatch(batch);
@@ -78,7 +78,7 @@ public partial class OutputWindow : FluentWindow
         window.Show();
 
         OpenChanged?.Invoke();
-        AppLog.Info("Вывод открыт в отдельном окне.");
+        AppLog.Hint("Вывод открыт в отдельном окне.");
     }
 
     /// <summary>Закрывает окно вывода, если оно открыто.</summary>
@@ -108,7 +108,7 @@ public partial class OutputWindow : FluentWindow
     {
         if (DataContext is not OperationResult result)
         {
-            AppLog.Warn("Сначала выберите сервер в таблице главного окна.");
+            AppLog.Hint("Сначала выберите сервер в таблице главного окна.", LogLevel.Warning);
             return;
         }
 
@@ -116,7 +116,7 @@ public partial class OutputWindow : FluentWindow
 
         if (text.Length == 0)
         {
-            AppLog.Warn($"У сервера {result.Title} вывода пока нет.");
+            AppLog.Hint($"У сервера {result.Title} вывода пока нет.", LogLevel.Warning);
             return;
         }
 
@@ -127,7 +127,7 @@ public partial class OutputWindow : FluentWindow
 
         if (ClipboardText.CopyTerminalOutput(text + Environment.NewLine))
         {
-            AppLog.Success($"Вывод скопирован: {result.Title}.");
+            AppLog.Hint($"Вывод скопирован: {result.Title}.");
         }
     }
 
@@ -136,18 +136,18 @@ public partial class OutputWindow : FluentWindow
     {
         if (DataContext is not OperationResult result)
         {
-            AppLog.Warn("Сначала выберите сервер в таблице главного окна.");
+            AppLog.Hint("Сначала выберите сервер в таблице главного окна.", LogLevel.Warning);
             return;
         }
 
         if (result.Output.Length == 0)
         {
-            AppLog.Info($"У сервера {result.Title} вывода и так нет.");
+            AppLog.Hint($"У сервера {result.Title} вывода и так нет.");
             return;
         }
 
         result.ClearOutput();
-        AppLog.Info($"Вывод очищен: {result.Title}.");
+        AppLog.Hint($"Вывод очищен: {result.Title}.");
     }
 
     private void OnClosing(object? sender, CancelEventArgs e)

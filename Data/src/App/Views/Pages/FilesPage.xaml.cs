@@ -98,7 +98,7 @@ public partial class FilesPage : Page
 
         workspace.ExcludeMasks = masks;
         var count = Core.ExcludeRules.Count(masks);
-        AppLog.Info(count > 0 ? $"Исключения при копировании: {count}." : "Исключения при копировании сняты.", workspace.Title);
+        AppLog.Hint(count > 0 ? $"Исключения при копировании: {count}." : "Исключения при копировании сняты.");
     }
 
     private void OnRemoveSelected(object sender, RoutedEventArgs e) =>
@@ -136,7 +136,7 @@ public partial class FilesPage : Page
         }
 
         AppState.Current.SaveSettings();
-        AppLog.Info($"Из истории путей удалено: {value}");
+        AppLog.Hint($"Из истории путей удалено: {value}");
 
         // удаление выбранной строки очищает поле ввода — возвращаем то, что там было
         Dispatcher.BeginInvoke(new Action(() => RemotePathBox.Text = typed));
@@ -184,7 +184,7 @@ public partial class FilesPage : Page
 
         if (browseServer is null)
         {
-            AppLog.Warn("Сначала добавьте хотя бы один сервер.");
+            AppLog.Hint("Сначала добавьте хотя бы один сервер.", LogLevel.Warning);
             return;
         }
 
@@ -231,7 +231,7 @@ public partial class FilesPage : Page
                 string.Empty,
                 "Копировать везде"))
         {
-            AppLog.Info("«Выполнить везде» отменено.");
+            AppLog.Hint("«Выполнить везде» отменено.");
             return;
         }
 

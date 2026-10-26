@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -55,6 +56,15 @@ public sealed class PaneRow : ObservableObject
 
     /// <summary>Найденная поиском папка: где она относительно открытой.</summary>
     public string Where { get; }
+
+    private bool _isCursor;
+
+    /// <summary>Строка под курсором — рамкой; галочку курсор не ставит.</summary>
+    public bool IsCursor
+    {
+        get => _isCursor;
+        set => Set(ref _isCursor, value);
+    }
 
     public string Name => _entry.Name;
 
@@ -178,6 +188,7 @@ public enum PaneCommand
     SendToCopy,
     SendToDownload,
     TransferToOther,
+    TransferOptions,
 }
 
 /// <summary>Перетащили в панель: из соседней панели или из проводника Windows.</summary>
@@ -214,8 +225,18 @@ public partial class FilePane : UserControl
     private bool _syncingTree;
     private string _typed = string.Empty;
     private DateTime _typedAt;
-    private Point? _dragStart;
     private string? _restoringFocus;
+
+    /// <summary>
+    /// Выделение — это выбор человека: программа его не ставит, а помнит. По папкам — пока
+    /// открыта программа, для открытой папки — и в файле вкладки.
+    /// </summary>
+    private readonly Dictionary<string, List<string>> _selectionByPath = new(StringComparer.OrdinalIgnoreCase);
+
+    private List<string>? _restoringSelection;
+
+    /// <summary>Строки меняет сама программа (переход, поиск, маска) — это не выбор человека.</summary>
+    private int _selectionHold;
 
     public FilePane()
     {
@@ -238,6 +259,32 @@ public partial class FilePane : UserControl
             await SearchFoldersAsync();
         };
 
+        // столбцы — по ширине панели: новые строки могут быть длиннее, поэтому мерить заново
+        _fitDelay = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
+        _fitDelay.Tick += (_, _) =>
+        {
+            _fitDelay.Stop();
+            MeasureColumns();
+            FitColumns();
+        };
+
+        ((System.Collections.Specialized.INotifyCollectionChanged)List.Items).CollectionChanged += (_, _) => ScheduleFit();
+        List.SizeChanged += (_, _) => FitColumns();
+        List.Loaded += (_, _) =>
+        {
+            // полоса прокрутки появилась или пропала — места под столбцы стало другое
+            if (FindChild<ScrollViewer>(List) is { } scroll)
+            {
+                scroll.ScrollChanged -= OnListScrollChanged;
+                scroll.ScrollChanged += OnListScrollChanged;
+            }
+
+            ScheduleFit();
+        };
+
+        List.CurrentCellChanged += OnCursorMoved;
+        List.AddHandler(Thumb.DragCompletedEvent, new DragCompletedEventHandler(OnColumnResized));
+
         PreviewKeyDown += OnPaneKeyDown;
         GotKeyboardFocus += (_, _) => Activated?.Invoke(this);
         PreviewMouseDown += (_, _) => Activated?.Invoke(this);
@@ -252,6 +299,43 @@ public partial class FilePane : UserControl
 
     public event Action<FilePane, PaneDrop>? DropRequested;
 
+    /// <summary>Щелчок по названию панели — когда оно выбирает, чьи это файлы (<see cref="EnableTitlePicker"/>).</summary>
+    public event Action<FilePane, FrameworkElement>? TitleClicked;
+
+    /// <summary>Название панели становится кнопкой со стрелкой: из него выбирают сервер.</summary>
+    public void EnableTitlePicker(string tip)
+    {
+        TitleButton.IsHitTestVisible = true;
+        TitleButton.ToolTip = tip;
+        TitleChevron.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>
+    /// Кнопка «Копировать» в соседнюю панель и параметры копирования рядом.
+    /// Стрелка смотрит туда, куда пойдут файлы.
+    /// </summary>
+    public void ShowTransfer(bool toRight, string tip)
+    {
+        TransferButton.Icon = new Wpf.Ui.Controls.SymbolIcon(toRight
+            ? Wpf.Ui.Controls.SymbolRegular.ArrowRight24
+            : Wpf.Ui.Controls.SymbolRegular.ArrowLeft24);
+        TransferButton.ToolTip = tip;
+        TransferButton.Visibility = Visibility.Visible;
+        OptionsButton.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Есть что копировать и куда.</summary>
+    public bool CanTransfer
+    {
+        set => TransferButton.IsEnabled = value;
+    }
+
+    private void OnTitleClick(object sender, RoutedEventArgs e) => TitleClicked?.Invoke(this, TitleButton);
+
+    private void OnTransfer(object sender, RoutedEventArgs e) => CommandRequested?.Invoke(this, PaneCommand.TransferToOther);
+
+    private void OnTransferOptions(object sender, RoutedEventArgs e) => CommandRequested?.Invoke(this, PaneCommand.TransferOptions);
+
     /// <summary>Открыта другая папка, сменился курсор или сортировка — страница сохраняет вкладку.</summary>
     public event Action<FilePane>? StateChanged;
 
@@ -261,15 +345,76 @@ public partial class FilePane : UserControl
 
     public string CurrentPath => _current;
 
-    /// <summary>Выделенные строки без «..».</summary>
+    /// <summary>Отмеченные галочками строки без «..».</summary>
     public IReadOnlyList<FsEntry> SelectedEntries => List.SelectedItems
         .OfType<PaneRow>()
         .Where(r => !r.IsParent && r.Entry.Kind == FsKind.Normal)
         .Select(r => r.Entry)
         .ToList();
 
-    /// <summary>Строка под курсором.</summary>
-    public FsEntry? FocusedEntry => List.SelectedItem is PaneRow { IsParent: false } row ? row.Entry : null;
+    /// <summary>Строка под курсором. Курсор и галочка — разные вещи: щелчок по строке её не отмечает.</summary>
+    public FsEntry? FocusedEntry => CursorRow is { IsParent: false } row ? row.Entry : null;
+
+    private PaneRow? CursorRow => List.CurrentItem as PaneRow;
+
+    /// <summary>Пока открыто меню правой кнопки — то, по чему щёлкнули; см. <see cref="TargetEntries"/>.</summary>
+    private IReadOnlyList<FsEntry>? _menuTargets;
+
+    /// <summary>
+    /// С чем работает действие: из меню правой кнопки — строка, по которой щёлкнули (а если
+    /// она отмечена — все отмеченные); иначе отмеченное галочками, а без галочек — строка под курсором.
+    /// </summary>
+    public IReadOnlyList<FsEntry> TargetEntries =>
+        _menuTargets ?? (SelectedEntries is { Count: > 0 } picked ? picked : FocusedEntry is { Kind: FsKind.Normal } one ? [one] : []);
+
+    /// <summary>Курсор на строку: рамкой, без галочки, и клавиши — в неё.</summary>
+    private void MoveCursor(PaneRow row)
+    {
+        List.CurrentCell = new DataGridCellInfo(row, NameColumn);
+        List.ScrollIntoView(row);
+        FocusRow(row);
+    }
+
+    /// <summary>
+    /// Фокус клавиатуры — в ячейку имени строки. Сама строка таблицы фокус не берёт: раньше он
+    /// оставался в соседней панели, и F2/Del/Enter после щелчка срабатывали там.
+    /// </summary>
+    private void FocusRow(object row)
+    {
+        if (List.ItemContainerGenerator.ContainerFromItem(row) is not DataGridRow)
+        {
+            List.UpdateLayout();
+        }
+
+        if (List.ItemContainerGenerator.ContainerFromItem(row) is DataGridRow generated
+            && NameColumn.GetCellContent(generated)?.Parent is DataGridCell cell
+            && cell.Focus())
+        {
+            return;
+        }
+
+        List.Focus();
+    }
+
+    /// <summary>Рамка курсора идёт за текущей строкой таблицы.</summary>
+    private void OnCursorMoved(object? sender, EventArgs e)
+    {
+        foreach (var row in _rows.Where(r => r.IsCursor && !ReferenceEquals(r, CursorRow)))
+        {
+            row.IsCursor = false;
+        }
+
+        if (CursorRow is { } current)
+        {
+            current.IsCursor = true;
+
+            if (FocusedEntry is { } entry && _state.Focus != entry.Name)
+            {
+                _state.Focus = entry.Name;
+                StateChanged?.Invoke(this);
+            }
+        }
+    }
 
     /// <summary>Все строки открытой папки — для проверки, что уже лежит в назначении.</summary>
     public IReadOnlyList<FsEntry> Entries => _rows.Where(r => !r.IsParent).Select(r => r.Entry).ToList();
@@ -282,6 +427,8 @@ public partial class FilePane : UserControl
         _navVersion++;
         TitleText.Text = title;
         TitleIcon.Source = icon;
+        TitleText.Visibility = TitleIcon.Visibility = TitleButton.Visibility = Visibility.Visible;
+        WindowsExplorerButton.Visibility = Visibility.Collapsed;
         _rows.Clear();
         Crumbs.Children.Clear();
         ShowMessage(message);
@@ -292,9 +439,25 @@ public partial class FilePane : UserControl
     /// <summary>Подключает панель к источнику и памяти вкладки и открывает запомненную папку.</summary>
     public async Task AttachAsync(IFileSource source, ExplorerPaneState state, string title, ImageSource? icon)
     {
+        _selectionHold++;
+
+        try
+        {
+            await AttachCoreAsync(source, state, title, icon);
+        }
+        finally
+        {
+            _selectionHold--;
+        }
+    }
+
+    private async Task AttachCoreAsync(IFileSource source, ExplorerPaneState state, string title, ImageSource? icon)
+    {
         StopWatching();
         CancelSearch();
 
+        _restoringSelection = state.Selected.ToList();
+        _selectionByPath.Clear();
         _source = source;
         _state = state;
         _back.Clear();
@@ -367,17 +530,19 @@ public partial class FilePane : UserControl
             : (Brush)FindResource("ControlStrokeColorDefaultBrush");
     }
 
+    /// <summary>Клавиши — в список, на строку под курсором. Выделение не трогается.</summary>
     public void FocusList()
     {
-        if (List.SelectedItem is null && _view?.Count > 0)
+        var item = List.CurrentItem ?? (_view?.Count > 0 ? _view.GetItemAt(0) : null);
+
+        if (item is not null && List.CurrentItem is null)
         {
-            List.SelectedIndex = 0;
+            List.CurrentCell = new DataGridCellInfo(item, NameColumn);
         }
 
-        if (List.SelectedItem is { } item
-            && List.ItemContainerGenerator.ContainerFromItem(item) is DataGridRow row)
+        if (item is not null)
         {
-            row.Focus();
+            FocusRow(item);
             return;
         }
 
@@ -472,9 +637,21 @@ public partial class FilePane : UserControl
         }
 
         var cameFrom = _current;
-        _current = target;
+        var keep = _restoringSelection ?? _selectionByPath.GetValueOrDefault(target) ?? [];
+        _restoringSelection = null;
+        _selectionHold++;
 
-        ShowRows(items, refill: true);
+        try
+        {
+            _current = target;
+            ShowRows(items, refill: true);
+            RestoreSelection(keep);
+        }
+        finally
+        {
+            _selectionHold--;
+        }
+
         ShowPath(target);
         UpdateNavButtons();
         Watch(target);
@@ -487,9 +664,10 @@ public partial class FilePane : UserControl
             ?? (source.Parent(cameFrom) == target ? Path.GetFileName(cameFrom.TrimEnd('/', '\\')) : null);
 
         _restoringFocus = null;
-        SelectName(wanted);
+        PlaceCursor(wanted);
 
         _state.Path = target;
+        _state.Selected = keep.Where(n => _rows.Any(r => !r.IsParent && r.Name == n)).ToList();
         StateChanged?.Invoke(this);
 
         _ = UpdateStatusAsync(target, version);
@@ -701,12 +879,8 @@ public partial class FilePane : UserControl
     private void OnListSelected(object sender, SelectionChangedEventArgs e)
     {
         WriteStatus();
-
-        if (FocusedEntry is { } entry && _state.Focus != entry.Name)
-        {
-            _state.Focus = entry.Name;
-            StateChanged?.Invoke(this);
-        }
+        UpdateAllCheck();
+        RememberSelection();
     }
 
     private void RememberFocus()
@@ -720,8 +894,8 @@ public partial class FilePane : UserControl
         }
     }
 
-    /// <summary>Курсор на строку с этим именем; нет такой — на первую.</summary>
-    public void SelectName(string? name)
+    /// <summary>Курсор на строку с этим именем (нет такой — на первую), но без выделения: галочки ставит человек.</summary>
+    private void PlaceCursor(string? name)
     {
         if (_view is null)
         {
@@ -731,11 +905,46 @@ public partial class FilePane : UserControl
         var row = name is null ? null : _view.Cast<PaneRow>().FirstOrDefault(r => r.Name == name);
         row ??= _view.Cast<PaneRow>().FirstOrDefault();
 
-        List.SelectedItem = row;
-
         if (row is not null)
         {
+            List.CurrentCell = new DataGridCellInfo(row, NameColumn);
             List.ScrollIntoView(row);
+        }
+    }
+
+    /// <summary>Выбор человека в открытой папке — в память панели и вкладки.</summary>
+    private void RememberSelection()
+    {
+        if (_selectionHold > 0 || _searching || _source is null || !ReferenceEquals(List.ItemsSource, _view))
+        {
+            return;
+        }
+
+        var names = List.SelectedItems.OfType<PaneRow>().Where(r => !r.IsParent).Select(r => r.Name).ToList();
+        _selectionByPath[_current] = names;
+
+        if (!_state.Selected.SequenceEqual(names))
+        {
+            _state.Selected = names;
+            StateChanged?.Invoke(this);
+        }
+    }
+
+    /// <summary>Отметить запомненное заново — из того, что сейчас видно в списке.</summary>
+    private void RestoreSelection(IReadOnlyCollection<string> names)
+    {
+        List.UnselectAll();
+
+        if (_view is null || names.Count == 0)
+        {
+            return;
+        }
+
+        var set = names.ToHashSet(StringComparer.Ordinal);
+
+        foreach (var row in _view.Cast<PaneRow>().Where(r => !r.IsParent && set.Contains(r.Name)))
+        {
+            List.SelectedItems.Add(row);
         }
     }
 
@@ -829,7 +1038,20 @@ public partial class FilePane : UserControl
     private void OnFileMaskChanged(object sender, TextChangedEventArgs e)
     {
         FileMaskClear.Visibility = NameMask.IsEmpty(FileMaskBox.Text) ? Visibility.Collapsed : Visibility.Visible;
-        _view?.Refresh();
+
+        // маска прячет строки, но не снимает выбор: сняли маску — отмеченное снова отмечено
+        _selectionHold++;
+
+        try
+        {
+            _view?.Refresh();
+            RestoreSelection(_selectionByPath.GetValueOrDefault(_current) ?? _state.Selected);
+        }
+        finally
+        {
+            _selectionHold--;
+        }
+
         WriteStatus();
 
         if (_state.FileMask != FileMaskBox.Text)
@@ -955,7 +1177,18 @@ public partial class FilePane : UserControl
 
         _searching = false;
         WhereColumn.Visibility = Visibility.Collapsed;
-        List.ItemsSource = _view;
+        _selectionHold++;
+
+        try
+        {
+            List.ItemsSource = _view;
+            RestoreSelection(_selectionByPath.GetValueOrDefault(_current) ?? _state.Selected);
+        }
+        finally
+        {
+            _selectionHold--;
+        }
+
         HideMessage();
         WriteStatus();
     }
@@ -1056,11 +1289,17 @@ public partial class FilePane : UserControl
     /// <summary>Права, владелец и ссылки — только у сервера; скрытые человеком — скрыты.</summary>
     private void ApplyColumns()
     {
+        // у компьютера название не нужно — и так понятно, чьи это файлы
+        WindowsExplorerButton.Visibility = IsRemote ? Visibility.Collapsed : Visibility.Visible;
+        TitleIcon.Visibility = IsRemote ? Visibility.Visible : Visibility.Collapsed;
+        TitleText.Visibility = TitleIcon.Visibility;
+        TitleButton.Visibility = TitleIcon.Visibility;
+
         foreach (var column in List.Columns)
         {
             var header = column.Header as string ?? string.Empty;
 
-            if (header is "Имя" or "Где")
+            if (header is "Имя" or "Где" || column == CheckColumn)
             {
                 continue;
             }
@@ -1070,6 +1309,145 @@ public partial class FilePane : UserControl
         }
 
         UpdateLinkColumn();
+        ScheduleFit();
+    }
+
+    // ── ширина столбцов ──────────────────────────────────────────────────────
+
+    private readonly DispatcherTimer _fitDelay;
+
+    /// <summary>Ширина столбца по содержимому — сколько ему нужно, чтобы ничего не обрезать.</summary>
+    private readonly Dictionary<DataGridColumn, double> _natural = new();
+
+    private void ScheduleFit()
+    {
+        _fitDelay.Stop();
+        _fitDelay.Start();
+    }
+
+    private void OnListScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (e.ViewportWidthChange != 0)
+        {
+            FitColumns();
+        }
+    }
+
+    private void MeasureColumns()
+    {
+        var dip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        var rows = List.Items.OfType<PaneRow>().ToList();
+
+        foreach (var column in List.Columns)
+        {
+            if (column == CheckColumn)
+            {
+                continue;
+            }
+
+            Func<PaneRow, string> text = column == NameColumn
+                ? r => r.Name
+                : column is DataGridTextColumn { Binding: Binding { Path.Path: var path } } && typeof(PaneRow).GetProperty(path) is { } property
+                    ? r => property.GetValue(r) as string ?? string.Empty
+                    : _ => string.Empty;
+
+            var font = column == RightsColumn ? new FontFamily("Consolas") : List.FontFamily;
+
+            // ширину дают самые длинные строки — меряются несколько самых длинных, а не все тысячи
+            var cells = rows.Select(text)
+                .Where(t => t.Length > 0)
+                .Distinct()
+                .OrderByDescending(t => t.Length)
+                .Take(5)
+                .Select(t => TextWidth(t, font, 12, FontWeights.Normal, dip))
+                .DefaultIfEmpty(0)
+                .Max();
+
+            // у шапки — место под стрелку сортировки, у имени — под значок
+            var head = TextWidth(column.Header as string ?? string.Empty, List.FontFamily, 11, FontWeights.SemiBold, dip) + 14;
+            var icon = column == NameColumn ? 24 : 0;
+
+            _natural[column] = Math.Ceiling(Math.Max(cells + icon, head) + 18);
+        }
+    }
+
+    private static double TextWidth(string text, FontFamily font, double size, FontWeight weight, double dip) =>
+        new FormattedText(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+            new Typeface(font, FontStyles.Normal, weight, FontStretches.Normal), size, Brushes.Black, dip).WidthIncludingTrailingWhitespace;
+
+    private static string HeaderOf(DataGridColumn column) => column.Header as string ?? string.Empty;
+
+    /// <summary>Ширина, которую человек дал руками; NaN — по содержимому.</summary>
+    private double UserWidth(DataGridColumn column) =>
+        _state.Columns.TryGetValue(HeaderOf(column), out var width) && width > 0 ? width : double.NaN;
+
+    /// <summary>
+    /// Столбец, растянутый руками за границу в шапке, держит свою ширину — она запоминается во
+    /// вкладке. Остальные — по содержимому, чтобы дата и размер не обрезались. Не хватает места —
+    /// сначала ужимается «Имя» до своего минимума (у длинного имени есть подсказка), и только
+    /// потом поровну остальные столбцы «по содержимому». Места с запасом — остаток отдаётся имени.
+    /// </summary>
+    private void FitColumns()
+    {
+        if (_natural.Count == 0 || FindChild<ScrollViewer>(List) is not { } scroll)
+        {
+            return;
+        }
+
+        var width = scroll.ViewportWidth > 0 ? scroll.ViewportWidth : List.ActualWidth;
+        var room = width - CheckColumn.Width.DisplayValue - 1;
+
+        if (room <= 0)
+        {
+            return;
+        }
+
+        var visible = List.Columns.Where(c => c != CheckColumn && c.Visibility == Visibility.Visible).ToList();
+        var manual = visible.Where(c => !double.IsNaN(UserWidth(c))).ToList();
+        var auto = visible.Where(c => c != NameColumn && double.IsNaN(UserWidth(c))).ToList();
+
+        foreach (var column in manual)
+        {
+            SetWidth(column, UserWidth(column));
+        }
+
+        var left = room - manual.Sum(UserWidth);
+        var wanted = auto.Sum(c => _natural.GetValueOrDefault(c, 80));
+
+        // имя растянуто руками — остаток делят только столбцы по содержимому
+        var name = double.IsNaN(UserWidth(NameColumn)) ? NameColumn.MinWidth : 0;
+        var share = wanted <= 0 || name + wanted <= left ? 1 : Math.Max(0, left - name) / wanted;
+
+        foreach (var column in auto)
+        {
+            SetWidth(column, Math.Max(column.MinWidth, _natural.GetValueOrDefault(column, 80) * share));
+        }
+
+        if (double.IsNaN(UserWidth(NameColumn)))
+        {
+            SetWidth(NameColumn, Math.Max(NameColumn.MinWidth, left - auto.Sum(c => c.Width.DisplayValue)));
+        }
+
+        static void SetWidth(DataGridColumn column, double value)
+        {
+            if (Math.Abs(column.Width.DisplayValue - value) > 0.5 || !column.Width.IsAbsolute)
+            {
+                column.Width = new DataGridLength(Math.Floor(value));
+            }
+        }
+    }
+
+    /// <summary>Отпустили границу столбца в шапке — его ширина запоминается во вкладке.</summary>
+    private void OnColumnResized(object sender, DragCompletedEventArgs e)
+    {
+        if (e.OriginalSource is not Thumb { TemplatedParent: DataGridColumnHeader { Column: { } column } } || column == CheckColumn)
+        {
+            return;
+        }
+
+        _state.Columns[HeaderOf(column)] = Math.Round(column.ActualWidth);
+        StateChanged?.Invoke(this);
+        FitColumns();
     }
 
     /// <summary>Правый щелчок по шапке — какие столбцы показывать.</summary>
@@ -1081,7 +1459,7 @@ public partial class FilePane : UserControl
         {
             var header = column.Header as string ?? string.Empty;
 
-            if (header is "Имя" or "Где" || (!IsRemote && header is "Права" or "Владелец" or "Куда ведёт"))
+            if (header is "Имя" or "Где" || column == CheckColumn || (!IsRemote && header is "Права" or "Владелец" or "Куда ведёт"))
             {
                 continue;
             }
@@ -1106,6 +1484,17 @@ public partial class FilePane : UserControl
             menu.Items.Add(item);
         }
 
+        // растянутое руками — обратно по содержимому
+        menu.Items.Add(new Separator());
+        var reset = new MenuItem { Header = "Ширина столбцов — по содержимому", IsEnabled = _state.Columns.Count > 0 };
+        reset.Click += (_, _) =>
+        {
+            _state.Columns.Clear();
+            StateChanged?.Invoke(this);
+            FitColumns();
+        };
+        menu.Items.Add(reset);
+
         return menu;
     }
 
@@ -1125,7 +1514,7 @@ public partial class FilePane : UserControl
 
         for (var i = 0; i < crumbs.Count; i++)
         {
-            if (i > 0 && !(source.IsRemote && i == 1))
+            if (Crumbs.Children.Count > 0 && !(source.IsRemote && i == 1))
             {
                 var arrow = new TextBlock
                 {
@@ -1424,22 +1813,20 @@ public partial class FilePane : UserControl
     {
         if (row.IsDirectory || row.IsParent)
         {
+            // строки пересоздаются, и фокус уходит вместе со старой — без возврата следующий Enter терялся
+            var hadFocus = IsKeyboardFocusWithin || List.IsMouseOver;
             FolderMaskBox.Text = string.Empty;
             await NavigateAsync(row.FullPath);
+
+            if (hadFocus)
+            {
+                _ = Dispatcher.BeginInvoke(FocusList, DispatcherPriority.Loaded);
+            }
+
             return;
         }
 
         CommandRequested?.Invoke(this, PaneCommand.Open);
-    }
-
-    private async void OnListDoubleClick(object sender, MouseButtonEventArgs e)
-    {
-        // двойной щелчок по шапке или пустому месту — не переход
-        if (FindRow(e.OriginalSource as DependencyObject)?.Item is PaneRow row && !row.IsRenaming)
-        {
-            e.Handled = true;
-            await OpenRowAsync(row);
-        }
     }
 
     private static DataGridRow? FindRow(DependencyObject? node)
@@ -1508,7 +1895,23 @@ public partial class FilePane : UserControl
             e.Handled = true;
             CommandRequested?.Invoke(this, PaneCommand.Properties);
         }
-        else if (key == Key.F5)
+        else if (key == Key.Enter && !ctrl && !shift)
+        {
+            // здесь, а не у таблицы: Enter работает, где бы в панели ни был фокус
+            e.Handled = true;
+
+            if (CursorRow is { IsRenaming: false } row)
+            {
+                await OpenRowAsync(row);
+            }
+        }
+        else if (key == Key.F5 && TransferButton.Visibility == Visibility.Visible)
+        {
+            // как в Total Commander и WinSCP: F5 — копировать в соседнюю панель
+            e.Handled = true;
+            CommandRequested?.Invoke(this, PaneCommand.TransferToOther);
+        }
+        else if (key == Key.F5 || (ctrl && key == Key.R))
         {
             e.Handled = true;
             await RefreshAllAsync();
@@ -1545,17 +1948,54 @@ public partial class FilePane : UserControl
         }
     }
 
-    private async void OnListKeyDown(object sender, KeyEventArgs e)
+    private void OnListKeyDown(object sender, KeyEventArgs e)
     {
         if (e.OriginalSource is TextBox)
         {
             return;
         }
 
-        if (e.Key == Key.Enter && (Keyboard.Modifiers & ModifierKeys.Alt) == 0 && List.SelectedItem is PaneRow row)
+        // стрелки и листание двигают курсор, а не галочки; с Shift — отмечают диапазон, как обычно
+        if (Keyboard.Modifiers == ModifierKeys.None && _view is { Count: > 0 } view
+            && e.Key is Key.Up or Key.Down or Key.Home or Key.End or Key.PageUp or Key.PageDown)
         {
             e.Handled = true;
-            await OpenRowAsync(row);
+
+            var index = CursorRow is { } at ? view.IndexOf(at) : -1;
+            var page = Math.Max(1, (int)(List.ActualHeight / Math.Max(1, List.RowHeight is > 0 and var h ? h : 24)) - 2);
+
+            index = e.Key switch
+            {
+                Key.Up => index - 1,
+                Key.Down => index + 1,
+                Key.Home => 0,
+                Key.End => view.Count - 1,
+                Key.PageUp => index - page,
+                _ => index + page,
+            };
+
+            if (view.GetItemAt(Math.Clamp(index, 0, view.Count - 1)) is PaneRow target)
+            {
+                MoveCursor(target);
+            }
+
+            return;
+        }
+
+        // пробел — галочка у строки под курсором, и курсор дальше: отмечать подряд с клавиатуры
+        if (e.Key == Key.Space && Keyboard.Modifiers == ModifierKeys.None && CursorRow is { } spaced && _view is { } rows)
+        {
+            e.Handled = true;
+
+            if (!spaced.IsParent && List.ItemContainerGenerator.ContainerFromItem(spaced) is DataGridRow container)
+            {
+                container.IsSelected = !container.IsSelected;
+            }
+
+            if (rows.IndexOf(spaced) + 1 < rows.Count && rows.GetItemAt(rows.IndexOf(spaced) + 1) is PaneRow next)
+            {
+                MoveCursor(next);
+            }
         }
     }
 
@@ -1576,13 +2016,7 @@ public partial class FilePane : UserControl
         if (hit is not null)
         {
             e.Handled = true;
-            List.SelectedItem = hit;
-            List.ScrollIntoView(hit);
-
-            if (List.ItemContainerGenerator.ContainerFromItem(hit) is DataGridRow container)
-            {
-                container.Focus();
-            }
+            MoveCursor(hit);
         }
     }
 
@@ -1651,7 +2085,7 @@ public partial class FilePane : UserControl
     /// <summary>F2: имя правится прямо в строке; выделено имя без расширения, как в Windows.</summary>
     public void BeginRename()
     {
-        if (List.SelectedItem is not PaneRow { IsParent: false } row || row.Entry.Kind != FsKind.Normal || _source is null)
+        if (CursorRow is not { IsParent: false } row || row.Entry.Kind != FsKind.Normal || _source is null)
         {
             return;
         }
@@ -1754,7 +2188,7 @@ public partial class FilePane : UserControl
 
     public async Task DeleteSelectedAsync()
     {
-        if (_source is not { } source || SelectedEntries is not { Count: > 0 } items)
+        if (_source is not { } source || TargetEntries is not { Count: > 0 } items)
         {
             return;
         }
@@ -1830,11 +2264,11 @@ public partial class FilePane : UserControl
 
         if (error)
         {
-            AppLog.Error(text, where);
+            AppLog.Error(text, where, AppSection.Explorer);
         }
         else
         {
-            AppLog.Success(text, where);
+            AppLog.Success(text, where, AppSection.Explorer);
         }
     }
 
@@ -1854,26 +2288,36 @@ public partial class FilePane : UserControl
             return;
         }
 
-        // правый щелчок по строке вне выделения — выделяется она одна, как в проводнике
-        if (FindRow(source) is { Item: PaneRow row } && !List.SelectedItems.Contains(row))
+        // Галочки правый щелчок не трогает. По отмеченной строке меню — про все отмеченные,
+        // по неотмеченной — про неё одну (курсор встаёт на неё), по пустому месту — про папку.
+        var clicked = FindRow(source)?.Item as PaneRow;
+
+        if (clicked is not null)
         {
-            List.SelectedItem = row;
+            MoveCursor(clicked);
         }
-        else if (FindRow(source) is null)
+        else
         {
-            List.SelectedItems.Clear();
+            FocusList();
         }
+
+        _menuTargets = clicked is null || clicked.IsParent || clicked.Entry.Kind != FsKind.Normal
+            ? []
+            : List.SelectedItems.Contains(clicked) ? SelectedEntries : [clicked.Entry];
 
         e.Handled = true;
         var menu = BuildMenu();
         menu.PlacementTarget = List;
+
+        // действие из меню уже прочитало, с чем работать, — после закрытия снова галочки и курсор
+        menu.Closed += (_, _) => Dispatcher.BeginInvoke(() => _menuTargets = null, DispatcherPriority.Background);
         menu.IsOpen = true;
     }
 
     private ContextMenu BuildMenu()
     {
         var menu = new ContextMenu();
-        var picked = SelectedEntries;
+        var picked = TargetEntries;
         var single = picked.Count == 1 ? picked[0] : null;
         var remote = IsRemote;
 
@@ -1886,6 +2330,8 @@ public partial class FilePane : UserControl
 
         void Ask(PaneCommand command) => CommandRequested?.Invoke(this, command);
 
+        var editable = picked.Where(p => !p.IsDirectory && TextFile.IsEditable(p.Name)).ToList();
+
         if (single is not null)
         {
             Add("Открыть", "Enter", () => _ = OpenRowAsync(new PaneRow(single, remote)));
@@ -1895,11 +2341,21 @@ public partial class FilePane : UserControl
                 Add("Открыть с помощью…", string.Empty, () => Ask(PaneCommand.OpenWith));
             }
 
+            if (editable.Count == 1)
+            {
+                Add("Править", string.Empty, () => EditFiles(editable));
+            }
+
             if (remote && single.IsLink && single.LinkTarget.Length > 0)
             {
                 Add("Перейти к цели ссылки", string.Empty, () => _ = GoToLinkTargetAsync(single));
             }
 
+            menu.Items.Add(new Separator());
+        }
+        else if (editable.Count > 1)
+        {
+            Add($"Править ({editable.Count})", string.Empty, () => EditFiles(editable));
             menu.Items.Add(new Separator());
         }
 
@@ -1927,7 +2383,7 @@ public partial class FilePane : UserControl
 
         if (single is { IsDirectory: false })
         {
-            Add("Сравнить с выделенным в другой панели", string.Empty, () => Ask(PaneCommand.Compare));
+            Add("Сравнить с файлом под курсором в другой панели", string.Empty, () => Ask(PaneCommand.Compare));
         }
 
         if (remote)
@@ -1954,9 +2410,33 @@ public partial class FilePane : UserControl
         return menu;
     }
 
+    private void OnEdit(object sender, RoutedEventArgs e) => EditFiles(TargetEntries);
+
+    /// <summary>«Править»: каждый файл — своим окном встроенного редактора.</summary>
+    private void EditFiles(IReadOnlyList<FsEntry> entries)
+    {
+        if (_source is not { } source)
+        {
+            return;
+        }
+
+        var files = entries.Where(e => !e.IsDirectory && e.Kind == FsKind.Normal).Take(10).ToList();
+
+        if (files.Count == 0)
+        {
+            AppLog.Hint("Поставьте курсор на файл: править можно только файл.");
+            return;
+        }
+
+        foreach (var file in files)
+        {
+            CodeEditorWindow.Open(Window.GetWindow(this), source, file.FullPath, file.Name);
+        }
+    }
+
     private void CopyPath()
     {
-        var paths = SelectedEntries.Select(e => e.FullPath).ToList();
+        var paths = TargetEntries.Select(e => e.FullPath).ToList();
 
         if (paths.Count == 0 && _source is { } source)
         {
@@ -1964,7 +2444,7 @@ public partial class FilePane : UserControl
         }
 
         ClipboardText.Copy(string.Join(Environment.NewLine, paths));
-        AppLog.Info(paths.Count == 1 ? $"Путь скопирован: {paths[0]}" : $"Путей скопировано: {paths.Count}");
+        AppLog.Hint(paths.Count == 1 ? $"Путь скопирован: {paths[0]}" : $"Путей скопировано: {paths.Count}");
     }
 
     private async Task GoToLinkTargetAsync(FsEntry link)
@@ -1989,62 +2469,102 @@ public partial class FilePane : UserControl
         }
     }
 
-    // ── перетаскивание ───────────────────────────────────────────────────────
+    // ── мышь: рамка выделения и приём файлов из проводника Windows ───────────
 
-    private const string DragFormat = "MultiServerSync.ExplorerItems";
-
-    /// <summary>Откуда тянут прямо сейчас — перетаскивание внутри программы.</summary>
-    private static FilePane? _dragFrom;
-
+    /// <summary>
+    /// Протяжка левой кнопкой — всегда рамка выделения, с любого места строки и с пустого
+    /// места под строками. Галочка добавляет или снимает свою строку.
+    /// </summary>
     private void OnListMouseDown(object sender, MouseButtonEventArgs e)
     {
         Activated?.Invoke(this);
-        _dragStart = FindRow(e.OriginalSource as DependencyObject) is { Item: PaneRow { IsParent: false } } ? e.GetPosition(List) : null;
+        _marqueeFrom = null;
+
+        var hit = e.OriginalSource as DependencyObject;
+
+        if (FindParent<DataGridColumnHeader>(hit) is not null || FindParent<ScrollBar>(hit) is not null || FindParent<TextBox>(hit) is not null)
+        {
+            return;
+        }
+
+        var row = FindRow(hit);
+
+        if (row is { Item: PaneRow { IsParent: false } } && FindParent<CheckBox>(hit) is not null)
+        {
+            row.IsSelected = !row.IsSelected;
+            e.Handled = true;
+            FocusList();
+            return;
+        }
+
+        if (_rows.Any(r => r.IsRenaming))
+        {
+            return;
+        }
+
+        // двойной щелчок — здесь же: щелчок ниже гасится, и до события двойного щелчка таблица не доходит
+        if (e.ClickCount == 2 && row is { Item: PaneRow opened })
+        {
+            e.Handled = true;
+            _ = OpenRowAsync(opened);
+            return;
+        }
+
+        // щелчок по строке — только курсор, галочку ставит сам чекбокс (или Ctrl/Shift со щелчком)
+        var plain = Keyboard.Modifiers == ModifierKeys.None;
+
+        if (plain && row is { Item: PaneRow clicked })
+        {
+            MoveCursor(clicked);
+            e.Handled = true;
+        }
+        else if (row is null)
+        {
+            // щелчок по пустому месту под строками — клавиши тоже сюда
+            FocusList();
+        }
+
+        if (e.ClickCount > 1)
+        {
+            return;
+        }
+
+        var from = e.GetPosition(List);
+        var index = row is null ? List.Items.Count : List.ItemContainerGenerator.IndexFromContainer(row);
+
+        _marqueeFrom = from;
+        _marqueeIndex = index;
+        _marqueeOnEmpty = row is null;
+        _marqueeBase = Keyboard.Modifiers.HasFlag(ModifierKeys.Control) ? List.SelectedItems.Cast<object>().ToList() : [];
+
+        // рамка держится за строку, а не за точку на экране: список при протяжке прокручивается
+        var anchor = row ?? LastRow();
+        _marqueeRow = anchor is null ? -1 : List.ItemContainerGenerator.IndexFromContainer(anchor);
+        _marqueeOffset = anchor is null ? 0 : from.Y - anchor.TranslatePoint(default, List).Y;
     }
 
     private void OnListMouseMove(object sender, MouseEventArgs e)
     {
-        if (_dragStart is not { } start || e.LeftButton != MouseButtonState.Pressed || _rows.Any(r => r.IsRenaming))
+        if (_marqueeFrom is not { } origin || e.LeftButton != MouseButtonState.Pressed)
         {
             return;
         }
 
-        var now = e.GetPosition(List);
+        var at = e.GetPosition(List);
 
-        if (Math.Abs(now.X - start.X) < SystemParameters.MinimumHorizontalDragDistance
-            && Math.Abs(now.Y - start.Y) < SystemParameters.MinimumVerticalDragDistance)
+        if (!_marqueeOn)
         {
-            return;
+            if (Math.Abs(at.X - origin.X) < SystemParameters.MinimumHorizontalDragDistance
+                && Math.Abs(at.Y - origin.Y) < SystemParameters.MinimumVerticalDragDistance)
+            {
+                return;
+            }
+
+            BeginMarquee();
         }
 
-        _dragStart = null;
-        var items = SelectedEntries;
-
-        if (items.Count == 0)
-        {
-            return;
-        }
-
-        var data = new DataObject(DragFormat, "1");
-
-        // файлы компьютера можно утащить и в сам проводник Windows
-        if (!IsRemote)
-        {
-            var files = new System.Collections.Specialized.StringCollection();
-            files.AddRange(items.Select(i => i.FullPath).ToArray());
-            data.SetFileDropList(files);
-        }
-
-        _dragFrom = this;
-
-        try
-        {
-            DragDrop.DoDragDrop(List, data, DragDropEffects.Copy | DragDropEffects.Move);
-        }
-        finally
-        {
-            _dragFrom = null;
-        }
+        UpdateMarquee(at);
+        e.Handled = true;
     }
 
     private string? DropFolder(DragEventArgs e)
@@ -2059,19 +2579,14 @@ public partial class FilePane : UserControl
         return _current.Length > 0 || IsRemote ? _current : null;
     }
 
+    /// <summary>Файлы, брошенные из проводника Windows: на сервер — заливкой, сюда — копией.</summary>
     private void OnListDragOver(object sender, DragEventArgs e)
     {
         var target = DropFolder(e);
-        var internalDrag = e.Data.GetDataPresent(DragFormat) && _dragFrom is not null;
-        var fromSelf = internalDrag && ReferenceEquals(_dragFrom, this);
 
-        e.Effects = target is null || _source is null
+        e.Effects = target is null || _source is null || !e.Data.GetDataPresent(DataFormats.FileDrop)
             ? DragDropEffects.None
-            : fromSelf && target == _current
-                ? DragDropEffects.None
-                : internalDrag || e.Data.GetDataPresent(DataFormats.FileDrop)
-                    ? (e.KeyStates & DragDropKeyStates.ShiftKey) != 0 && (fromSelf || (!IsRemote && !internalDrag)) ? DragDropEffects.Move : DragDropEffects.Copy
-                    : DragDropEffects.None;
+            : (e.KeyStates & DragDropKeyStates.ShiftKey) != 0 && !IsRemote ? DragDropEffects.Move : DragDropEffects.Copy;
 
         e.Handled = true;
     }
@@ -2085,18 +2600,6 @@ public partial class FilePane : UserControl
 
         e.Handled = true;
         var move = (e.KeyStates & DragDropKeyStates.ShiftKey) != 0;
-
-        if (e.Data.GetDataPresent(DragFormat) && _dragFrom is { } from)
-        {
-            var items = from.SelectedEntries;
-
-            if (items.Count > 0 && !(ReferenceEquals(from, this) && target == _current))
-            {
-                DropRequested?.Invoke(this, new PaneDrop(from, items, [], target, move));
-            }
-
-            return;
-        }
 
         if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } files)
         {
@@ -2201,7 +2704,10 @@ public partial class FilePane : UserControl
 
         _treeSelected = node;
 
-        if (_syncingTree || node.FullPath == _current)
+        // Переходит только выбор человеком — щелчок или клавиши в самом дереве. Подключение
+        // вкладки пересоздаёт дерево, и оно само «выбирало» корень: панель уходила в «Этот
+        // компьютер» (на сервере — в «/») и затирала сохранённую папку вкладки.
+        if (_syncingTree || node.FullPath == _current || !Tree.IsKeyboardFocusWithin)
         {
             return;
         }
@@ -2346,12 +2852,12 @@ public partial class FilePane : UserControl
                 if (marked)
                 {
                     bookmarks.RemoveAll(b => string.Equals(b, here, StringComparison.OrdinalIgnoreCase));
-                    AppLog.Info($"Закладка убрана: {source.Display(here)}");
+                    AppLog.Hint($"Закладка убрана: {source.Display(here)}");
                 }
                 else
                 {
                     bookmarks.Add(here);
-                    AppLog.Info($"Закладка добавлена: {source.Display(here)}");
+                    AppLog.Hint($"Закладка добавлена: {source.Display(here)}");
                 }
 
                 AppState.Current.SaveSettings();
@@ -2404,7 +2910,7 @@ public partial class FilePane : UserControl
                     bookmarks.RemoveAll(b => string.Equals(b, path, StringComparison.OrdinalIgnoreCase));
                     AppState.Current.SaveSettings();
                     menu.Items.Remove(item);
-                    AppLog.Info($"Закладка убрана: {source.Display(path)}");
+                    AppLog.Hint($"Закладка убрана: {source.Display(path)}");
                 };
                 row.Children.Add(remove);
             }
@@ -2414,7 +2920,263 @@ public partial class FilePane : UserControl
         }
     }
 
+    // ── рамка выделения ──────────────────────────────────────────────────────
+
+    /// <summary>Где нажали, пока рамка ещё не пошла; пусто — нажатие не для рамки.</summary>
+    private Point? _marqueeFrom;
+
+    /// <summary>Строка, с которой начали, — или число строк, если начали под ними.</summary>
+    private int _marqueeIndex;
+
+    /// <summary>Строка, за которую держится угол рамки, и сдвиг точки от её верха.</summary>
+    private int _marqueeRow;
+    private double _marqueeOffset;
+
+    private bool _marqueeOn;
+    private bool _marqueeOnEmpty;
+    private bool _marqueeCapturing;
+
+    /// <summary>Что было выделено до рамки с Ctrl: рамка добавляет к нему, а не заменяет.</summary>
+    private List<object> _marqueeBase = [];
+
+    private DispatcherTimer? _marqueeScroll;
+
+    private void BeginMarquee()
+    {
+        _marqueeOn = true;
+
+        // у таблицы своя протяжка выделения — снимаем её захват мыши и берём свой
+        _marqueeCapturing = true;
+        List.ReleaseMouseCapture();
+        List.CaptureMouse();
+        _marqueeCapturing = false;
+
+        Marquee.Visibility = Visibility.Visible;
+
+        _marqueeScroll ??= new DispatcherTimer(TimeSpan.FromMilliseconds(60), DispatcherPriority.Input, (_, _) => ScrollMarquee(), Dispatcher);
+        _marqueeScroll.Start();
+    }
+
+    private void EndMarquee()
+    {
+        _marqueeOn = false;
+        _marqueeFrom = null;
+        _marqueeScroll?.Stop();
+        Marquee.Visibility = Visibility.Collapsed;
+
+        if (List.IsMouseCaptured)
+        {
+            _marqueeCapturing = true;
+            List.ReleaseMouseCapture();
+            _marqueeCapturing = false;
+        }
+    }
+
+    private void OnListMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_marqueeOn)
+        {
+            EndMarquee();
+            return;
+        }
+
+        // щелчок по пустому месту под строками снимает выделение, как в проводнике
+        if (_marqueeFrom is not null && _marqueeOnEmpty && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            List.UnselectAll();
+        }
+
+        _marqueeFrom = null;
+    }
+
+    private void OnListLostCapture(object sender, MouseEventArgs e)
+    {
+        if (_marqueeOn && !_marqueeCapturing)
+        {
+            EndMarquee();
+        }
+    }
+
+    /// <summary>Мышь за краем списка — список едет сам, рамка тянется за ним.</summary>
+    private void ScrollMarquee()
+    {
+        if (!_marqueeOn || Mouse.LeftButton != MouseButtonState.Pressed || FindChild<ScrollViewer>(List) is not { } scroll)
+        {
+            return;
+        }
+
+        var at = Mouse.GetPosition(List);
+        var (top, bottom) = RowsArea();
+
+        if (at.Y < top)
+        {
+            scroll.LineUp();
+        }
+        else if (at.Y > bottom)
+        {
+            scroll.LineDown();
+        }
+        else
+        {
+            return;
+        }
+
+        List.UpdateLayout();
+        UpdateMarquee(at);
+    }
+
+    private void UpdateMarquee(Point at)
+    {
+        var (top, bottom) = RowsArea();
+        var y = Math.Clamp(at.Y, top, Math.Max(top, bottom - 1));
+        var x = Math.Clamp(at.X, 0, List.ActualWidth);
+
+        // угол, откуда тянули: строка уехала за край — угол прижат к краю
+        var anchorY = (_marqueeRow >= 0 ? List.ItemContainerGenerator.ContainerFromIndex(_marqueeRow) as DataGridRow : null) is { } anchor
+            ? anchor.TranslatePoint(default, List).Y + _marqueeOffset
+            : _marqueeRow < FirstVisibleIndex() ? top : bottom;
+        anchorY = Math.Clamp(anchorY, top, bottom);
+
+        var fromX = Math.Clamp(_marqueeFrom?.X ?? x, 0, List.ActualWidth);
+        Canvas.SetLeft(Marquee, Math.Min(fromX, x));
+        Canvas.SetTop(Marquee, Math.Min(anchorY, y));
+        Marquee.Width = Math.Abs(x - fromX);
+        Marquee.Height = Math.Abs(y - anchorY);
+
+        // строки между началом и концом рамки; «..» не выделяется
+        var current = IndexAt(y);
+        var first = Math.Min(_marqueeIndex, current);
+        var last = Math.Min(Math.Max(_marqueeIndex, current), List.Items.Count - 1);
+        var wanted = new HashSet<object>(_marqueeBase);
+
+        for (var i = first; i <= last; i++)
+        {
+            if (List.Items[i] is PaneRow { IsParent: false } item)
+            {
+                wanted.Add(item);
+            }
+        }
+
+        var selected = new HashSet<object>(List.SelectedItems.Cast<object>());
+
+        foreach (var stale in selected.Where(o => !wanted.Contains(o)).ToList())
+        {
+            List.SelectedItems.Remove(stale);
+        }
+
+        foreach (var item in wanted.Where(o => !selected.Contains(o)).ToList())
+        {
+            List.SelectedItems.Add(item);
+        }
+    }
+
+    /// <summary>Строка на этой высоте; под последней строкой — число строк.</summary>
+    private int IndexAt(double y)
+    {
+        var hit = List.InputHitTest(new Point(Math.Max(1, NameColumn.ActualWidth / 2), y)) as DependencyObject;
+        return FindRow(hit) is { } row ? List.ItemContainerGenerator.IndexFromContainer(row) : List.Items.Count;
+    }
+
+    private int FirstVisibleIndex()
+    {
+        var (top, _) = RowsArea();
+        var index = IndexAt(top + 1);
+        return index == List.Items.Count ? 0 : index;
+    }
+
+    private DataGridRow? LastRow() =>
+        List.Items.Count == 0 ? null : List.ItemContainerGenerator.ContainerFromIndex(List.Items.Count - 1) as DataGridRow;
+
+    /// <summary>Где на списке строки: под шапкой столбцов и до низа видимой части.</summary>
+    private (double Top, double Bottom) RowsArea()
+    {
+        if (FindChild<ScrollContentPresenter>(List) is { } rows)
+        {
+            var top = rows.TranslatePoint(default, List).Y;
+            return (top, top + rows.ActualHeight);
+        }
+
+        return (0, List.ActualHeight);
+    }
+
+    // ── галочки и проводник Windows ─────────────────────────────────────────
+
+    /// <summary>Галочка в шапке: что-то не выделено — выделить всё, иначе снять.</summary>
+    private void OnCheckAll(object sender, RoutedEventArgs e)
+    {
+        var (picked, total) = CheckCounts();
+
+        if (picked < total)
+        {
+            List.SelectAll();
+
+            foreach (var parent in List.SelectedItems.OfType<PaneRow>().Where(r => r.IsParent).ToList())
+            {
+                List.SelectedItems.Remove(parent);
+            }
+        }
+        else
+        {
+            List.UnselectAll();
+        }
+
+        UpdateAllCheck();
+    }
+
+    private (int Picked, int Total) CheckCounts() =>
+        (List.SelectedItems.OfType<PaneRow>().Count(r => !r.IsParent), List.Items.OfType<PaneRow>().Count(r => !r.IsParent));
+
+    private void UpdateAllCheck()
+    {
+        var (picked, total) = CheckCounts();
+        AllCheck.IsChecked = picked == 0 ? false : picked == total ? true : null;
+    }
+
+    /// <summary>
+    /// Системное окно «Открыть папку», как «Файл → Открыть папку» в VS Code: открывается там,
+    /// где стоит панель, выбранная папка открывается в панели.
+    /// </summary>
+    private async void OnOpenInWindows(object sender, RoutedEventArgs e)
+    {
+        if (_source is not { IsRemote: false })
+        {
+            return;
+        }
+
+        var owner = Window.GetWindow(this) is { } window ? new System.Windows.Interop.WindowInteropHelper(window).Handle : IntPtr.Zero;
+
+        if (LocalPicker.PickFolder(owner, _current) is not { } folder)
+        {
+            return;
+        }
+
+        FileMaskBox.Text = string.Empty;
+        await OpenFolderAsync(folder);
+        FocusList();
+    }
+
     // ── поиск в визуальном дереве ────────────────────────────────────────────
+
+    private static T? FindChild<T>(DependencyObject root)
+        where T : DependencyObject
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+
+            if (child is T found)
+            {
+                return found;
+            }
+
+            if (FindChild<T>(child) is { } deeper)
+            {
+                return deeper;
+            }
+        }
+
+        return null;
+    }
 
     private static T? FindChild<T>(DependencyObject root, string name)
         where T : FrameworkElement

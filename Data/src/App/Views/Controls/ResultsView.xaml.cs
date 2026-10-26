@@ -1,4 +1,6 @@
+using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using MultiServerSync.Models;
@@ -19,8 +21,10 @@ public partial class ResultsView : UserControl
 
         DataContextChanged += OnDataContextChanged;
 
-        // порядок в таблице выбирается щелчком по заголовку и не сбрасывается
-        GridSort.Keep(ResultsGrid, "results");
+        // порядок в таблице выбирается щелчком по заголовку и не сбрасывается; строка команд
+        // после копирования в сортировке не участвует — стоит под строкой своего копирования
+        GridSort.Keep(ResultsGrid, "results",
+            byColumn => ReferenceEquals(ResultsGrid.ItemsSource, _rows) ? new PairOrder(byColumn, _heads, _queue) : null);
 
         // вывод может жить в отдельном окне: панель тогда пустая, а кнопка возвращает его назад
         OutputWindow.OpenChanged += ApplyDetachState;
@@ -44,12 +48,65 @@ public partial class ResultsView : UserControl
 
     private OperationBatch? Batch => DataContext as OperationBatch;
 
+    /// <summary>
+    /// Строка кнопок стоит в одной строке с ярлыками «Терминал / Журнал»: слева отступ
+    /// на их ширину, высота — как у них, чтобы кнопки встали по их середине.
+    /// </summary>
+    public void AlignToolbar(double indent, double height)
+    {
+        ToolBar.Margin = new Thickness(indent, 0, 0, 4);
+        ToolBar.MinHeight = height;
+    }
+
+    /// <summary>Команды после копирования показанного прогона; null — их нет.</summary>
+    private OperationBatch? _chain;
+
+    /// <summary>Строки таблицы, когда у копирования есть команды после него: сервер, под ним его команды.</summary>
+    private readonly ObservableCollection<OperationResult> _rows = new();
+
+    /// <summary>Строка команд → строка её копирования.</summary>
+    private readonly Dictionary<OperationResult, OperationResult> _heads = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>Место строки копирования в очереди — порядок, когда по столбцу строки равны.</summary>
+    private readonly Dictionary<OperationResult, int> _queue = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>
+    /// Порядок связками: копирования сравниваются по выбранному столбцу, строка команд
+    /// идёт сразу под своим копированием, как бы ни менялись её собственные значения.
+    /// </summary>
+    private sealed class PairOrder(
+        System.Collections.IComparer byColumn,
+        Dictionary<OperationResult, OperationResult> heads,
+        Dictionary<OperationResult, int> queue) : System.Collections.IComparer
+    {
+        public int Compare(object? x, object? y)
+        {
+            if (ReferenceEquals(x, y) || x is not OperationResult a || y is not OperationResult b)
+            {
+                return 0;
+            }
+
+            var headA = heads.GetValueOrDefault(a, a);
+            var headB = heads.GetValueOrDefault(b, b);
+
+            if (!ReferenceEquals(headA, headB))
+            {
+                var order = byColumn.Compare(headA, headB);
+                return order != 0 ? order : queue.GetValueOrDefault(headA).CompareTo(queue.GetValueOrDefault(headB));
+            }
+
+            return ReferenceEquals(a, headA) ? -1 : 1;
+        }
+    }
+
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
         if (e.OldValue is OperationBatch old)
         {
             old.Results.CollectionChanged -= OnResultsChanged;
         }
+
+        ShowRows();
 
         // окно вывода пишет состояние того прогона, что показывает панель
         OutputWindow.TrackBatch(e.NewValue as OperationBatch);
@@ -75,9 +132,109 @@ public partial class ResultsView : UserControl
         }
     }
 
+    /// <summary>
+    /// Копирование с командами после него: под строкой копирования каждого сервера — строка
+    /// его команд, та же, что в разделе «Команда». Команды прошлого прогона не показываются:
+    /// пока идёт новое копирование, они ещё не начались.
+    /// </summary>
+    private void ShowRows()
+    {
+        var chain = Batch is { } batch ? AppState.Current.AfterCopyBatchOf(batch) : null;
+
+        if (!ReferenceEquals(chain, _chain))
+        {
+            if (_chain is not null)
+            {
+                _chain.Results.CollectionChanged -= OnChainChanged;
+                _chain.PropertyChanged -= OnChainProperty;
+            }
+
+            _chain = chain;
+
+            if (_chain is not null)
+            {
+                _chain.Results.CollectionChanged += OnChainChanged;
+                _chain.PropertyChanged += OnChainProperty;
+            }
+        }
+
+        if (Batch is not { } shown)
+        {
+            ResultsGrid.ItemsSource = null;
+            return;
+        }
+
+        if (_chain is null)
+        {
+            if (!ReferenceEquals(ResultsGrid.ItemsSource, shown.Results))
+            {
+                ResultsGrid.ItemsSource = shown.Results;
+            }
+
+            return;
+        }
+
+        var picked = ResultsGrid.SelectedItem;
+        var fresh = _chain.StartedAt is { } chainStart && shown.StartedAt is { } copyStart && chainStart >= copyStart;
+
+        _rows.Clear();
+        _heads.Clear();
+        _queue.Clear();
+
+        var pairs = shown.Results
+            .Select(row => (row, after: fresh ? _chain.Results.FirstOrDefault(c => ReferenceEquals(c.Server, row.Server)) : null))
+            .ToList();
+
+        // связки заполняются раньше строк: таблица ставит строку на место уже при добавлении
+        foreach (var (row, after) in pairs)
+        {
+            _queue[row] = _queue.Count;
+
+            if (after is not null)
+            {
+                _heads[after] = row;
+            }
+        }
+
+        foreach (var (row, after) in pairs)
+        {
+            _rows.Add(row);
+
+            if (after is not null)
+            {
+                _rows.Add(after);
+            }
+        }
+
+        if (!ReferenceEquals(ResultsGrid.ItemsSource, _rows))
+        {
+            ResultsGrid.ItemsSource = _rows;
+        }
+
+        if (picked is not null && _rows.Contains(picked))
+        {
+            ResultsGrid.SelectedItem = picked;
+        }
+
+        FitServerColumn();
+    }
+
+    private void OnChainChanged(object? sender, NotifyCollectionChangedEventArgs e) => Dispatcher.BeginInvoke(new Action(ShowRows));
+
+    private void OnChainProperty(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(OperationBatch.StartedAt))
+        {
+            Dispatcher.BeginInvoke(new Action(ShowRows));
+        }
+    }
+
     /// <summary>Первый сервер выделяется сам, чтобы панель вывода не пустовала.</summary>
     private void OnResultsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        // новый прогон: команды после копирования могли включить или выключить
+        ShowRows();
+
         if (ResultsGrid.SelectedItem is null && Batch is { Results.Count: > 0 } batch)
         {
             ResultsGrid.SelectedItem = batch.Results[0];
@@ -114,18 +271,18 @@ public partial class ResultsView : UserControl
     {
         if (ResultsGrid.SelectedItem is not OperationResult result)
         {
-            AppLog.Warn("Сначала выберите сервер в таблице слева — очищается вывод выбранного.");
+            AppLog.Hint("Сначала выберите сервер в таблице слева — очищается вывод выбранного.", LogLevel.Warning);
             return;
         }
 
         if (result.Output.Length == 0)
         {
-            AppLog.Info($"У сервера {result.Title} вывода и так нет.");
+            AppLog.Hint($"У сервера {result.Title} вывода и так нет.");
             return;
         }
 
         result.ClearOutput();
-        AppLog.Info($"Вывод очищен: {result.Title}.");
+        AppLog.Hint($"Вывод очищен: {result.Title}.");
     }
 
     /// <summary>
@@ -169,7 +326,7 @@ public partial class ResultsView : UserControl
     {
         if (source is not { Results.Count: > 0 } batch)
         {
-            AppLog.Warn("Копировать нечего — результатов пока нет.");
+            AppLog.Hint("Копировать нечего — результатов пока нет.", LogLevel.Warning);
             return;
         }
 
@@ -184,7 +341,7 @@ public partial class ResultsView : UserControl
 
         if (ClipboardText.CopyTerminalOutput(text, auto: finished is not null))
         {
-            AppLog.Success((finished is not null ? $"{finished} — вывод всех серверов скопирован в буфер обмена: " : "Вывод скопирован в буфер обмена: ")
+            AppLog.Hint((finished is not null ? $"{finished} — вывод всех серверов скопирован в буфер обмена: " : "Вывод скопирован в буфер обмена: ")
                 + $"серверов {batch.Results.Count}, строк {text.Split('\n').Length}.");
         }
     }
@@ -204,7 +361,7 @@ public partial class ResultsView : UserControl
 
         if (result is null)
         {
-            AppLog.Warn($"{finished}, но результатов нет — копировать нечего.");
+            AppLog.Hint($"{finished}, но результатов нет — копировать нечего.", LogLevel.Warning);
             return;
         }
 
@@ -222,7 +379,7 @@ public partial class ResultsView : UserControl
     {
         if (ResultsGrid.SelectedItem is not OperationResult result)
         {
-            AppLog.Warn("Сначала выберите сервер в таблице слева.");
+            AppLog.Hint("Сначала выберите сервер в таблице слева.", LogLevel.Warning);
             return;
         }
 
@@ -236,7 +393,7 @@ public partial class ResultsView : UserControl
 
         if (text.Length == 0)
         {
-            AppLog.Warn($"У сервера {result.Title} вывода пока нет.");
+            AppLog.Hint($"У сервера {result.Title} вывода пока нет.", LogLevel.Warning);
             return;
         }
 
@@ -258,7 +415,7 @@ public partial class ResultsView : UserControl
 
         if (ClipboardText.CopyTerminalOutput(text + Environment.NewLine, auto: finished is not null))
         {
-            AppLog.Success(finished is not null
+            AppLog.Hint(finished is not null
                 ? $"{finished} — вывод скопирован в буфер обмена: {result.Title}."
                 : $"Вывод скопирован: {result.Title}.");
         }

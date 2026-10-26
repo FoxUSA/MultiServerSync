@@ -22,6 +22,8 @@
     <Resource Include="Assets\app.ico" />
     <Resource Include="Assets\data.ico" />
     <Resource Include="Assets\user_data.ico" />
+    <!--  подсветка редактора «Править» для того, чего нет в AvalonEdit: bash, YAML, конфиги  -->
+    <EmbeddedResource Include="Assets\Highlighting\*.xshd" />
   </ItemGroup>
 
   <ItemGroup>
@@ -41,6 +43,8 @@
   <ItemGroup>
     <PackageReference Include="WPF-UI" Version="4.3.0" />
     <PackageReference Include="SSH.NET" Version="2026.0.0" />
+    <!--  редактор «Править»: номера строк, подсветка, поиск  -->
+    <PackageReference Include="AvalonEdit" Version="6.3.1.120" />
   </ItemGroup>
 
 </Project>

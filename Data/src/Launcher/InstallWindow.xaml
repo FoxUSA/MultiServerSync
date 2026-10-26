@@ -6,12 +6,13 @@
   Title="Обновление MultiServerSync"
   Width="520"
   MinHeight="0"
+  Background="{DynamicResource ApplicationBackgroundBrush}"
   ExtendsContentIntoTitleBar="True"
   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
   Icon="pack://application:,,,/Assets/app.ico"
   ResizeMode="NoResize"
   SizeToContent="Height"
-  WindowBackdropType="Mica"
+  WindowBackdropType="None"
   WindowCornerPreference="Round"
   WindowStartupLocation="CenterScreen">
 

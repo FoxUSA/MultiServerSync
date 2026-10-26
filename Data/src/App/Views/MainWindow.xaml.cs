@@ -49,19 +49,11 @@ public partial class MainWindow : FluentWindow
             new Core.RelayCommand(_ => AddTab()), Key.T, ModifierKeys.Control));
         InputBindings.Add(new KeyBinding(
             new Core.RelayCommand(_ => CloseCurrentTab()), Key.W, ModifierKeys.Control));
-        InputBindings.Add(new KeyBinding(
-            new Core.RelayCommand(_ => TabBoardWindow.Open(this)), Key.D, ModifierKeys.Control));
 
         // ярлык вкладки ведут от состояния, а не наоборот: двусторонняя привязка SelectedItem
         // умеет записать в ActiveWorkspace свой null при перестроении списка, и тогда текущей
         // становится первая вкладка — переход по разделам слева сбивал открытую вкладку
-        AppState.Current.ActiveWorkspaceChanged += workspace =>
-        {
-            TabStrip.SelectedItem = workspace;
-
-            // вкладку могли открыть с доски вкладок — лента наверху должна до неё доехать
-            ScrollTabIntoView(workspace);
-        };
+        AppState.Current.ActiveWorkspaceChanged += workspace => TabStrip.SelectedItem = workspace;
 
         // проводник просит открыть вкладку другого раздела — например, команду «здесь»
         AppState.Current.TabShowRequested += tab => ShowTab(tab, State.SectionOfTab(tab) switch
@@ -72,10 +64,25 @@ public partial class MainWindow : FluentWindow
             _ => typeof(FilesPage),
         });
 
-        AppState.Current.ActiveServerSetChanged += set =>
+        AppState.Current.ActiveServerSetChanged += set => SetStrip.SelectedItem = set;
+
+        // ряд разделов следит за открытым разделом: в раздел попадают и не кнопкой (из вкладки, из проводника)
+        State.PropertyChanged += (_, e) =>
         {
-            SetStrip.SelectedItem = set;
-            ScrollIntoStrip(SetStrip, SetScroller, set, set.Title);
+            if (e.PropertyName == nameof(AppState.Section))
+            {
+                ShowSection();
+            }
+        };
+        ShowSection();
+
+        // рамка не копит историю: страницы и так живут всё время работы программы
+        PageFrame.Navigated += (_, _) =>
+        {
+            while (PageFrame.CanGoBack)
+            {
+                PageFrame.RemoveBackEntry();
+            }
         };
 
         SetupTabReorder();
@@ -89,7 +96,7 @@ public partial class MainWindow : FluentWindow
         {
             TabStrip.SelectedItem = State.ActiveWorkspace;
             SetStrip.SelectedItem = State.ActiveServerSet;
-            RootNavigation.Navigate(typeof(ServersPage));
+            Navigate(typeof(ServersPage));
 
             // записи загрузки плашкой не показываем — только то, что сделано после открытия окна
             AppLog.Written += Toast.Show;
@@ -122,6 +129,46 @@ public partial class MainWindow : FluentWindow
         System.Diagnostics.Process.Start(
             new System.Diagnostics.ProcessStartInfo(UpdateService.PageUrl) { UseShellExecute = true });
 
+    /// <summary>Страницы разделов — по одной на раздел: вкладки, выделение и прокрутка не теряются при переходах.</summary>
+    private readonly Dictionary<Type, System.Windows.Controls.Page> _pages = new();
+
+    /// <summary>Открыть раздел. Назад-вперёд у рамки нет: разделы переключает ряд над страницей.</summary>
+    private void Navigate(Type type)
+    {
+        if (!_pages.TryGetValue(type, out var page))
+        {
+            page = (System.Windows.Controls.Page)Activator.CreateInstance(type)!;
+            _pages[type] = page;
+        }
+
+        if (ReferenceEquals(PageFrame.Content, page))
+        {
+            return;
+        }
+
+        PageFrame.Navigate(page);
+    }
+
+    /// <summary>Кнопка раздела в ряду над рабочей областью.</summary>
+    private void OnSectionClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: Type page })
+        {
+            Navigate(page);
+        }
+    }
+
+    /// <summary>Отмечена кнопка открытого раздела; в «Настройках» — ни одна.</summary>
+    private void ShowSection()
+    {
+        var section = State.Section;
+        ServersSection.IsChecked = section == AppSection.Servers;
+        ExplorerSection.IsChecked = section == AppSection.Explorer;
+        CommandSection.IsChecked = section == AppSection.Command;
+        FilesSection.IsChecked = section == AppSection.Files;
+        DownloadSection.IsChecked = section == AppSection.Download;
+    }
+
     /// <summary>
     /// Двойной щелчок по пункту меню слева возвращает на первую вкладку: с любой вкладки
     /// быстро попасть на основную, не целясь мышью в ленту ярлыков.
@@ -140,8 +187,7 @@ public partial class MainWindow : FluentWindow
     {
         if (TabStrip.SelectedItem is Workspace workspace)
         {
-            AppLog.Debug($"Выбрана вкладка «{workspace.Title}», место {State.Tabs.IndexOf(workspace) + 1}, "
-                + $"лента сдвинута на {TabScroller.HorizontalOffset:0} из {TabScroller.ScrollableWidth:0}.");
+            AppLog.Debug($"Выбрана вкладка «{workspace.Title}», место {State.Tabs.IndexOf(workspace) + 1}.");
             State.ActiveWorkspace = workspace;
         }
         else if (State.Tabs.Count > 0)
@@ -166,20 +212,25 @@ public partial class MainWindow : FluentWindow
     /// <summary>Всё общее состояние: серверы, вкладки, настройки.</summary>
     public AppState State => AppState.Current;
 
+    /// <summary>
+    /// Тема программы. Подложки нет (WindowBackdropType.None): сплошной фон держит ступени
+    /// яркости окна, карточек и таблиц одинаковыми при любых обоях и в неактивном окне.
+    /// WPF-UI без явного указания снова включает Mica, поэтому «как в системе» считаем сами.
+    /// </summary>
     public static void ApplyTheme(string theme)
     {
-        switch (theme)
+        var target = theme switch
         {
-            case "Light":
-                ApplicationThemeManager.Apply(ApplicationTheme.Light);
-                break;
-            case "Dark":
-                ApplicationThemeManager.Apply(ApplicationTheme.Dark);
-                break;
-            default:
-                ApplicationThemeManager.ApplySystemTheme();
-                break;
-        }
+            "Light" => ApplicationTheme.Light,
+            "Dark" => ApplicationTheme.Dark,
+            _ => ApplicationThemeManager.GetSystemTheme() switch
+            {
+                SystemTheme.Dark or SystemTheme.Glow or SystemTheme.CapturedMotion => ApplicationTheme.Dark,
+                SystemTheme.HC1 or SystemTheme.HC2 or SystemTheme.HCBlack or SystemTheme.HCWhite => ApplicationTheme.HighContrast,
+                _ => ApplicationTheme.Light,
+            },
+        };
+        ApplicationThemeManager.Apply(target, WindowBackdropType.None);
     }
 
     /// <summary>Повторный запуск программы: вместо второго окна — ещё одна вкладка в этом.</summary>
@@ -192,69 +243,7 @@ public partial class MainWindow : FluentWindow
 
     private void AddWorkspace()
     {
-        var workspace = State.AddWorkspace();
-
-        State.ActiveWorkspace = workspace;
-        ScrollTabIntoView(workspace);
-    }
-
-    private void ScrollTabIntoView(Workspace workspace) => ScrollIntoStrip(TabStrip, TabScroller, workspace, workspace.Title);
-
-    /// <summary>
-    /// Подвинуть ленту так, чтобы ярлык был виден целиком. Своя прокрутка ListBox тут
-    /// не работает: список лежит внутри общего ScrollViewer и получает всю нужную ширину,
-    /// так что ездит именно внешний ScrollViewer — <see cref="System.Windows.Controls.ListBox.ScrollIntoView"/>
-    /// на нём ничего не делает. Это единственное место, которое двигает ленту само, —
-    /// см. <see cref="OnTabStripBringIntoView"/>.
-    /// </summary>
-    private void ScrollIntoStrip(System.Windows.Controls.ListBox strip, System.Windows.Controls.ScrollViewer scroller, object item, string title)
-    {
-        // при запуске ярлыки ещё не созданы — ждём, пока разложится лента
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            if (strip.ItemContainerGenerator.ContainerFromItem(item) is not FrameworkElement tab
-                || !scroller.IsAncestorOf(tab))
-            {
-                return;
-            }
-
-            var left = tab.TransformToAncestor(scroller).Transform(new Point(0, 0)).X + scroller.HorizontalOffset;
-            var right = left + tab.ActualWidth;
-            var before = scroller.HorizontalOffset;
-
-            if (left < scroller.HorizontalOffset)
-            {
-                scroller.ScrollToHorizontalOffset(Math.Max(0, left - 8));
-            }
-            else if (right > scroller.HorizontalOffset + scroller.ViewportWidth)
-            {
-                scroller.ScrollToHorizontalOffset(right - scroller.ViewportWidth + 8);
-            }
-            else
-            {
-                return;
-            }
-
-            AppLog.Debug($"Лента подкручена к «{title}»: была сдвинута на {before:0}, ярлык {left:0}–{right:0}, видно {scroller.ViewportWidth:0}.");
-        }), System.Windows.Threading.DispatcherPriority.Loaded);
-    }
-
-    /// <summary>
-    /// WPF сам просит ленту «показать» то, что получило фокус. Когда фокус встаёт на весь список
-    /// ярлыков, а не на один, просьба — показать список целиком, и лента отскакивала в начало:
-    /// под мышью оказывались другие вкладки, будто они поменялись местами. Ленту двигает только
-    /// выбор вкладки (<see cref="ScrollIntoStrip"/>), такие просьбы пропускаем.
-    /// </summary>
-    private void OnTabStripBringIntoView(object sender, RequestBringIntoViewEventArgs e)
-    {
-        e.Handled = true;
-
-        var target = e.TargetObject is FrameworkElement { DataContext: Workspace or ServerSet } element
-            && element is System.Windows.Controls.ListBoxItem
-            ? $"ярлык «{(element.DataContext as Workspace)?.Title ?? (element.DataContext as ServerSet)?.Title}»"
-            : e.TargetObject?.GetType().Name ?? "?";
-
-        AppLog.Debug($"Лента: просьба WPF показать {target} пропущена.");
+        State.ActiveWorkspace = State.AddWorkspace();
     }
 
     private void OnAddTab(object sender, RoutedEventArgs e) => AddTab();
@@ -331,9 +320,6 @@ public partial class MainWindow : FluentWindow
         }
     }
 
-    /// <summary>Доска вкладок: те же ярлыки кирпичами, но в отдельном растягиваемом окне.</summary>
-    private void OnOpenBoard(object sender, RoutedEventArgs e) => TabBoardWindow.Open(this);
-
     /// <summary>
     /// Галочки «после команды» / «после копирования» в терминале: вывод сам уходит в буфер.
     /// Срабатывает выбор того вида операции, что закончилась, а не того раздела, что открыт.
@@ -379,7 +365,7 @@ public partial class MainWindow : FluentWindow
 
         AppState.Current.Settings.SmartMode = on;
         AppState.Current.SaveSettings();
-        AppLog.Info(on
+        AppLog.Hint(on
             ? "Умный режим включён: спросит, если сервер непривычный для команды или вкладки."
             : "Умный режим выключен.");
     }
@@ -390,7 +376,7 @@ public partial class MainWindow : FluentWindow
         if (!State.PaneAllSets)
         {
             State.PaneAllSets = true;
-            AppLog.Info($"Целевые сервера — из всех наборов: {State.PaneServers.Count}.", State.ActiveWorkspace.Title);
+            AppLog.Hint($"Целевые сервера — из всех наборов: {State.PaneServers.Count}.");
         }
     }
 
@@ -412,14 +398,57 @@ public partial class MainWindow : FluentWindow
     // ── перетаскивание ярлыков мышью ───────────────────────────────────────────
 
     /// <summary>
-    /// Ярлыки вкладок и наборов переставляются мышью, как в браузере. Первый ярлык
-    /// в каждой ленте закреплён.
+    /// Мышью, как в браузере, переставляются ярлыки вкладок и наборов (первый в каждой ленте
+    /// закреплён), кнопки разделов и серверы в панели слева.
     /// </summary>
     private void SetupTabReorder()
     {
+        RestoreSectionOrder();
+
+        _ = new Controls.TabReorder(
+            SectionBar,
+            item => item is System.Windows.Controls.RadioButton,
+            (item, to) =>
+            {
+                if (item is not UIElement button)
+                {
+                    return;
+                }
+
+                var from = SectionBar.Children.IndexOf(button);
+
+                if (from < 0 || from == to)
+                {
+                    return;
+                }
+
+                SectionBar.Children.RemoveAt(from);
+                SectionBar.Children.Insert(to, button);
+
+                State.Settings.SectionOrder = SectionBar.Children.OfType<FrameworkElement>().Select(b => b.Name).ToList();
+                State.SaveSettings();
+            });
+
+        // место в панели — среди серверов, которые она показывает: набор вкладки или «Все»
+        _ = new Controls.TabReorder(
+            PaneServerList,
+            PaneScroller,
+            item => item is Models.ServerCheck,
+            fixedCount: 0,
+            (item, to) =>
+            {
+                var shown = State.ActiveWorkspace.Servers;
+
+                if (item is Models.ServerCheck dragged && to < shown.Count)
+                {
+                    State.MoveServer(dragged.Server, shown[to].Server);
+                }
+            },
+            grabButtons: true);
+
         _ = new Controls.TabReorder(
             TabStrip,
-            TabScroller,
+            null,
             item => item is Workspace { IsMain: false },
             fixedCount: 1,
             (item, to) =>
@@ -433,7 +462,7 @@ public partial class MainWindow : FluentWindow
 
         _ = new Controls.TabReorder(
             SetStrip,
-            SetScroller,
+            null,
             item => item is ServerSet { IsMain: false },
             fixedCount: 1,
             (item, to) =>
@@ -445,139 +474,82 @@ public partial class MainWindow : FluentWindow
             });
     }
 
-    // ── вид ленты: полные ярлыки или краткие в два ряда ──────────────────────────
-
-    private System.Windows.Controls.ItemsPanelTemplate? _wideTabsPanel;
-    private DataTemplate? _wideTabTemplate;
-    private DataTemplate? _wideSetTemplate;
-
-    /// <summary>
-    /// Полные ярлыки описаны прямо в разметке лент — их запоминаем, краткие берём из ресурсов.
-    /// Подменяются раскладка и шаблон ярлыка; рамка и отступы ярлыка следят за настройкой сами.
-    /// </summary>
-    private void SetupTabView()
+    /// <summary>Кнопки разделов — в том порядке, в каком их расставили; незнакомые имена пропускаются.</summary>
+    private void RestoreSectionOrder()
     {
-        _wideTabsPanel = TabStrip.ItemsPanel;
-        _wideTabTemplate = TabStrip.ItemTemplate;
-        _wideSetTemplate = SetStrip.ItemTemplate;
+        var buttons = SectionBar.Children.OfType<FrameworkElement>().ToList();
+        var order = State.Settings.SectionOrder;
 
-        // лента не уже окна — иначе личным вкладкам не к чему прижаться справа
-        TabScroller.SizeChanged += (_, _) => TabStrip.MinWidth = TabScroller.ActualWidth;
+        // кнопки, которых в сохранённом порядке нет (новый раздел), остаются в конце
+        var sorted = buttons
+            .OrderBy(b => order.IndexOf(b.Name) is var i && i >= 0 ? i : int.MaxValue)
+            .ToList();
 
-        ApplyTabView();
-
-        State.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(AppState.CompactTabs))
-            {
-                ApplyTabView();
-            }
-            else if (e.PropertyName == nameof(AppState.Section))
-            {
-                SwitchBottomHeight();
-            }
-        };
-    }
-
-    private void ApplyTabView()
-    {
-        var compact = State.CompactTabs;
-        var panel = compact ? (System.Windows.Controls.ItemsPanelTemplate)FindResource("CompactTabsPanel") : _wideTabsPanel;
-
-        TabStrip.ItemsPanel = panel;
-        TabStrip.ItemTemplate = compact ? (DataTemplate)FindResource("CompactTabTemplate") : _wideTabTemplate;
-        SetStrip.ItemsPanel = panel;
-        SetStrip.ItemTemplate = compact ? (DataTemplate)FindResource("CompactSetTemplate") : _wideSetTemplate;
-
-        CompactButton.Appearance = compact ? ControlAppearance.Primary : ControlAppearance.Secondary;
-        CompactButton.ToolTip = compact
-            ? "Краткие ярлыки включены. Нажмите, чтобы вернуть полные — со счётчиками серверов и отметок"
-            : "Краткие ярлыки: только название и статус, мельче и в два ряда";
-
-        // ярлыки переложены заново — открытая вкладка должна остаться на виду
-        ScrollTabIntoView(State.ActiveWorkspace);
-    }
-
-    private void OnToggleCompactTabs(object sender, RoutedEventArgs e) => State.CompactTabs = !State.CompactTabs;
-
-    // ── своя полоса прокрутки под ярлыками ───────────────────────────────────────
-
-    private bool _syncingTabBar;
-
-    /// <summary>Лента открытого раздела: на «Серверах» — наборы, на «Копировании» и «Команде» — вкладки.</summary>
-    private System.Windows.Controls.ScrollViewer ActiveScroller => State.ShowsServerSetTabs ? SetScroller : TabScroller;
-
-    private void OnTabStripScrolled(object sender, System.Windows.Controls.ScrollChangedEventArgs e)
-    {
-        // сдвиг самой ленты — в отладку: по нему видно, кто и когда её двигает
-        if (ReferenceEquals(e.OriginalSource, sender) && Math.Abs(e.HorizontalChange) > 0.5)
-        {
-            AppLog.Debug($"Лента сдвинулась: {e.HorizontalOffset - e.HorizontalChange:0} → {e.HorizontalOffset:0}.");
-        }
-
-        SyncTabScrollBar();
-    }
-
-    private void OnTabScrollerVisibleChanged(object sender, DependencyPropertyChangedEventArgs e) => SyncTabScrollBar();
-
-    /// <summary>Ползунок повторяет ленту: видна она вся — полосы нет, иначе ползунок там, где лента.</summary>
-    private void SyncTabScrollBar()
-    {
-        var scroller = ActiveScroller;
-        var overflow = scroller.IsVisible && scroller.ScrollableWidth > 0.5;
-
-        TabScrollBar.Visibility = overflow ? Visibility.Visible : Visibility.Collapsed;
-
-        if (!overflow)
+        if (sorted.SequenceEqual(buttons))
         {
             return;
         }
 
-        _syncingTabBar = true;
-        TabScrollBar.Maximum = scroller.ScrollableWidth;
-        TabScrollBar.LargeChange = Math.Max(1, scroller.ViewportWidth);
-        TabScrollBar.Value = scroller.HorizontalOffset;
-        _syncingTabBar = false;
+        SectionBar.Children.Clear();
+
+        foreach (var button in sorted)
+        {
+            SectionBar.Children.Add(button);
+        }
     }
 
-    /// <summary>Ползунок тащат — лента едет следом.</summary>
-    private void OnTabScrollBarChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    // ── лента ярлыков и место под ней ──────────────────────────────────────────
+
+    private void SetupTabView()
     {
-        if (!_syncingTabBar && TabScrollBar.IsVisible)
+        State.PropertyChanged += (_, e) =>
         {
-            AppLog.Debug($"Ползунок ленты: {e.OldValue:0} → {e.NewValue:0}.");
-            ActiveScroller.ScrollToHorizontalOffset(e.NewValue);
-        }
+            if (e.PropertyName == nameof(AppState.Section))
+            {
+                SwitchBottomHeight();
+                ApplyServerPane();
+            }
+        };
+
+        ApplyServerPane();
+    }
+
+    /// <summary>У «Проводника» карточки «Целевые сервера» нет: сервер выбирается в самой правой панели.</summary>
+    private void ApplyServerPane()
+    {
+        var explorer = State.Section == AppSection.Explorer;
+        PaneCard.Visibility = explorer ? Visibility.Collapsed : Visibility.Visible;
+        PaneColumn.Width = new GridLength(explorer ? 0 : 220);
     }
 
     /// <summary>
-    /// Колесо над полосой прокрутки листает ленту вбок. Над самими ярлыками это делает общий
-    /// <see cref="WheelScroll"/>, но полоса лежит рядом с лентой, а не внутри неё — сама он её не найдёт.
+    /// Ярлыки встали вторым рядом (или ряд ушёл) — лента выросла вниз. Страница сама ужимается
+    /// на всю разницу, а нижняя панель стоит своей высотой; чтобы обе ужались поровну, нижней
+    /// отдаём её долю разницы.
     /// </summary>
-    private void OnTabStripWheel(object sender, MouseWheelEventArgs e)
+    private void OnTabStripAreaSized(object sender, SizeChangedEventArgs e)
     {
-        var scroller = ActiveScroller;
-        scroller.ScrollToHorizontalOffset(scroller.HorizontalOffset - e.Delta);
-        e.Handled = true;
+        var delta = e.NewSize.Height - e.PreviousSize.Height;
+
+        if (!e.HeightChanged || e.PreviousSize.Height <= 0 || Math.Abs(delta) < 1
+            || BottomPanel.Visibility != Visibility.Visible || !BottomRow.Height.IsAbsolute)
+        {
+            return;
+        }
+
+        var page = PageRow.ActualHeight;
+        var bottom = BottomRow.ActualHeight;
+
+        if (page + bottom <= 0)
+        {
+            return;
+        }
+
+        BottomRow.Height = new GridLength(Math.Max(0, bottom - delta * bottom / (page + bottom)));
     }
 
-    /// <summary>Правый щелчок по ярлыку только открывает меню ленты, вкладку не переключает.</summary>
+    /// <summary>Правый щелчок по ярлыку вкладку не переключает.</summary>
     private void OnTabStripRightDown(object sender, MouseButtonEventArgs e) => e.Handled = true;
-
-    /// <summary>Карандаш в нижнем углу ярлыка.</summary>
-    private void OnRenameTabClick(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-
-        if (sender is FrameworkElement { DataContext: Workspace workspace })
-        {
-            Rename(workspace);
-        }
-        else if (sender is FrameworkElement { DataContext: ServerSet set })
-        {
-            Rename(set);
-        }
-    }
 
     /// <summary>
     /// Свитч на ярлыке копирования. Первое включение создаёт пустую личную вкладку команд
@@ -594,13 +566,13 @@ public partial class MainWindow : FluentWindow
 
         if (!copy.AfterCopyEnabled)
         {
-            AppLog.Info($"Команды после копирования выключены: «{copy.Title}».");
+            AppLog.Hint($"Команды после копирования выключены: «{copy.Title}».");
             return;
         }
 
         if (copy.Personal is { } personal)
         {
-            AppLog.Info($"Команды после копирования включены: «{copy.Title}».");
+            AppLog.Hint($"Команды после копирования включены: «{copy.Title}».");
             return;
         }
 
@@ -633,13 +605,13 @@ public partial class MainWindow : FluentWindow
         }
     }
 
-    private void OnOpenSettings(object sender, RoutedEventArgs e) => RootNavigation.Navigate(typeof(SettingsPage));
+    private void OnOpenSettings(object sender, RoutedEventArgs e) => Navigate(typeof(SettingsPage));
 
     /// <summary>Открыть вкладку в её разделе: сначала выбрать её, потом перейти в раздел.</summary>
     private void ShowTab(Workspace tab, Type page)
     {
         State.ActiveWorkspace = tab;
-        RootNavigation.Navigate(page);
+        Navigate(page);
     }
 
     /// <summary>Двойной щелчок по ярлыку — то же самое.</summary>
@@ -681,7 +653,7 @@ public partial class MainWindow : FluentWindow
     {
         if (workspace.IsPersonal)
         {
-            AppLog.Info("Личная вкладка называется как её вкладка копирования — переименуйте ту.");
+            AppLog.Hint("Личная вкладка называется как её вкладка копирования — переименуйте ту.");
             return;
         }
 
@@ -780,7 +752,7 @@ public partial class MainWindow : FluentWindow
             }
 
             // пятая часть того, что делят страница и панель; до первой раскладки — от высоты окна
-            var page = ((System.Windows.Controls.Grid)BottomPanel.Parent).RowDefinitions[2].ActualHeight;
+            var page = PageRow.ActualHeight;
             var shared = page > 0 ? page + BottomRow.ActualHeight : Height - 120;
 
             return Math.Max(120, Math.Round(shared / 5));
@@ -824,6 +796,13 @@ public partial class MainWindow : FluentWindow
 
         Terminal.Visibility = terminal ? Visibility.Visible : Visibility.Collapsed;
         Log.Visibility = terminal ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// <summary>Ярлыки «Терминал / Журнал» разложились — кнопки обоих встают в их строку, правее них.</summary>
+    private void OnBottomTabsSized(object sender, SizeChangedEventArgs e)
+    {
+        Terminal.AlignToolbar(e.NewSize.Width, e.NewSize.Height);
+        Log.AlignToolbar(e.NewSize.Width, e.NewSize.Height);
     }
 
     // ── трей и выход ───────────────────────────────────────────────────────────

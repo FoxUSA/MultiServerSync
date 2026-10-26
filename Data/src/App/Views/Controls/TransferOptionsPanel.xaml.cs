@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using MultiServerSync.Services;
 using MultiServerSync.Views.Dialogs;
 
@@ -41,7 +42,72 @@ public partial class TransferOptionsPanel : UserControl
             choice.GroupName = group;
         }
 
+        // свёрнутая строка повторяет то, что выбрано, — при любом щелчке и при смене вкладки
+        foreach (var toggle in new ToggleButton[] { AllChoice, MissingChoice, DateChoice, HashChoice, DateOption, VerifyOption, ReplaceOption })
+        {
+            toggle.Checked += (_, _) => UpdateSummary();
+            toggle.Unchecked += (_, _) => UpdateSummary();
+        }
+
+        DataContextChanged += (_, _) => Dispatcher.BeginInvoke(new Action(UpdateSummary));
+
         ApplyTexts();
+    }
+
+    /// <summary>Свернуть можно у «Копирования» и «Скачивания»; в окне «Проводника» блок всегда целиком.</summary>
+    private bool CanFold => Direction != TransferDirection.Both;
+
+    private bool Folded
+    {
+        get => Direction == TransferDirection.Download
+            ? AppState.Current.Settings.DownloadOptionsFolded
+            : AppState.Current.Settings.UploadOptionsFolded;
+        set
+        {
+            if (Direction == TransferDirection.Download)
+            {
+                AppState.Current.Settings.DownloadOptionsFolded = value;
+            }
+            else
+            {
+                AppState.Current.Settings.UploadOptionsFolded = value;
+            }
+
+            AppState.Current.SaveSettings();
+        }
+    }
+
+    private void OnFold(object sender, RoutedEventArgs e)
+    {
+        Folded = !Folded;
+        ApplyFold();
+    }
+
+    /// <summary>Свёрнуто — шапка и строка выбранного; развёрнуто — все параметры.</summary>
+    private void ApplyFold()
+    {
+        var folded = CanFold && Folded;
+
+        FoldButton.Visibility = CanFold ? Visibility.Visible : Visibility.Collapsed;
+        FoldIcon.Symbol = folded ? Wpf.Ui.Controls.SymbolRegular.ChevronRight24 : Wpf.Ui.Controls.SymbolRegular.ChevronDown24;
+        FoldButton.ToolTip = folded ? "Развернуть параметры" : "Свернуть в одну строку";
+        Body.Visibility = folded ? Visibility.Collapsed : Visibility.Visible;
+        SummaryText.Visibility = folded ? Visibility.Visible : Visibility.Collapsed;
+        HeaderRow.Margin = folded ? new Thickness(0) : new Thickness(0, 0, 0, 4);
+
+        UpdateSummary();
+    }
+
+    /// <summary>Выбранный режим и включённые галочки — через точку, теми же словами, что в блоке.</summary>
+    private void UpdateSummary()
+    {
+        var mode = new[] { AllChoice, MissingChoice, DateChoice, HashChoice }.FirstOrDefault(c => c.IsChecked == true);
+        var options = new[] { DateOption, VerifyOption, ReplaceOption }
+            .Where(o => o.IsChecked == true && o.Visibility == Visibility.Visible);
+
+        var parts = new ContentControl?[] { mode }.Concat(options).OfType<ContentControl>().Select(c => c.Content as string).OfType<string>();
+        SummaryText.Text = string.Join("  ·  ", parts);
+        SummaryText.ToolTip = SummaryText.Text;
     }
 
     public TransferDirection Direction
@@ -66,6 +132,7 @@ public partial class TransferOptionsPanel : UserControl
                 Set(VerifyOption, "после скачивания сверять суммы",
                     "Проверка уже скачанного: SHA-256 здесь против sha256sum на сервере — только для файлов этого захода.");
                 ExcludeButton.Visibility = Visibility.Collapsed;
+                ReplaceOption.Visibility = Visibility.Collapsed;
                 break;
 
             case TransferDirection.Both:
@@ -80,6 +147,7 @@ public partial class TransferOptionsPanel : UserControl
                 Set(VerifyOption, "после копирования сверять суммы",
                     "Проверка уже скопированного: SHA-256 с обеих сторон — только для файлов этого захода.");
                 ExcludeButton.Visibility = Visibility.Visible;
+                ReplaceOption.Visibility = Visibility.Visible;
                 break;
 
             default:
@@ -96,8 +164,11 @@ public partial class TransferOptionsPanel : UserControl
                 Set(VerifyOption, "после копирования сверять суммы",
                     "Проверка уже отправленного: после копирования на сервере запускается sha256sum и хеши сравниваются с локальными. Только для файлов этого захода.");
                 ExcludeButton.Visibility = Visibility.Collapsed;
+                ReplaceOption.Visibility = Visibility.Collapsed;
                 break;
         }
+
+        ApplyFold();
     }
 
     private static void Set(ContentControl control, string text, string tip)
@@ -117,6 +188,6 @@ public partial class TransferOptionsPanel : UserControl
 
         workspace.ExcludeMasks = masks;
         var count = Core.ExcludeRules.Count(masks);
-        AppLog.Info(count > 0 ? $"Исключения при копировании: {count}." : "Исключения при копировании сняты.", workspace.Title);
+        AppLog.Hint(count > 0 ? $"Исключения при копировании: {count}." : "Исключения при копировании сняты.");
     }
 }

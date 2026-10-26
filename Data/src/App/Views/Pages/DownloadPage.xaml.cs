@@ -85,7 +85,7 @@ public partial class DownloadPage : Page
 
         if (server is null)
         {
-            AppLog.Warn("Сначала добавьте хотя бы один сервер.");
+            AppLog.Hint("Сначала добавьте хотя бы один сервер.", LogLevel.Warning);
             return;
         }
 
@@ -108,7 +108,7 @@ public partial class DownloadPage : Page
 
         if (item.Server is not { } server)
         {
-            AppLog.Warn($"Сервер строки «{item.Name}» удалён из списка — открыть обзор не на чем.", workspace.Title);
+            AppLog.Hint($"Сервер строки «{item.Name}» удалён из списка — открыть обзор не на чем.", LogLevel.Warning);
             return;
         }
 
@@ -132,11 +132,9 @@ public partial class DownloadPage : Page
             dialog.Server,
             dialog.SelectedItems.Select(i => (i.FullPath, i.IsDirectory, i.Length, i.Modified)));
 
-        AppLog.Info(
-            added > 0
+        AppLog.Hint(added > 0
                 ? $"Добавлено для скачивания с «{dialog.Server.PaneLabel}»: {added}."
-                : "Всё выбранное уже есть в списке.",
-            workspace.Title);
+                : "Всё выбранное уже есть в списке.");
 
         // у новых папок сразу видны число файлов и размер
         Check();
@@ -162,7 +160,7 @@ public partial class DownloadPage : Page
 
         workspace.ExcludeMasks = masks;
         var count = ExcludeRules.Count(masks);
-        AppLog.Info(count > 0 ? $"Исключения при скачивании: {count}." : "Исключения при скачивании сняты.", workspace.Title);
+        AppLog.Hint(count > 0 ? $"Исключения при скачивании: {count}." : "Исключения при скачивании сняты.");
     }
 
     private void OnRemoveSelected(object sender, RoutedEventArgs e)
@@ -179,9 +177,7 @@ public partial class DownloadPage : Page
             workspace.Downloads.Remove(item);
         }
 
-        AppLog.Info(
-            picked.Count > 0 ? $"Убрано строк: {picked.Count}." : "Выделите строки, которые убрать (Ctrl, Shift).",
-            workspace.Title);
+        AppLog.Hint(picked.Count > 0 ? $"Убрано строк: {picked.Count}." : "Выделите строки, которые убрать (Ctrl, Shift).");
     }
 
     private void OnClear(object sender, RoutedEventArgs e)
@@ -189,7 +185,7 @@ public partial class DownloadPage : Page
         if (Workspace is { Downloads.Count: > 0 } workspace)
         {
             workspace.Downloads.Clear();
-            AppLog.Info("Список путей для скачивания очищен.", workspace.Title);
+            AppLog.Hint("Список путей для скачивания очищен.");
         }
     }
 
@@ -222,7 +218,7 @@ public partial class DownloadPage : Page
 
         if (!Directory.Exists(folder))
         {
-            AppLog.Warn(folder.Length == 0 ? "Папка не указана." : $"Папки ещё нет: {folder}. Она появится при первом скачивании.");
+            AppLog.Hint(folder.Length == 0 ? "Папка не указана." : $"Папки ещё нет: {folder}. Она появится при первом скачивании.", LogLevel.Warning);
             return;
         }
 
@@ -257,7 +253,7 @@ public partial class DownloadPage : Page
                 string.Empty,
                 "Скачать везде"))
         {
-            AppLog.Info("«Выполнить везде» отменено.");
+            AppLog.Hint("«Выполнить везде» отменено.");
             return;
         }
 

@@ -43,7 +43,7 @@ public partial class ActionToast : UserControl
     /// <summary>Угловая плашка: повтор записи журнала. Записи, показанные на месте, она пропускает.</summary>
     public void Show(LogEntry entry)
     {
-        if (entry.ShownInPlace || IsServerLine(entry))
+        if (entry.ShownInPlace || entry.IsServerLine)
         {
             return;
         }
@@ -84,10 +84,6 @@ public partial class ActionToast : UserControl
 
         BeginAnimation(OpacityProperty, fade);
     }
-
-    /// <summary>Запись про отдельный сервер: у неё в пометке стоит адрес сервера.</summary>
-    private static bool IsServerLine(LogEntry entry) =>
-        entry.Scope is { } scope && AppState.Current.Servers.Any(s => s.Display == scope);
 
     private Brush DotBrush(LogLevel level)
     {

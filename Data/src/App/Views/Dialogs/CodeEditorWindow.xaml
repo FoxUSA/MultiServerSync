@@ -1,0 +1,261 @@
+<ui:FluentWindow
+  x:Class="MultiServerSync.Views.Dialogs.CodeEditorWindow"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:avalon="http://icsharpcode.net/sharpdevelop/avalonedit"
+  xmlns:core="clr-namespace:MultiServerSync.Core"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+  Title="Правка"
+  Width="1040"
+  Height="740"
+  MinWidth="420"
+  MinHeight="0"
+  ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
+  ExtendsContentIntoTitleBar="True"
+  Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  ShowInTaskbar="True"
+  WindowBackdropType="None"
+  WindowCornerPreference="Round"
+  WindowStartupLocation="CenterOwner">
+
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <ui:TitleBar
+      Grid.Row="0"
+      Title="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
+      Icon="{core:AppIcon}" />
+
+    <!--  где файл и что с ним можно сделать  -->
+    <Grid Grid.Row="1" Margin="12,2,12,4">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <ui:Button
+        x:Name="SaveButton"
+        Grid.Column="0"
+        Padding="9,2"
+        Click="OnSave"
+        Content="Сохранить"
+        FontSize="11"
+        IsEnabled="False"
+        ToolTip="Записать в тот же файл: владелец и права остаются прежними, после записи сверяется SHA-256 (Ctrl+S)">
+        <ui:Button.Icon>
+          <ui:SymbolIcon FontSize="17" Symbol="Save24" />
+        </ui:Button.Icon>
+      </ui:Button>
+
+      <ui:Button
+        Grid.Column="1"
+        Margin="4,0,0,0"
+        Padding="9,2"
+        Click="OnFind"
+        Content="Найти"
+        FontSize="11"
+        ToolTip="Найти и заменить (Ctrl+F, Ctrl+H); дальше — F3, назад — Shift+F3">
+        <ui:Button.Icon>
+          <ui:SymbolIcon FontSize="17" Symbol="Search24" />
+        </ui:Button.Icon>
+      </ui:Button>
+
+      <ui:Button
+        Grid.Column="2"
+        Margin="4,0,0,0"
+        Padding="9,2"
+        Click="OnReload"
+        Content="Перечитать"
+        FontSize="11"
+        ToolTip="Открыть файл заново — таким, какой он сейчас на диске">
+        <ui:Button.Icon>
+          <ui:SymbolIcon FontSize="17" Symbol="ArrowClockwise24" />
+        </ui:Button.Icon>
+      </ui:Button>
+
+      <CheckBox
+        x:Name="WrapBox"
+        Grid.Column="3"
+        Margin="12,0,0,0"
+        VerticalAlignment="Center"
+        Click="OnWrap"
+        Content="Перенос строк"
+        FontSize="11"
+        ToolTip="Длинные строки — переносом по ширине окна. В файле они остаются одной строкой" />
+
+      <TextBlock
+        x:Name="PathText"
+        Grid.Column="4"
+        Margin="12,0,0,0"
+        VerticalAlignment="Center"
+        FontSize="12"
+        FontWeight="SemiBold"
+        TextTrimming="CharacterEllipsis" />
+    </Grid>
+
+    <!--  поиск и замена: Ctrl+F / Ctrl+H, Esc — закрыть  -->
+    <Grid
+      x:Name="FindBar"
+      Grid.Row="2"
+      Margin="12,0,12,4"
+      Visibility="Collapsed">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="2*" MaxWidth="320" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="2*" MaxWidth="320" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <ui:TextBox
+        x:Name="FindBox"
+        Grid.Column="0"
+        Padding="8,4"
+        FontSize="12"
+        Icon="{ui:SymbolIcon Search24}"
+        PlaceholderText="Найти"
+        PreviewKeyDown="OnFindKeyDown"
+        TextChanged="OnFindChanged" />
+      <ui:Button
+        Grid.Column="1"
+        Margin="4,0,0,0"
+        Click="OnFindPrevious"
+        Icon="{ui:SymbolIcon ArrowUp24}"
+        ToolTip="Предыдущее (Shift+F3, Shift+Enter)" />
+      <ui:Button
+        Grid.Column="2"
+        Margin="4,0,0,0"
+        Click="OnFindNext"
+        Icon="{ui:SymbolIcon ArrowDown24}"
+        ToolTip="Следующее (F3, Enter)" />
+      <CheckBox
+        x:Name="CaseBox"
+        Grid.Column="3"
+        Margin="8,0,0,0"
+        VerticalAlignment="Center"
+        Click="OnCaseChanged"
+        Content="Aa"
+        FontSize="11"
+        ToolTip="С учётом регистра" />
+
+      <ui:TextBox
+        x:Name="ReplaceBox"
+        Grid.Column="4"
+        Margin="8,0,0,0"
+        Padding="8,4"
+        FontSize="12"
+        Icon="{ui:SymbolIcon ArrowSwap24}"
+        PlaceholderText="Заменить на"
+        PreviewKeyDown="OnReplaceKeyDown" />
+      <ui:Button
+        Grid.Column="5"
+        Margin="4,0,0,0"
+        Padding="9,2"
+        Click="OnReplace"
+        Content="Заменить"
+        FontSize="11"
+        ToolTip="Заменить найденное и перейти к следующему (Enter в поле замены)" />
+      <ui:Button
+        Grid.Column="6"
+        Margin="4,0,0,0"
+        Padding="9,2"
+        Click="OnReplaceAll"
+        Content="Все"
+        FontSize="11"
+        ToolTip="Заменить всё в файле. Отменяется одним Ctrl+Z" />
+
+      <TextBlock
+        x:Name="FindCount"
+        Grid.Column="7"
+        Margin="8,0,0,0"
+        VerticalAlignment="Center"
+        FontSize="11"
+        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+      <ui:Button
+        Grid.Column="9"
+        Click="OnCloseFind"
+        Icon="{ui:SymbolIcon Dismiss24}"
+        ToolTip="Закрыть поиск (Esc)" />
+    </Grid>
+
+    <Border
+      Grid.Row="3"
+      Margin="12,0,12,8"
+      Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+      BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+      BorderThickness="1">
+      <Grid>
+        <avalon:TextEditor
+          x:Name="Editor"
+          Padding="4,2,0,0"
+          Background="Transparent"
+          FontFamily="Cascadia Mono, Consolas"
+          FontSize="13"
+          Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+          HorizontalScrollBarVisibility="Auto"
+          LineNumbersForeground="{DynamicResource TextFillColorTertiaryBrush}"
+          ShowLineNumbers="True"
+          VerticalScrollBarVisibility="Auto"
+          Visibility="Hidden" />
+
+        <TextBlock
+          x:Name="Message"
+          Margin="24"
+          HorizontalAlignment="Center"
+          VerticalAlignment="Center"
+          FontSize="13"
+          Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+          Text="Файл читается…"
+          TextAlignment="Center"
+          TextWrapping="Wrap" />
+      </Grid>
+    </Border>
+
+    <!--  строка состояния: слева — что произошло, справа — где курсор и какой файл  -->
+    <Border
+      Grid.Row="4"
+      Padding="12,4"
+      Background="{DynamicResource ControlFillColorDefaultBrush}"
+      BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+      BorderThickness="0,1,0,0">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <TextBlock
+          x:Name="StatusText"
+          Grid.Column="0"
+          VerticalAlignment="Center"
+          FontSize="11"
+          TextTrimming="CharacterEllipsis" />
+
+        <TextBlock
+          x:Name="InfoText"
+          Grid.Column="1"
+          Margin="12,0,0,0"
+          VerticalAlignment="Center"
+          FontSize="11"
+          Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+          ToolTip="Кодировка и концы строк сохраняются такими, какими были в файле" />
+      </Grid>
+    </Border>
+  </Grid>
+</ui:FluentWindow>

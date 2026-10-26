@@ -433,7 +433,7 @@ public partial class PropertiesDialog : FluentWindow
         if (HashText.Text.Length == 64)
         {
             ClipboardText.Copy(HashText.Text);
-            AppLog.Info("Контрольная сумма скопирована.");
+            AppLog.Hint("Контрольная сумма скопирована.");
         }
     }
 

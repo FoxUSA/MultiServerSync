@@ -16,8 +16,88 @@
 
     <Setter Property="RowHeight" Value="26" />
     <Setter Property="ColumnHeaderHeight" Value="28" />
-    <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="Background" Value="Transparent" />
+
+    <!--  Три ступени яркости, все сплошные: окно, на нём карточка светлее, в карточке рабочая
+          поверхность (таблица, вывод, список) темнее окна — так вложенность видна и без яркой
+          обводки. Таблица — та самая поверхность: сплошной фон темы и тонкая линия по краю  -->
+    <Setter Property="Background" Value="{DynamicResource SolidBackgroundFillColorSecondaryBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Padding" Value="0" />
+    <!--  шаблон штатный, добавлено только скругление углов рамки  -->
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="DataGrid">
+          <Border
+            Padding="{TemplateBinding Padding}"
+            Background="{TemplateBinding Background}"
+            BorderBrush="{TemplateBinding BorderBrush}"
+            BorderThickness="{TemplateBinding BorderThickness}"
+            CornerRadius="4"
+            SnapsToDevicePixels="True">
+            <ScrollViewer x:Name="DG_ScrollViewer" Focusable="False">
+              <ScrollViewer.Template>
+                <ControlTemplate TargetType="ScrollViewer">
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="Auto" />
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="*" />
+                      <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Button
+                      Width="{Binding CellsPanelHorizontalOffset, RelativeSource={RelativeSource AncestorType={x:Type DataGrid}}}"
+                      Command="{x:Static DataGrid.SelectAllCommand}"
+                      Focusable="False"
+                      Style="{DynamicResource {ComponentResourceKey ResourceId=DataGridSelectAllButtonStyle,
+                                                                    TypeInTargetAssembly={x:Type DataGrid}}}"
+                      Visibility="{Binding HeadersVisibility, ConverterParameter={x:Static DataGridHeadersVisibility.All}, Converter={x:Static DataGrid.HeadersVisibilityConverter}, RelativeSource={RelativeSource AncestorType={x:Type DataGrid}}}" />
+                    <DataGridColumnHeadersPresenter
+                      x:Name="PART_ColumnHeadersPresenter"
+                      Grid.Column="1"
+                      Visibility="{Binding HeadersVisibility, ConverterParameter={x:Static DataGridHeadersVisibility.Column}, Converter={x:Static DataGrid.HeadersVisibilityConverter}, RelativeSource={RelativeSource AncestorType={x:Type DataGrid}}}" />
+                    <ScrollContentPresenter
+                      x:Name="PART_ScrollContentPresenter"
+                      Grid.Row="1"
+                      Grid.ColumnSpan="2"
+                      CanContentScroll="{TemplateBinding CanContentScroll}" />
+                    <ScrollBar
+                      x:Name="PART_VerticalScrollBar"
+                      Grid.Row="1"
+                      Grid.Column="2"
+                      Maximum="{TemplateBinding ScrollableHeight}"
+                      Orientation="Vertical"
+                      ViewportSize="{TemplateBinding ViewportHeight}"
+                      Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"
+                      Value="{Binding VerticalOffset, Mode=OneWay, RelativeSource={RelativeSource TemplatedParent}}" />
+                    <Grid Grid.Row="2" Grid.Column="1">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="{Binding NonFrozenColumnsViewportHorizontalOffset, RelativeSource={RelativeSource AncestorType={x:Type DataGrid}}}" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <ScrollBar
+                        x:Name="PART_HorizontalScrollBar"
+                        Grid.Column="1"
+                        Maximum="{TemplateBinding ScrollableWidth}"
+                        Orientation="Horizontal"
+                        ViewportSize="{TemplateBinding ViewportWidth}"
+                        Visibility="{TemplateBinding ComputedHorizontalScrollBarVisibility}"
+                        Value="{Binding HorizontalOffset, Mode=OneWay, RelativeSource={RelativeSource TemplatedParent}}" />
+                    </Grid>
+                  </Grid>
+                </ControlTemplate>
+              </ScrollViewer.Template>
+              <ItemsPresenter SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+            </ScrollViewer>
+          </Border>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
     <Setter Property="AlternationCount" Value="2" />
     <Setter Property="RowBackground" Value="Transparent" />
     <Setter Property="AlternatingRowBackground" Value="{DynamicResource ControlFillColorDefaultBrush}" />
@@ -70,8 +150,8 @@
   </Style>
 
   <Style x:Key="AppDataGridCellStyle" TargetType="DataGridCell">
-    <!--  окно полупрозрачное (Mica), и без подсказки WPF рисует текст на прозрачном фоне серым
-          сглаживанием — он выходит тоньше и мутнее, чем в поле вывода рядом, где ClearType есть  -->
+    <!--  у ячеек фон прозрачный, и без подсказки WPF рисует на нём текст серым сглаживанием —
+          он выходит тоньше и мутнее, чем в поле вывода рядом, где ClearType есть  -->
     <Setter Property="RenderOptions.ClearTypeHint" Value="Enabled" />
     <Setter Property="Padding" Value="8,0" />
     <Setter Property="FocusVisualStyle" Value="{x:Null}" />
@@ -155,6 +235,11 @@
               Style="{StaticResource ColResizeGripperStyle}" />
           </Grid>
           <ControlTemplate.Triggers>
+            <!--  таблицы, где ширину тянут руками (ResizableColumnHeaderStyle), — хваталка на границе видна  -->
+            <Trigger Property="Tag" Value="Resizable">
+              <Setter TargetName="PART_RightHeaderGripper" Property="Visibility" Value="Visible" />
+              <Setter TargetName="PART_RightHeaderGripper" Property="Cursor" Value="SizeWE" />
+            </Trigger>
             <Trigger Property="SortDirection" Value="Ascending">
               <Setter TargetName="SortArrow" Property="Visibility" Value="Visible" />
             </Trigger>
@@ -172,6 +257,14 @@
         </ControlTemplate>
       </Setter.Value>
     </Setter>
+  </Style>
+
+  <!--  та же шапка, но ширину столбца тянут мышью за границу — у списков файлов проводника  -->
+  <Style
+    x:Key="ResizableColumnHeaderStyle"
+    BasedOn="{StaticResource AppColumnHeaderStyle}"
+    TargetType="DataGridColumnHeader">
+    <Setter Property="Tag" Value="Resizable" />
   </Style>
 
   <Style

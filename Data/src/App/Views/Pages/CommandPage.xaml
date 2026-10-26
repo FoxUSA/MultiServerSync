@@ -33,9 +33,9 @@
       а действие относится ровно к тому полю, над которым висят.
     -->
     <Style x:Key="EditorIconStyle" TargetType="Button">
-      <Setter Property="Width" Value="34" />
-      <Setter Property="Height" Value="34" />
-      <Setter Property="Margin" Value="2,0,0,0" />
+      <Setter Property="Width" Value="{StaticResource IconButtonSize}" />
+      <Setter Property="Height" Value="{StaticResource IconButtonSize}" />
+      <Setter Property="Margin" Value="4,0,0,0" />
       <Setter Property="Padding" Value="0" />
       <Setter Property="Focusable" Value="False" />
       <Setter Property="Cursor" Value="Hand" />
@@ -308,7 +308,7 @@
                   Click="OnPasteStep"
                   Style="{StaticResource EditorIconStyle}"
                   ToolTip="Вставить из буфера — заменяет всё окно, чтобы вставка не приклеилась к прошлой команде">
-                  <ui:SymbolIcon FontSize="20" Symbol="ClipboardPaste24" />
+                  <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="ClipboardPaste24" />
                 </Button>
 
                 <!--  на одном месте запуск и остановка: пока команда идёт, ▶ становится ■  -->
@@ -320,7 +320,7 @@
                   ToolTip="Выполнить только это окно"
                   Visibility="{Binding DataContext.CommandBatch.IsIdle, RelativeSource={RelativeSource AncestorType=Page}, Converter={StaticResource BoolToVis}}">
                   <ui:SymbolIcon
-                    FontSize="20"
+                    FontSize="{StaticResource IconGlyphSize}"
                     Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
                     Symbol="Play24" />
                 </Button>
@@ -331,7 +331,7 @@
                   Style="{StaticResource EditorIconStyle}"
                   ToolTip="Выполнить это окно и все ниже — по очереди, каждое после успешного предыдущего (Ctrl+Enter)">
                   <ui:SymbolIcon
-                    FontSize="20"
+                    FontSize="{StaticResource IconGlyphSize}"
                     Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
                     Symbol="FastForward24" />
                 </Button>
@@ -341,7 +341,7 @@
                   ToolTip="{x:Static controls:StopButton.Hint}"
                   Visibility="{Binding DataContext.CommandBatch.IsRunning, RelativeSource={RelativeSource AncestorType=Page}, Converter={StaticResource BoolToVis}}">
                   <ui:SymbolIcon
-                    FontSize="20"
+                    FontSize="{StaticResource IconGlyphSize}"
                     Foreground="#E0574A"
                     Symbol="Stop24" />
                 </Button>
@@ -351,7 +351,7 @@
                   IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}"
                   Style="{StaticResource EditorIconStyle}"
                   ToolTip="Копировать вывод (Ctrl+Shift+C) — то же, что «Копировать. Текущее окно» в терминале: весь вывод сервера, выбранного в таблице слева, со всеми окнами">
-                  <ui:SymbolIcon FontSize="20" Symbol="Copy24" />
+                  <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Copy24" />
                 </Button>
 
                 <Border
@@ -366,7 +366,7 @@
                   IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}"
                   Style="{StaticResource EditorIconStyle}"
                   ToolTip="В избранное — это окно. Существующее название перезапишет свою запись.">
-                  <ui:SymbolIcon FontSize="20" Symbol="Heart24" />
+                  <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Heart24" />
                 </Button>
                 <!--  два сердечка: весь набор окон одной записью  -->
                 <Button
@@ -393,7 +393,7 @@
                   Click="OnClearStep"
                   Style="{StaticResource EditorIconStyle}"
                   ToolTip="Очистить окно">
-                  <ui:SymbolIcon FontSize="20" Symbol="Delete24" />
+                  <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Delete24" />
                 </Button>
 
                 <Border
@@ -407,14 +407,14 @@
                   Click="OnAddStep"
                   Style="{StaticResource EditorIconStyle}"
                   ToolTip="Добавить окно ниже — выполнится после этого">
-                  <ui:SymbolIcon FontSize="20" Symbol="Add24" />
+                  <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Add24" />
                 </Button>
                 <Button
                   Click="OnRemoveStep"
                   Style="{StaticResource EditorIconStyle}"
                   ToolTip="Убрать это окно"
                   Visibility="{Binding IsMulti, Converter={StaticResource BoolToVis}}">
-                  <ui:SymbolIcon FontSize="20" Symbol="Subtract24" />
+                  <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Subtract24" />
                 </Button>
               </StackPanel>
 

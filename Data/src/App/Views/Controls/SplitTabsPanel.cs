@@ -5,31 +5,17 @@ using MultiServerSync.Services;
 namespace MultiServerSync.Views.Controls;
 
 /// <summary>
-/// Лента вкладок: обычные — от левого края, личные вкладки команд — прижаты к правому.
-/// Пока места хватает, между ними пусто; не хватает — встают вплотную и лента листается.
-/// В кратком виде ярлыки идут столбцами по <see cref="Rows"/> штуки сверху вниз, как раньше
-/// в вертикальном WrapPanel, — и так же отдельно слева и справа.
+/// Лента вкладок: ярлыки одного размера идут в ряд, не влезли по ширине — переносятся
+/// в следующий ряд, и лента растёт вниз. Обычные вкладки — с начала, личные вкладки команд —
+/// прижаты к правому краю последнего ряда; пока места хватает, между ними пусто.
 /// </summary>
 public sealed class SplitTabsPanel : Panel
 {
-    public static readonly DependencyProperty RowsProperty = DependencyProperty.Register(
-        nameof(Rows),
-        typeof(int),
-        typeof(SplitTabsPanel),
-        new FrameworkPropertyMetadata(1, FrameworkPropertyMetadataOptions.AffectsMeasure));
-
     public static readonly DependencyProperty RowHeightProperty = DependencyProperty.Register(
         nameof(RowHeight),
         typeof(double),
         typeof(SplitTabsPanel),
         new FrameworkPropertyMetadata(double.NaN, FrameworkPropertyMetadataOptions.AffectsMeasure));
-
-    /// <summary>Сколько ярлыков в столбце: 1 — полный вид, 2 — краткий.</summary>
-    public int Rows
-    {
-        get => (int)GetValue(RowsProperty);
-        set => SetValue(RowsProperty, value);
-    }
 
     /// <summary>Высота ряда; не задана — по самому высокому ярлыку.</summary>
     public double RowHeight
@@ -41,65 +27,73 @@ public sealed class SplitTabsPanel : Panel
     private static bool IsRight(UIElement child) =>
         child is FrameworkElement { DataContext: Workspace { IsPersonal: true } };
 
-    /// <summary>Столбцы одной стороны: по Rows ярлыков, ширина столбца — по самому широкому.</summary>
-    private List<(List<UIElement> Items, double Width)> Columns(bool right)
-    {
-        var rows = Math.Max(1, Rows);
-        var columns = new List<(List<UIElement>, double)>();
-        var side = InternalChildren.Cast<UIElement>().Where(c => IsRight(c) == right).ToList();
+    /// <summary>Сколько мест в ряду при такой ширине; бесконечная ширина — все в один ряд.</summary>
+    private int PerRow(double width, double slot) =>
+        double.IsInfinity(width) || slot <= 0
+            ? Math.Max(1, InternalChildren.Count)
+            : Math.Max(1, (int)Math.Floor(width / slot));
 
-        for (var i = 0; i < side.Count; i += rows)
-        {
-            var items = side.Skip(i).Take(rows).ToList();
-            columns.Add((items, items.Max(c => c.DesiredSize.Width)));
-        }
-
-        return columns;
-    }
+    private int RowsFor(int perRow) => Math.Max(1, (InternalChildren.Count + perRow - 1) / perRow);
 
     protected override Size MeasureOverride(Size available)
     {
-        var rowHeight = double.IsNaN(RowHeight) ? available.Height : RowHeight;
         var tallest = 0.0;
+        var widest = 0.0;
 
         foreach (UIElement child in InternalChildren)
         {
-            child.Measure(new Size(double.PositiveInfinity, rowHeight));
+            child.Measure(new Size(double.PositiveInfinity, double.IsNaN(RowHeight) ? double.PositiveInfinity : RowHeight));
             tallest = Math.Max(tallest, child.DesiredSize.Height);
+            widest = Math.Max(widest, child.DesiredSize.Width);
         }
 
-        var width = Columns(right: false).Sum(c => c.Width) + Columns(right: true).Sum(c => c.Width);
-        var height = double.IsNaN(RowHeight) ? tallest : RowHeight * Math.Max(1, Rows);
+        var rowHeight = double.IsNaN(RowHeight) ? tallest : RowHeight;
+        var perRow = PerRow(available.Width, widest);
+        var rows = InternalChildren.Count == 0 ? 1 : RowsFor(perRow);
+        var width = double.IsInfinity(available.Width) ? widest * InternalChildren.Count : available.Width;
 
-        return new Size(width, height);
+        return new Size(width, rowHeight * rows);
     }
 
     protected override Size ArrangeOverride(Size final)
     {
-        var tallest = InternalChildren.Cast<UIElement>().Select(c => c.DesiredSize.Height).DefaultIfEmpty(0).Max();
-        var rowHeight = double.IsNaN(RowHeight) ? (Rows <= 1 ? final.Height : tallest) : RowHeight;
+        var children = InternalChildren.Cast<UIElement>().ToList();
+        var widest = children.Select(c => c.DesiredSize.Width).DefaultIfEmpty(0).Max();
+        var tallest = children.Select(c => c.DesiredSize.Height).DefaultIfEmpty(0).Max();
+        var rowHeight = double.IsNaN(RowHeight) ? tallest : RowHeight;
+        var perRow = PerRow(final.Width, widest);
+        var slots = RowsFor(perRow) * perRow;
 
-        var left = Columns(right: false);
-        var right = Columns(right: true);
+        var left = children.Where(c => !IsRight(c)).ToList();
+        var right = children.Where(IsRight).ToList();
 
-        var x = Place(left, 0, rowHeight);
-        Place(right, Math.Max(x, final.Width - right.Sum(c => c.Width)), rowHeight);
-
-        return final;
-    }
-
-    private static double Place(List<(List<UIElement> Items, double Width)> columns, double x, double rowHeight)
-    {
-        foreach (var (items, width) in columns)
+        // обычные — с первого места по порядку, личные — на последних местах
+        for (var i = 0; i < left.Count; i++)
         {
-            for (var row = 0; row < items.Count; row++)
-            {
-                items[row].Arrange(new Rect(x, row * rowHeight, width, rowHeight));
-            }
-
-            x += width;
+            Place(left[i], i);
         }
 
-        return x;
+        for (var i = 0; i < right.Count; i++)
+        {
+            Place(right[i], slots - right.Count + i);
+        }
+
+        return final;
+
+        void Place(UIElement child, int slot)
+        {
+            var row = slot / perRow;
+            var column = slot % perRow;
+
+            // правый край ряда — вплотную к краю ленты, как раньше у личных вкладок
+            var x = column * widest;
+
+            if (right.Contains(child))
+            {
+                x = final.Width - (perRow - column) * widest;
+            }
+
+            child.Arrange(new Rect(x, row * rowHeight, widest, rowHeight));
+        }
     }
 }

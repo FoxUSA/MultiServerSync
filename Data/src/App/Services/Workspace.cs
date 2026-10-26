@@ -37,6 +37,7 @@ public sealed class Workspace : ObservableObject
     private bool _overwrite = true;
     private bool _preserveTimestamps = true;
     private bool _verifyChecksums;
+    private bool _replaceWithoutAsking;
     private string _excludeMasks = string.Empty;
     private bool _matchByDate;
     private bool _matchByHash;
@@ -200,6 +201,22 @@ public sealed class Workspace : ObservableObject
     public void PickAllSets() => SwitchScope(() => _paneAllSets = true);
 
     /// <summary>
+    /// «Проводник»: сервер выбирают из названия правой панели. Отметка остаётся одна — у него;
+    /// сервер из другого набора переводит вкладку на тот набор.
+    /// </summary>
+    public void PickExplorerServer(ServerEntry server)
+    {
+        if (!_paneAllSets && PaneSet is { } current && !current.Contains(server)
+            && AppState.Current.ServerSets.FirstOrDefault(s => s.Contains(server)) is { } owner)
+        {
+            PickPaneSet(owner);
+        }
+
+        SelectServers([server.Id]);
+        Save();
+    }
+
+    /// <summary>
     /// Смена набора: отметки уходящего запоминаются за ним, у пришедшего встают его собственные.
     /// Это нужно из-за «Всех»: там те же серверы, что в наборах, и без своей памяти отметки
     /// одного места перетирали бы отметки другого.
@@ -358,6 +375,22 @@ public sealed class Workspace : ObservableObject
     /// <summary>Сводка по всем вкладкам — заполняется на той вкладке, с которой нажали «Выполнить везде».</summary>
     public OperationBatch SummaryBatch { get; } = new();
 
+    /// <summary>«Сравнить» в проводнике: подробный отчёт — в терминал вкладки, а не плашкой.</summary>
+    public OperationBatch CompareBatch { get; } = new();
+
+    /// <summary>
+    /// Сравнение двух файлов проводника строкой сервера в терминале: <paramref name="work"/>
+    /// пишет в вывод что с чем сравнивается и итог.
+    /// </summary>
+    public async Task CompareAsync(ServerEntry server, Func<OperationResult, CancellationToken, Task> work)
+    {
+        AppState.Current.RequestTerminal();
+        ShowResults(CompareBatch);
+        CompareBatch.Scope = AppState.Current.TabsOf(this).Count > 1 ? Title : null;
+        CompareBatch.Section = AppSection.Explorer;
+        await CompareBatch.RunAsync("Сравнение файлов", [server], (_, result, ct) => work(result, ct), maxParallel: 1);
+    }
+
     /// <summary>Что показывает терминал внизу окна: результат последней запущенной операции.</summary>
     public OperationBatch ResultsBatch => _resultsBatch ?? CommandBatch;
 
@@ -405,6 +438,16 @@ public sealed class Workspace : ObservableObject
     {
         get => _verifyChecksums;
         set { if (Set(ref _verifyChecksums, value)) { Save(); } }
+    }
+
+    /// <summary>
+    /// «Проводник»: заменять файлы в назначении, не спрашивая. По умолчанию копирование,
+    /// которое перезапишет файлы, сначала спрашивает.
+    /// </summary>
+    public bool ReplaceWithoutAsking
+    {
+        get => _replaceWithoutAsking;
+        set { if (Set(ref _replaceWithoutAsking, value)) { Save(); } }
     }
 
     /// <summary>Исключения при копировании: маски по одной в строке.</summary>
@@ -715,8 +758,7 @@ public sealed class Workspace : ObservableObject
     {
         if (CopyBatch.IsRunning)
         {
-            AppLog.Warn("Скачивание уже идёт.", Title);
-            AppState.Current.RequestLog();
+            AppLog.Hint("Скачивание уже идёт.", LogLevel.Warning);
             return false;
         }
 
@@ -787,7 +829,8 @@ public sealed class Workspace : ObservableObject
         IReadOnlyDictionary<ServerEntry, List<string>> plan,
         string folder,
         UploadOptions options,
-        bool verify)
+        bool verify,
+        ConfirmReplace? confirmReplace = null)
     {
         var targets = plan.Keys.ToList();
         var settings = AppState.Current.Settings;
@@ -814,7 +857,7 @@ public sealed class Workspace : ObservableObject
                 result.Append("куда: " + root);
 
                 var stats = await DownloadService.DownloadAsync(
-                    server, settings, plan[server], root, options, verify, line => result.Append(line), ct, result.SetTransfer);
+                    server, settings, plan[server], root, options, verify, line => result.Append(line), ct, result.SetTransfer, confirmReplace);
 
                 result.Append(
                     $"итог: получено {stats.Received} ({TransferItem.Format(stats.Bytes)}) · такие же {stats.UpToDate}"
@@ -842,7 +885,8 @@ public sealed class Workspace : ObservableObject
                 }
 
                 result.Message = $"получено {stats.Received}, {TransferItem.Format(stats.Bytes)}"
-                    + (stats.UpToDate > 0 ? $" · такие же {stats.UpToDate}" : string.Empty);
+                    + (stats.UpToDate > 0 ? $" · такие же {stats.UpToDate}" : string.Empty)
+                    + (stats.Skipped > 0 ? $" · уже были, не тронуты {stats.Skipped}" : string.Empty);
                 result.Status = OperationStatus.Success;
             },
             settings.MaxParallel);
@@ -1425,7 +1469,7 @@ public sealed class Workspace : ObservableObject
         }
 
         RaiseSelectionInfo();
-        AppLog.Info(selectAll ? $"Отмечены все целевые сервера: {set.Count}." : "Отметки целевых серверов сняты.", Title);
+        AppLog.Hint(selectAll ? $"Отмечены все целевые сервера: {set.Count}." : "Отметки целевых серверов сняты.");
     }
 
     // ── список копирования ─────────────────────────────────────────────────────
@@ -1452,7 +1496,7 @@ public sealed class Workspace : ObservableObject
 
         if (added > 0)
         {
-            AppLog.Info($"В список добавлено объектов: {added} (всего {Items.Count}).", Title);
+            AppLog.Hint($"В список добавлено объектов: {added} (всего {Items.Count}).");
         }
 
         return added;
@@ -1540,8 +1584,7 @@ public sealed class Workspace : ObservableObject
         if (CopyBatch.IsRunning)
         {
             // метку «идёт» не сбиваем — операция та же самая и она ещё работает
-            AppLog.Warn("Копирование уже идёт.", Title);
-            AppState.Current.RequestLog();
+            AppLog.Hint("Копирование уже идёт.", LogLevel.Warning);
             return false;
         }
 
@@ -1647,7 +1690,8 @@ public sealed class Workspace : ObservableObject
         string remotePath,
         IReadOnlyList<ServerEntry> targets,
         UploadOptions options,
-        bool verify)
+        bool verify,
+        ConfirmReplace? confirmReplace = null)
     {
         var settings = AppState.Current.Settings;
 
@@ -1713,7 +1757,8 @@ public sealed class Workspace : ObservableObject
                         result.Message = text + "…";
                         Step((int)step, text);
                     },
-                    result.SetTransfer);
+                    result.SetTransfer,
+                    confirmReplace);
 
                 var seen = stats.FilesSent + stats.FilesUpToDate + stats.FilesSkipped;
 
@@ -1980,8 +2025,7 @@ public sealed class Workspace : ObservableObject
     {
         if (CommandBatch.IsRunning)
         {
-            AppLog.Warn("Команда уже выполняется.", Title);
-            AppState.Current.RequestLog();
+            AppLog.Hint("Команда уже выполняется.", LogLevel.Warning);
             return false;
         }
 
@@ -2174,7 +2218,6 @@ public sealed class Workspace : ObservableObject
                             result.Append("— команда прервана —");
                             result.Message = label + "прервано";
                             result.Status = OperationStatus.Cancelled;
-                            AppLog.Warn(label + "команда прервана", server.Display);
                             Close(false);
                             return;
                         }
@@ -2188,7 +2231,6 @@ public sealed class Workspace : ObservableObject
                                 ? $"не дождались ответа ({settings.CommandTimeoutSeconds} с)"
                                 : trouble);
                             result.Status = OperationStatus.Failed;
-                            AppLog.Error(result.Message, server.Display);
                             Close(false);
                             return;
                         }
@@ -2201,7 +2243,6 @@ public sealed class Workspace : ObservableObject
                                 : $"— #{step.Number} завершилась с кодом {code}: следующие окна на этом сервере не запускаются —");
                             result.Message = $"#{step.Number}: код {code}";
                             result.Status = OperationStatus.Failed;
-                            AppLog.Error(result.Message, server.Display);
                             Close(false);
                             return;
                         }
@@ -2361,6 +2402,7 @@ public sealed class Workspace : ObservableObject
         OverwriteFiles = OverwriteFiles,
         PreserveTimestamps = PreserveTimestamps,
         VerifyChecksums = VerifyChecksums,
+        ReplaceWithoutAsking = ReplaceWithoutAsking,
         ExcludeMasks = ExcludeMasks,
         MatchByDate = MatchByDate,
         MatchByHash = MatchByHash,
@@ -2382,6 +2424,7 @@ public sealed class Workspace : ObservableObject
         _overwrite = state.OverwriteFiles;
         _preserveTimestamps = state.PreserveTimestamps;
         _verifyChecksums = state.VerifyChecksums;
+        _replaceWithoutAsking = state.ReplaceWithoutAsking;
         _excludeMasks = state.ExcludeMasks ?? string.Empty;
         _matchByDate = state.MatchByDate;
         _matchByHash = state.MatchByHash;
@@ -2452,7 +2495,7 @@ public sealed class Workspace : ObservableObject
 
         if (Items.Count > 0 || missing > 0)
         {
-            AppLog.Info($"Список копирования восстановлен: {Items.Count} объект(ов)"
+            AppLog.Debug($"Список копирования восстановлен: {Items.Count} объект(ов)"
                 + (missing > 0 ? $", не найдено {missing}" : string.Empty), Title);
         }
 
@@ -2461,6 +2504,7 @@ public sealed class Workspace : ObservableObject
             nameof(OverwriteFiles),
             nameof(PreserveTimestamps),
             nameof(VerifyChecksums),
+            nameof(ReplaceWithoutAsking),
             nameof(ExcludeMasks),
             nameof(ExcludeCaption),
             nameof(MatchByDate),
@@ -2487,6 +2531,12 @@ public sealed class Workspace : ObservableObject
         CopyBatch.Scope = scope;
         CommandBatch.Scope = scope;
         CheckBatch.Scope = scope;
+
+        var section = AppState.Current.SectionOfTab(this);
+        CopyBatch.Section = section;
+        CommandBatch.Section = section;
+        // проверку связи зовут и со страницы «Серверы» — запись туда, откуда позвали
+        CheckBatch.Section = AppState.Current.Section;
     }
 
     /// <summary>Терминал внизу окна показывает ту операцию, которую запустили последней.</summary>
@@ -2717,7 +2767,7 @@ public sealed class Workspace : ObservableObject
         }
 
         KeepOnly(picked[0]);
-        AppLog.Info($"Одиночный выбор: оставлен один сервер — {picked[0].Server.PaneLabel}.", Title);
+        AppLog.Hint($"Одиночный выбор: оставлен один сервер — {picked[0].Server.PaneLabel}.");
     }
 
     private void RaiseCopyInfo() => RaiseMany(

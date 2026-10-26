@@ -59,18 +59,18 @@ public static class FolderIcons
 
             if (restoredIcons.Count > 0)
             {
-                AppLog.Info("Восстановлены файлы иконок: " + string.Join(", ", restoredIcons) + ".");
+                AppLog.Debug("Восстановлены файлы иконок: " + string.Join(", ", restoredIcons) + ".");
             }
 
             if (changed.Count > 0)
             {
-                AppLog.Info("Восстановлены иконки папок: " + string.Join(", ", changed) + ".");
+                AppLog.Debug("Восстановлены иконки папок: " + string.Join(", ", changed) + ".");
                 RefreshShell();
             }
         }
         catch (Exception ex)
         {
-            AppLog.Warn("Не удалось восстановить иконки папок: " + ex.Message);
+            AppLog.Debug("Не удалось восстановить иконки папок: " + ex.Message);
         }
     }
 

@@ -168,7 +168,7 @@ public partial class CommandPage : Page
         }
 
         var step = workspace.AddStep(StepOf(sender));
-        AppLog.Info($"Добавлено окно #{step.Number}. Окон: {workspace.Steps.Count}.", workspace.Title);
+        AppLog.Hint($"Добавлено окно #{step.Number}. Окон: {workspace.Steps.Count}.");
         FocusStep(step);
     }
 
@@ -183,7 +183,7 @@ public partial class CommandPage : Page
 
         if (workspace.RemoveStep(step))
         {
-            AppLog.Info($"Окно #{number} убрано. Окон: {workspace.Steps.Count}.", workspace.Title);
+            AppLog.Hint($"Окно #{number} убрано. Окон: {workspace.Steps.Count}.");
         }
     }
 
@@ -196,12 +196,12 @@ public partial class CommandPage : Page
 
         if (string.IsNullOrWhiteSpace(step.Text))
         {
-            AppLog.Info("Окно и так пустое.");
+            AppLog.Hint("Окно и так пустое.");
             return;
         }
 
         step.Text = string.Empty;
-        AppLog.Info(Workspace?.Steps.Count > 1 ? $"Окно #{step.Number} очищено." : "Поле команды очищено.");
+        AppLog.Hint(Workspace?.Steps.Count > 1 ? $"Окно #{step.Number} очищено." : "Поле команды очищено.");
         HistoryBox.SelectedItem = null;
     }
 
@@ -285,7 +285,7 @@ public partial class CommandPage : Page
         if (e.AddedItems.Count > 0 && HistoryBox.SelectedItem is string text && ActiveStep is { } step)
         {
             step.Text = text;
-            AppLog.Info("Подставлена команда из истории: " + OneLine(text));
+            AppLog.Hint("Подставлена команда из истории: " + OneLine(text));
         }
     }
 
@@ -308,13 +308,13 @@ public partial class CommandPage : Page
         }
         catch (Exception ex)
         {
-            AppLog.Warn("Не удалось прочитать буфер обмена: " + ex.Message);
+            AppLog.Hint("Не удалось прочитать буфер обмена: " + ex.Message, LogLevel.Warning);
             return;
         }
 
         if (string.IsNullOrWhiteSpace(text))
         {
-            AppLog.Warn("В буфере обмена нет текста.");
+            AppLog.Hint("В буфере обмена нет текста.", LogLevel.Warning);
             return;
         }
 
@@ -325,7 +325,7 @@ public partial class CommandPage : Page
         }
 
         step.Text = text.Replace("\r\n", "\n", StringComparison.Ordinal).Trim();
-        AppLog.Info($"Вставлено из буфера ({step.Text.Length} символов): {OneLine(step.Text)}");
+        AppLog.Hint($"Вставлено из буфера ({step.Text.Length} символов): {OneLine(step.Text)}");
 
         _activeStep = step;
         FocusStep(step);
@@ -376,14 +376,14 @@ public partial class CommandPage : Page
         {
             workspace.SetSteps(snippet.AsSteps());
             _activeStep = workspace.Steps[0];
-            AppLog.Info($"Из избранного раскрыто окон: {workspace.Steps.Count} — {snippet.Comment}");
+            AppLog.Hint($"Из избранного раскрыто окон: {workspace.Steps.Count} — {snippet.Comment}");
         }
         else
         {
             var sudo = ActiveStep?.UseSudo ?? false;
             workspace.SetSteps([new SavedCommandStep { Text = snippet.Command, UseSudo = sudo }]);
             _activeStep = workspace.Steps[0];
-            AppLog.Info($"Подставлена команда из избранного: {snippet.Comment}");
+            AppLog.Hint($"Подставлена команда из избранного: {snippet.Comment}");
         }
     }
 
@@ -392,7 +392,7 @@ public partial class CommandPage : Page
     {
         if (StepOf(sender) is not { } step || string.IsNullOrWhiteSpace(step.Text))
         {
-            AppLog.Warn("Сначала наберите команду в окне — её и запишем в избранное.");
+            AppLog.Hint("Сначала наберите команду в окне — её и запишем в избранное.", LogLevel.Warning);
             return;
         }
 
@@ -409,7 +409,7 @@ public partial class CommandPage : Page
 
         if (steps.Count == 0)
         {
-            AppLog.Warn("Все окна пустые — записывать в избранное нечего.");
+            AppLog.Hint("Все окна пустые — записывать в избранное нечего.", LogLevel.Warning);
             return;
         }
 
@@ -447,12 +447,12 @@ public partial class CommandPage : Page
             existing = new CommandSnippet { Comment = comment };
             existing.SetSteps(steps);
             book.Add(existing);
-            AppLog.Success(multi ? $"В избранное добавлен набор из {steps.Count} окон: {comment}" : $"В избранное добавлено: {comment}");
+            AppLog.Hint(multi ? $"В избранное добавлен набор из {steps.Count} окон: {comment}" : $"В избранное добавлено: {comment}");
         }
         else
         {
             existing.SetSteps(steps);
-            AppLog.Success($"Запись избранного обновлена: {comment}");
+            AppLog.Hint($"Запись избранного обновлена: {comment}");
         }
 
         AppState.Current.SaveSettings();
@@ -479,7 +479,7 @@ public partial class CommandPage : Page
 
         if (workspace.CommandBatch.IsRunning)
         {
-            AppLog.Warn("Команда ещё выполняется — править избранное можно, когда она закончится.");
+            AppLog.Hint("Команда ещё выполняется — править избранное можно, когда она закончится.", LogLevel.Warning);
             return;
         }
 
@@ -491,7 +491,7 @@ public partial class CommandPage : Page
         IsNotEditingSnippet = false;
 
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(PaintBoxes));
-        AppLog.Info($"Правка избранного: {snippet.Comment}");
+        AppLog.Hint($"Правка избранного: {snippet.Comment}");
     }
 
     private void OnSaveEdit(object sender, RoutedEventArgs e)
@@ -505,7 +505,7 @@ public partial class CommandPage : Page
 
         if (name.Length == 0)
         {
-            AppLog.Warn("У записи должно быть название.");
+            AppLog.Hint("У записи должно быть название.", LogLevel.Warning);
             EditNameBox.Focus();
             return;
         }
@@ -516,7 +516,7 @@ public partial class CommandPage : Page
         if (book.FirstOrDefault(s => !ReferenceEquals(s, snippet)
                 && string.Equals(s.Comment, name, StringComparison.OrdinalIgnoreCase)) is { } clash)
         {
-            AppLog.Warn($"В избранном уже есть запись «{clash.Comment}» — выберите другое название.");
+            AppLog.Hint($"В избранном уже есть запись «{clash.Comment}» — выберите другое название.", LogLevel.Warning);
             EditNameBox.Focus();
             return;
         }
@@ -528,21 +528,21 @@ public partial class CommandPage : Page
 
         if (steps.Count == 0)
         {
-            AppLog.Warn("Все окна пустые — запись без команд не сохраняется. Удалить её можно крестиком в списке.");
+            AppLog.Hint("Все окна пустые — запись без команд не сохраняется. Удалить её можно крестиком в списке.", LogLevel.Warning);
             return;
         }
 
         snippet.Comment = name;
         snippet.SetSteps(steps);
         AppState.Current.SaveSettings();
-        AppLog.Success($"Запись избранного изменена: {name}");
+        AppLog.Hint($"Запись избранного изменена: {name}");
 
         EndEdit();
     }
 
     private void OnCancelEdit(object sender, RoutedEventArgs e)
     {
-        AppLog.Info("Правка избранного отменена.");
+        AppLog.Hint("Правка избранного отменена.");
         CancelEdit();
     }
 
@@ -581,7 +581,7 @@ public partial class CommandPage : Page
         }
 
         AppState.Current.SaveSettings();
-        AppLog.Info($"Из избранного удалено: {snippet.Comment}");
+        AppLog.Hint($"Из избранного удалено: {snippet.Comment}");
 
         BookBox.IsDropDownOpen = book.Count > 0;
     }
@@ -605,7 +605,7 @@ public partial class CommandPage : Page
         }
 
         AppState.Current.SaveSettings();
-        AppLog.Info($"Из истории команд удалено: {value}");
+        AppLog.Hint($"Из истории команд удалено: {value}");
 
         HistoryBox.IsDropDownOpen = history.Count > 0;
     }
@@ -661,7 +661,7 @@ public partial class CommandPage : Page
                 string.Empty,
                 "Выполнить везде"))
         {
-            AppLog.Info("«Выполнить везде» отменено.");
+            AppLog.Hint("«Выполнить везде» отменено.");
             return;
         }
 

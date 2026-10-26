@@ -95,7 +95,7 @@ public partial class ServersPage : Page
 
         if (found.Count == 0)
         {
-            AppLog.Warn("Импортировать нечего: в ~/.ssh/config, PuTTY и WinSCP серверов не найдено.");
+            AppLog.Hint("Импортировать нечего: в ~/.ssh/config, PuTTY и WinSCP серверов не найдено.", LogLevel.Warning);
             return;
         }
 
@@ -174,8 +174,7 @@ public partial class ServersPage : Page
 
         if (picked.Count == 0)
         {
-            AppLog.Warn("Скопировать в набор: не отмечено ни одного сервера.");
-            AppState.Current.RequestLog();
+            AppLog.Hint("Скопировать в набор: не отмечено ни одного сервера.", LogLevel.Warning);
             return;
         }
 
@@ -183,8 +182,7 @@ public partial class ServersPage : Page
 
         if (others.Count == 0)
         {
-            AppLog.Warn("Скопировать в набор: других наборов нет — сначала добавьте вкладку плюсом слева вверху.");
-            AppState.Current.RequestLog();
+            AppLog.Hint("Скопировать в набор: других наборов нет — сначала добавьте вкладку плюсом слева вверху.", LogLevel.Warning);
             return;
         }
 
@@ -270,20 +268,19 @@ public partial class ServersPage : Page
         AppLog.Warn($"Удалено записей: {picked.Count}.");
     }
 
-    /// <summary>Проводник на выделенном (или первом отмеченном) сервере — своя вкладка или уже открытая.</summary>
+    /// <summary>Проводник на выделенном (или первом отмеченном) сервере — в основной вкладке проводника.</summary>
     private void OnExplorer(object sender, RoutedEventArgs e)
     {
         var server = (ServersGrid.SelectedItem as ServerCheck)?.Server ?? Picked.FirstOrDefault();
 
         if (server is null)
         {
-            AppLog.Warn("Выделите сервер в таблице — его папки откроются в «Проводнике».");
-            AppState.Current.RequestLog();
+            AppLog.Hint("Выделите сервер в таблице — его папки откроются в «Проводнике».", LogLevel.Warning);
             return;
         }
 
         var tab = AppState.Current.ExplorerFor(server);
-        AppLog.Info($"Проводник: {server.PaneLabel}.", tab.Title);
+        AppLog.Hint($"Проводник: {server.PaneLabel}.");
         AppState.Current.ShowTab(tab);
     }
 

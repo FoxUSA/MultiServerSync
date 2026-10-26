@@ -25,7 +25,7 @@
       x:Name="Body"
       Padding="12,8"
       Background="{DynamicResource SolidBackgroundFillColorTertiaryBrush}"
-      BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+      BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
       BorderThickness="1"
       CornerRadius="6">
       <Grid>

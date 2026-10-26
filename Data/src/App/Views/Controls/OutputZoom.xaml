@@ -7,8 +7,8 @@
   <!--  лупа: шрифт вывода мельче и крупнее — один на панель под выводом и отдельное окно  -->
   <UserControl.Resources>
     <Style x:Key="ZoomButtonStyle" TargetType="Button">
-      <Setter Property="Width" Value="28" />
-      <Setter Property="Height" Value="28" />
+      <Setter Property="Width" Value="{StaticResource IconButtonSize}" />
+      <Setter Property="Height" Value="{StaticResource IconButtonSize}" />
       <Setter Property="Padding" Value="0" />
       <Setter Property="Focusable" Value="False" />
       <Setter Property="Cursor" Value="Hand" />
@@ -41,13 +41,13 @@
       Click="OnSmaller"
       Style="{StaticResource ZoomButtonStyle}"
       ToolTip="Шрифт вывода мельче (Ctrl + колесо вниз)">
-      <ui:SymbolIcon FontSize="18" Symbol="ZoomOut24" />
+      <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="ZoomOut24" />
     </Button>
     <Button
       Click="OnBigger"
       Style="{StaticResource ZoomButtonStyle}"
       ToolTip="Шрифт вывода крупнее (Ctrl + колесо вверх)">
-      <ui:SymbolIcon FontSize="18" Symbol="ZoomIn24" />
+      <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="ZoomIn24" />
     </Button>
   </StackPanel>
 </UserControl>

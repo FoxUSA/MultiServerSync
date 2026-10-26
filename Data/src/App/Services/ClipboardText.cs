@@ -22,12 +22,12 @@ public static class ClipboardText
             }
             catch (Exception ex) when (attempt == 1)
             {
-                AppLog.Warn("Буфер обмена занят, повтор: " + ex.Message);
+                AppLog.Debug("Буфер обмена занят, повтор: " + ex.Message);
                 System.Threading.Thread.Sleep(120);
             }
             catch (Exception ex)
             {
-                AppLog.Error("Не удалось скопировать в буфер обмена: " + ex.Message);
+                AppLog.Hint("Не удалось скопировать в буфер обмена: " + ex.Message, LogLevel.Error);
             }
         }
 

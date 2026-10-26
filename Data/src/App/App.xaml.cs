@@ -85,9 +85,9 @@ public partial class App : Application
 
         PasswordVault.OpenAll();
 
-        AppLog.Info($"Запуск. Версия {AppVersion.Details}.");
-        AppLog.Info($"Программа: {AppPaths.DataDir}");
-        AppLog.Info($"Настройки пользователя: {AppPaths.UserDataDir}");
+        AppLog.Debug($"Запуск. Версия {AppVersion.Details}.");
+        AppLog.Debug($"Программа: {AppPaths.DataDir}");
+        AppLog.Debug($"Настройки пользователя: {AppPaths.UserDataDir}");
 
         // иконки папок чинятся при каждом запуске: архиваторы и переносы между ПК их съедают
         Task.Run(FolderIcons.Restore);
@@ -112,7 +112,7 @@ public partial class App : Application
             if (AppState.Current.Workspaces.Count > 0)
             {
                 AppState.Current.SaveAll();
-                AppLog.Info("Выход.");
+                AppLog.Debug("Выход.");
             }
         }
         catch

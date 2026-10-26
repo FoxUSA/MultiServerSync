@@ -14,10 +14,11 @@
       x:Key="PaneButtonStyle"
       BasedOn="{StaticResource {x:Type ui:Button}}"
       TargetType="ui:Button">
-      <Setter Property="Width" Value="30" />
-      <Setter Property="Height" Value="30" />
+      <Setter Property="Width" Value="{StaticResource IconButtonSize}" />
+      <Setter Property="Height" Value="{StaticResource IconButtonSize}" />
       <Setter Property="Padding" Value="0" />
-      <Setter Property="Margin" Value="0,0,2,0" />
+      <Setter Property="Margin" Value="0,0,4,0" />
+      <Setter Property="FontSize" Value="{StaticResource IconGlyphSize}" />
       <Setter Property="HorizontalContentAlignment" Value="Center" />
       <Setter Property="Appearance" Value="Transparent" />
       <Setter Property="Focusable" Value="False" />
@@ -131,14 +132,21 @@
       </Setter>
     </Style>
 
-    <!--  строка списка: скрытые файлы приглушены, как в проводнике  -->
+    <!--  строка списка: скрытые файлы приглушены, как в проводнике. Курсор — рамкой: он
+          отдельно от галочек, щелчок по строке её не отмечает. Рамка есть у всех строк,
+          прозрачная, — чтобы строка с курсором не становилась выше  -->
     <Style
       x:Key="PaneRowStyle"
       BasedOn="{StaticResource AppDataGridRowStyle}"
       TargetType="DataGridRow">
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="Transparent" />
       <Style.Triggers>
         <DataTrigger Binding="{Binding IsHidden}" Value="True">
           <Setter Property="Opacity" Value="0.6" />
+        </DataTrigger>
+        <DataTrigger Binding="{Binding IsCursor}" Value="True">
+          <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
         </DataTrigger>
       </Style.Triggers>
     </Style>
@@ -159,32 +167,36 @@
         <RowDefinition Height="Auto" />
       </Grid.RowDefinitions>
 
-      <!--  шапка: чьи это файлы и панель инструментов  -->
+      <!--  шапка: панель инструментов от левого края — у обеих панелей одинаково.
+            Панель узкая — ряд ужимается целиком вместе со значками, а не прячет кнопки  -->
       <Grid
         Grid.Row="0"
         Margin="8,4,4,0">
-        <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="Auto" />
-          <ColumnDefinition Width="*" />
-          <ColumnDefinition Width="Auto" />
-        </Grid.ColumnDefinitions>
-
-        <Image
-          x:Name="TitleIcon"
-          Grid.Column="0"
-          Width="16"
-          Height="16"
-          Margin="0,0,6,0"
-          VerticalAlignment="Center" />
-        <TextBlock
-          x:Name="TitleText"
-          Grid.Column="1"
-          VerticalAlignment="Center"
-          FontSize="13"
-          FontWeight="SemiBold"
-          TextTrimming="CharacterEllipsis" />
-
-        <StackPanel Grid.Column="2" Orientation="Horizontal">
+        <Viewbox
+          HorizontalAlignment="Left"
+          Stretch="Uniform"
+          StretchDirection="DownOnly">
+        <StackPanel Orientation="Horizontal">
+          <!--  копирование в соседнюю панель и его параметры — только в «Проводнике»  -->
+          <ui:Button
+            x:Name="TransferButton"
+            Height="{StaticResource IconButtonSize}"
+            Margin="0,0,4,0"
+            Padding="10,0"
+            Click="OnTransfer"
+            Content="Копировать"
+            FontSize="12"
+            Focusable="False"
+            IsEnabled="False"
+            Visibility="Collapsed" />
+          <ui:Button
+            x:Name="OptionsButton"
+            Margin="0,0,12,0"
+            Click="OnTransferOptions"
+            Icon="{ui:SymbolIcon Settings24}"
+            Style="{StaticResource PaneButtonStyle}"
+            ToolTip="Параметры копирования и исключения"
+            Visibility="Collapsed" />
           <ui:Button
             x:Name="BackButton"
             Click="OnBack"
@@ -216,7 +228,7 @@
             Click="OnRefresh"
             Icon="{ui:SymbolIcon ArrowClockwise24}"
             Style="{StaticResource PaneButtonStyle}"
-            ToolTip="Обновить (F5)" />
+            ToolTip="Обновить (Ctrl+R)" />
           <ui:Button
             Click="OnNewFolder"
             Icon="{ui:SymbolIcon FolderAdd24}"
@@ -227,6 +239,11 @@
             Icon="{ui:SymbolIcon DocumentAdd24}"
             Style="{StaticResource PaneButtonStyle}"
             ToolTip="Новый файл" />
+          <ui:Button
+            Click="OnEdit"
+            Icon="{ui:SymbolIcon DocumentEdit24}"
+            Style="{StaticResource PaneButtonStyle}"
+            ToolTip="Править файл под курсором во встроенном редакторе: номера строк, подсветка, поиск. Права и кодировка не меняются" />
           <ui:Button
             Click="OnDelete"
             Icon="{ui:SymbolIcon Delete24}"
@@ -245,6 +262,7 @@
             Style="{StaticResource PaneButtonStyle}"
             ToolTip="Закладки и последние папки" />
         </StackPanel>
+        </Viewbox>
       </Grid>
 
       <!--
@@ -256,8 +274,65 @@
         Grid.Row="1"
         Height="32"
         Margin="8,4,8,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!--  у сервера на том же месте — чей он: щелчок открывает список серверов  -->
+        <ui:Button
+          x:Name="TitleButton"
+          Grid.Column="0"
+          MaxWidth="280"
+          Height="32"
+          Margin="0,0,4,0"
+          Padding="10,0"
+          Click="OnTitleClick"
+          FontSize="12"
+          Focusable="False"
+          IsHitTestVisible="False"
+          Visibility="Collapsed">
+          <DockPanel>
+            <Image
+              x:Name="TitleIcon"
+              Width="16"
+              Height="16"
+              Margin="0,0,6,0"
+              VerticalAlignment="Center"
+              DockPanel.Dock="Left" />
+            <ui:SymbolIcon
+              x:Name="TitleChevron"
+              Margin="6,0,0,0"
+              VerticalAlignment="Center"
+              DockPanel.Dock="Right"
+              FontSize="12"
+              Symbol="ChevronDown24"
+              Visibility="Collapsed" />
+            <TextBlock
+              x:Name="TitleText"
+              VerticalAlignment="Center"
+              TextTrimming="CharacterEllipsis" />
+          </DockPanel>
+        </ui:Button>
+
+        <!--  у компьютера вместо «Этот компьютер» — системное окно «Открыть папку»  -->
+        <ui:Button
+          x:Name="WindowsExplorerButton"
+          Grid.Column="0"
+          Height="32"
+          Margin="0,0,4,0"
+          Padding="10,0"
+          Click="OnOpenInWindows"
+          Content="Открыть"
+          FontSize="12"
+          Focusable="False"
+          Icon="{ui:SymbolIcon FolderOpen24}"
+          ToolTip="Выбрать папку в окне Windows — она откроется здесь"
+          Visibility="Collapsed" />
+
         <ui:TextBox
           x:Name="PathBox"
+          Grid.Column="1"
           VerticalContentAlignment="Center"
           ClearButtonEnabled="False"
           KeyDown="OnPathKeyDown"
@@ -269,6 +344,7 @@
 
         <Border
           x:Name="CrumbBar"
+          Grid.Column="1"
           Background="{DynamicResource ControlFillColorDefaultBrush}"
           BorderBrush="{DynamicResource ControlElevationBorderBrush}"
           BorderThickness="1"
@@ -371,7 +447,8 @@
         <Border
           x:Name="TreeHost"
           Grid.Column="0"
-          BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+          Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+          BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
           BorderThickness="1"
           CornerRadius="4"
           Visibility="Collapsed">
@@ -477,13 +554,14 @@
           Grid.Column="2"
           AllowDrop="True"
           CellStyle="{StaticResource AppDataGridCellStyle}"
-          ColumnHeaderStyle="{StaticResource AppColumnHeaderStyle}"
+          ColumnHeaderStyle="{StaticResource ResizableColumnHeaderStyle}"
           DragOver="OnListDragOver"
           Drop="OnListDrop"
           GotKeyboardFocus="OnListFocused"
-          MouseDoubleClick="OnListDoubleClick"
           PreviewKeyDown="OnListKeyDown"
+          LostMouseCapture="OnListLostCapture"
           PreviewMouseLeftButtonDown="OnListMouseDown"
+          PreviewMouseLeftButtonUp="OnListMouseUp"
           PreviewMouseMove="OnListMouseMove"
           PreviewMouseRightButtonDown="OnListRightDown"
           PreviewTextInput="OnListTextInput"
@@ -494,7 +572,49 @@
           VirtualizingPanel.IsVirtualizing="True"
           VirtualizingPanel.VirtualizationMode="Recycling">
           <DataGrid.Columns>
+            <!--  галочки — то же выделение, что мышью: щелчок по галочке добавляет или снимает строку  -->
             <DataGridTemplateColumn
+              x:Name="CheckColumn"
+              Width="40"
+              CanUserSort="False"
+              CellStyle="{StaticResource FirstColumnCellStyle}"
+              HeaderStyle="{StaticResource FirstColumnHeaderStyle}">
+              <DataGridTemplateColumn.Header>
+                <CheckBox
+                  x:Name="AllCheck"
+                  MinWidth="0"
+                  MinHeight="0"
+                  Margin="0"
+                  Padding="0"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  Click="OnCheckAll"
+                  Focusable="False"
+                  IsThreeState="True"
+                  ToolTip="Выделить все или снять выделение" />
+              </DataGridTemplateColumn.Header>
+              <DataGridTemplateColumn.CellTemplate>
+                <DataTemplate>
+                  <CheckBox
+                    x:Name="RowCheck"
+                    MinWidth="0"
+                    MinHeight="0"
+                    Margin="0"
+                    Padding="0"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Focusable="False"
+                    IsChecked="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=DataGridRow}, Mode=OneWay}" />
+                  <DataTemplate.Triggers>
+                    <DataTrigger Binding="{Binding IsParent}" Value="True">
+                      <Setter TargetName="RowCheck" Property="Visibility" Value="Hidden" />
+                    </DataTrigger>
+                  </DataTemplate.Triggers>
+                </DataTemplate>
+              </DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
+            <DataGridTemplateColumn
+              x:Name="NameColumn"
               Width="*"
               MinWidth="160"
               Header="Имя"
@@ -530,16 +650,41 @@
                       Visibility="{Binding ShowsName, Converter={StaticResource BoolToVis}}" />
 
                     <!--  переименование на месте (F2): Enter — готово, Esc — отмена  -->
+                    <!--
+                      Своя простая рамка вместо темы: у темы снизу полоса фокуса и высота поля
+                      больше строки — она закрывала буквы.
+                    -->
                     <TextBox
                       x:Name="RenameBox"
                       Grid.Column="1"
+                      MinHeight="0"
                       Margin="-4,0,0,0"
-                      Padding="2,0"
+                      Padding="3,1"
                       VerticalAlignment="Center"
+                      CaretBrush="{DynamicResource TextFillColorPrimaryBrush}"
+                      Foreground="{DynamicResource TextFillColorPrimaryBrush}"
                       KeyDown="OnRenameKeyDown"
                       LostKeyboardFocus="OnRenameLostFocus"
+                      SelectionBrush="{DynamicResource AccentFillColorDefaultBrush}"
                       Text="{Binding EditName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                      Visibility="{Binding IsRenaming, Converter={StaticResource BoolToVis}}" />
+                      Visibility="{Binding IsRenaming, Converter={StaticResource BoolToVis}}">
+                      <TextBox.Template>
+                        <ControlTemplate TargetType="TextBox">
+                          <Border
+                            Padding="{TemplateBinding Padding}"
+                            Background="{DynamicResource SolidBackgroundFillColorBaseBrush}"
+                            BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="3">
+                            <ScrollViewer
+                              x:Name="PART_ContentHost"
+                              Focusable="False"
+                              HorizontalScrollBarVisibility="Hidden"
+                              VerticalScrollBarVisibility="Hidden" />
+                          </Border>
+                        </ControlTemplate>
+                      </TextBox.Template>
+                    </TextBox>
                   </Grid>
                 </DataTemplate>
               </DataGridTemplateColumn.CellTemplate>
@@ -586,6 +731,20 @@
               SortMemberPath="LinkTarget" />
           </DataGrid.Columns>
         </DataGrid>
+
+        <!--  рамка выделения мышью, как в проводнике  -->
+        <Canvas
+          Grid.Column="2"
+          ClipToBounds="True"
+          IsHitTestVisible="False">
+          <Border
+            x:Name="Marquee"
+            BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
+            BorderThickness="1"
+            Visibility="Collapsed">
+            <Rectangle Fill="{DynamicResource AccentFillColorDefaultBrush}" Opacity="0.2" />
+          </Border>
+        </Canvas>
 
         <!--  пусто, нет связи, не выбран сервер — словами посреди списка  -->
         <TextBlock

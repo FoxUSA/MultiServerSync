@@ -187,7 +187,7 @@ public sealed class AppState : ObservableObject
         owner.PickPaneSet(set);
         RaisePane();
         EnforceSingleSelect();
-        AppLog.Info($"Целевые сервера — из набора «{set.Title}».", owner.Title);
+        AppLog.Hint($"Целевые сервера — из набора «{set.Title}».");
     }
 
     /// <summary>Подпись под «Целевые сервера»: какой набор у вкладки.</summary>
@@ -235,9 +235,9 @@ public sealed class AppState : ObservableObject
             owner.SetSingleSelect(value);
             RaiseSingleSelect();
 
-            AppLog.Info(value
+            AppLog.Hint(value
                 ? "Одиночный выбор включён."
-                : "Одиночный выбор выключен — можно отмечать несколько серверов.", owner.Title);
+                : "Одиночный выбор выключен — можно отмечать несколько серверов.");
         }
     }
 
@@ -332,7 +332,7 @@ public sealed class AppState : ObservableObject
 
             owner.SetShowIp(value);
             Raise();
-            AppLog.Info(value ? "Под целевыми серверами показывается адрес." : "Адрес под целевыми серверами скрыт.", owner.Title);
+            AppLog.Hint(value ? "Под целевыми серверами показывается адрес." : "Адрес под целевыми серверами скрыт.");
         }
     }
 
@@ -349,65 +349,7 @@ public sealed class AppState : ObservableObject
 
             owner.SetShowUser(value);
             Raise();
-            AppLog.Info(value ? "Под целевыми серверами показывается имя пользователя." : "Имя пользователя под целевыми серверами скрыто.", owner.Title);
-        }
-    }
-
-    /// <summary>
-    /// Краткие ярлыки вкладок открытого раздела. У «Серверов», «Команды» и «Копирования»
-    /// выбор свой: переключение в одном разделе другие не трогает.
-    /// </summary>
-    public bool CompactTabs
-    {
-        get => _section switch
-        {
-            AppSection.Servers => Settings.CompactTabsServers,
-            AppSection.Command => Settings.CompactTabsCommand,
-            AppSection.Files => Settings.CompactTabsFiles,
-            AppSection.Download => Settings.CompactTabsDownload,
-            AppSection.Explorer => Settings.CompactTabsExplorer,
-            _ => false,
-        };
-        set
-        {
-            if (CompactTabs == value)
-            {
-                return;
-            }
-
-            string where;
-
-            switch (_section)
-            {
-                case AppSection.Servers:
-                    Settings.CompactTabsServers = value;
-                    where = "«Серверы»";
-                    break;
-                case AppSection.Command:
-                    Settings.CompactTabsCommand = value;
-                    where = "«Команда»";
-                    break;
-                case AppSection.Files:
-                    Settings.CompactTabsFiles = value;
-                    where = "«Копирование»";
-                    break;
-                case AppSection.Download:
-                    Settings.CompactTabsDownload = value;
-                    where = "«Скачивание»";
-                    break;
-                case AppSection.Explorer:
-                    Settings.CompactTabsExplorer = value;
-                    where = "«Проводник»";
-                    break;
-                default:
-                    return;
-            }
-
-            Raise();
-            SaveSettings();
-            AppLog.Info(value
-                ? $"Ярлыки вкладок в разделе {where} — краткие: только название и статус, в два ряда."
-                : $"Ярлыки вкладок в разделе {where} — полные: со счётчиками.");
+            AppLog.Hint(value ? "Под целевыми серверами показывается имя пользователя." : "Имя пользователя под целевыми серверами скрыто.");
         }
     }
 
@@ -479,7 +421,7 @@ public sealed class AppState : ObservableObject
             Settings.CopyWithChain = value;
             Raise();
             SaveSettings();
-            AppLog.Info(value
+            AppLog.Hint(value
                 ? "Копирование вывода в разделе «Копирование» берёт и вывод личных команд вкладки."
                 : "Копирование вывода — только копирование, без личных команд.");
         }
@@ -501,6 +443,16 @@ public sealed class AppState : ObservableObject
         }
 
         var owner = Workspaces.FirstOrDefault(w => w.CopyBatch.Results.Contains(copyRow));
+        return owner is { AfterCopyEnabled: true, Personal: { } personal } ? personal.CommandBatch : null;
+    }
+
+    /// <summary>
+    /// Команды после копирования этой вкладки — их строки встают в таблице терминала под строками
+    /// копирования. Null — у вкладки их нет или они выключены.
+    /// </summary>
+    public OperationBatch? AfterCopyBatchOf(OperationBatch copy)
+    {
+        var owner = Workspaces.FirstOrDefault(w => ReferenceEquals(w.CopyBatch, copy));
         return owner is { AfterCopyEnabled: true, Personal: { } personal } ? personal.CommandBatch : null;
     }
 
@@ -651,7 +603,7 @@ public sealed class AppState : ObservableObject
 
             // лента показывает вкладки открытого раздела — сначала список, потом выбор в нём
             RaiseMany(nameof(Section), nameof(Tabs), nameof(ShowsWorkspaceTabs), nameof(ShowsServerSetTabs), nameof(ShowsTabStrip),
-                nameof(AutoCopyAll), nameof(AutoCopyCurrent), nameof(AutoCopyWhen), nameof(ChainCopyVisibility), nameof(CompactTabs),
+                nameof(AutoCopyAll), nameof(AutoCopyCurrent), nameof(AutoCopyWhen), nameof(ChainCopyVisibility),
                 nameof(PaneShowIp), nameof(PaneShowUser));
             RaisePane();
             EnforceSingleSelect();
@@ -725,7 +677,7 @@ public sealed class AppState : ObservableObject
             Servers.Add(s);
         }
 
-        AppLog.Info($"Загружено серверов: {Servers.Count}");
+        AppLog.Debug($"Загружено серверов: {Servers.Count}");
 
         LoadServerSets();
         ServerSets.CollectionChanged += (_, _) => Raise(nameof(ShowsSetSwitcher));
@@ -749,7 +701,7 @@ public sealed class AppState : ObservableObject
         ServerSets.Add(set);
         SaveServerSets();
 
-        AppLog.Info($"Добавлен набор серверов «{set.Title}». Всего наборов: {ServerSets.Count}.");
+        AppLog.Hint($"Добавлен набор серверов «{set.Title}». Всего наборов: {ServerSets.Count}.");
         return set;
     }
 
@@ -761,13 +713,13 @@ public sealed class AppState : ObservableObject
     {
         if (set.IsMain)
         {
-            AppLog.Warn("Первый набор серверов закрыть нельзя.");
+            AppLog.Hint("Первый набор серверов закрыть нельзя.", LogLevel.Warning);
             return false;
         }
 
         if (AllWorkspaces.Any(w => w.IsBusy))
         {
-            AppLog.Warn("Идёт операция — дождитесь её окончания, потом закрывайте набор.");
+            AppLog.Hint("Идёт операция — дождитесь её окончания, потом закрывайте набор.", LogLevel.Warning);
             return false;
         }
 
@@ -864,7 +816,7 @@ public sealed class AppState : ObservableObject
             _legacyAllSingleSelect = file?.LegacyAllSingleSelect ?? true;
             _legacyAllSingleSelectCopy = file?.LegacyAllSingleSelectCopy == true;
 
-            AppLog.Info($"Наборов серверов: {ServerSets.Count}. Текущий: «{ActiveServerSet.Title}».");
+            AppLog.Debug($"Наборов серверов: {ServerSets.Count}. Текущий: «{ActiveServerSet.Title}».");
 
             if (adopted > 0 || file is null)
             {
@@ -915,6 +867,7 @@ public sealed class AppState : ObservableObject
             OverwriteFiles = source?.OverwriteFiles ?? Settings.OverwriteFiles,
             PreserveTimestamps = source?.PreserveTimestamps ?? Settings.PreserveTimestamps,
             VerifyChecksums = source?.VerifyChecksums ?? Settings.VerifyChecksums,
+            ReplaceWithoutAsking = source?.ReplaceWithoutAsking ?? false,
             ExcludeMasks = source?.ExcludeMasks ?? string.Empty,
             MatchByDate = source?.MatchByDate ?? false,
             MatchByHash = source?.MatchByHash ?? false,
@@ -941,7 +894,7 @@ public sealed class AppState : ObservableObject
         tabs.Add(workspace);
         SaveWorkspaces();
 
-        AppLog.Info($"Добавлена вкладка «{workspace.Title}». Всего вкладок: {tabs.Count}.");
+        AppLog.Hint($"Добавлена вкладка «{workspace.Title}». Всего вкладок: {tabs.Count}.");
         return workspace;
     }
 
@@ -1010,22 +963,20 @@ public sealed class AppState : ObservableObject
     public AppSection SectionOfTab(Workspace tab) => SectionOf(tab);
 
     /// <summary>
-    /// Вкладка проводника на этом сервере — для кнопки «Проводник» в «Серверах»: уже открытая,
-    /// иначе свободная (без сервера), иначе новая. Сервер встаёт отмеченным в её панели.
+    /// Кнопка «Проводник» в «Серверах»: всегда основная вкладка проводника, новых не заводим.
+    /// Справа — домашняя папка этого сервера, слева — «Этот компьютер» со всеми дисками.
     /// </summary>
     public Workspace ExplorerFor(ServerEntry server)
     {
-        var tab = ExplorerTabs.FirstOrDefault(t => ReferenceEquals(t.ExplorerServer, server))
-            ?? ExplorerTabs.FirstOrDefault(t => t.ExplorerServer is null);
+        var tab = ExplorerTabs.FirstOrDefault(t => t.IsMain) ?? ExplorerTabs[0];
 
-        if (tab is null)
-        {
-            tab = new Workspace(Guid.NewGuid().ToString("N"), server.PaneLabel, isMain: false);
-            tab.SyncServers(Servers);
-            tab.Restore(new WorkspaceState { OverwriteFiles = true, PreserveTimestamps = true });
-            tab.InitPane(ActiveServerSet.Id, allSets: true, new Dictionary<string, bool>(), showIp: false, showUser: false);
-            ExplorerTabs.Add(tab);
-        }
+        var state = tab.Explorer;
+        state.Local.Path = string.Empty;
+        state.Local.Focus = string.Empty;
+        state.RemoteServerId = server.Id;
+        state.Remote.Path = string.Empty;
+        state.Remote.Focus = string.Empty;
+        state.RemoteActive = true;
 
         // сервера нет в наборе вкладки — она смотрит на «Все», иначе он не встанет отмеченным
         if (!tab.PaneAllSets && tab.PaneSet is { } set && !set.Servers.Contains(server))
@@ -1039,24 +990,32 @@ public sealed class AppState : ObservableObject
     }
 
     /// <summary>
-    /// Командная вкладка с готовой командой на одном сервере — из проводника: «открыть здесь
-    /// вкладку команды», «выполнить на сервере». Сама команда не запускается.
+    /// Команда из проводника («команда здесь», «запустить») — как «Проводник» в «Серверах»:
+    /// всегда основная вкладка «Команды», новых не заводим. Слева отмечен только этот сервер,
+    /// в первом окне — готовая команда. Сама команда не запускается.
     /// </summary>
-    public Workspace AddCommandTab(string title, string command, ServerEntry server)
+    public Workspace CommandFor(ServerEntry server, string command)
     {
-        var tab = new Workspace(Guid.NewGuid().ToString("N"), title, isMain: false);
+        var tab = CommandTabs.FirstOrDefault(t => t.IsMain) ?? CommandTabs[0];
 
-        // сервер может быть в любом наборе — вкладка смотрит на «Все», чтобы он был виден отмеченным
-        tab.SyncServers(Servers);
-        tab.Restore(new WorkspaceState { Commands = [new SavedCommandStep { Text = command }] });
-        tab.InitPane(ActiveServerSet.Id, allSets: true, new Dictionary<string, bool>(), showIp: false, showUser: false);
+        // сервера нет в наборе вкладки — она смотрит на «Все», иначе он не встанет отмеченным
+        if (!tab.PaneAllSets && tab.PaneSet is { } set && !set.Servers.Contains(server))
+        {
+            tab.PickAllSets();
+        }
+
         tab.SelectCommandServers([server.Id]);
-
-        CommandTabs.Add(tab);
+        tab.CommandText = command;
         SaveWorkspaces();
-        AppLog.Info($"Создана вкладка команды «{title}» на {server.PaneLabel}.");
+        AppLog.Hint($"Команда для {server.PaneLabel} — в основной вкладке «Команды».");
         return tab;
     }
+
+    /// <summary>
+    /// «Добавить в скачивание» из проводника: в основную вкладку «Скачивания», строками ниже
+    /// уже имеющихся — список не затирается.
+    /// </summary>
+    public Workspace MainDownloadTab => DownloadTabs.FirstOrDefault(t => t.IsMain) ?? DownloadTabs[0];
 
     /// <summary>
     /// Личная командная вкладка для вкладки копирования: пустая, с тем же названием,
@@ -1079,7 +1038,7 @@ public sealed class AppState : ObservableObject
         ArrangePersonalTabs();
         SaveWorkspaces();
 
-        AppLog.Info($"Создана личная вкладка команд для «{copy.Title}»: выполнится после удачного копирования.");
+        AppLog.Hint($"Создана личная вкладка команд для «{copy.Title}»: выполнится после удачного копирования.");
         return personal;
     }
 
@@ -1150,24 +1109,49 @@ public sealed class AppState : ObservableObject
         return true;
     }
 
+    /// <summary>
+    /// Перетаскивание сервера в панели «Целевые сервера»: встаёт на место <paramref name="target"/>.
+    /// Порядок у серверов один — его видят панели всех вкладок и таблица на «Серверах».
+    /// </summary>
+    public bool MoveServer(ServerEntry dragged, ServerEntry target)
+    {
+        var from = Servers.IndexOf(dragged);
+        var to = Servers.IndexOf(target);
+
+        if (from < 0 || to < 0 || from == to)
+        {
+            return false;
+        }
+
+        // остальное перестроится по сигналу списка: наборы, панели вкладок
+        Servers.Move(from, to);
+        SaveServers();
+
+        // таблица на «Серверах», отсортированная по столбцу, новый порядок не показала бы
+        GridSort.Reset("servers");
+
+        AppLog.Debug($"Сервер «{dragged.Display}» переставлен: место {from + 1} → {to + 1}.");
+        return true;
+    }
+
     public bool RemoveWorkspace(Workspace workspace)
     {
         if (workspace.IsMain)
         {
-            AppLog.Warn("Первую вкладку закрыть нельзя.");
+            AppLog.Hint("Первую вкладку закрыть нельзя.", LogLevel.Warning);
             return false;
         }
 
         if (workspace.IsBusy)
         {
-            AppLog.Warn($"Вкладка «{workspace.Title}» занята операцией — сначала дождитесь её окончания.");
+            AppLog.Hint($"Вкладка «{workspace.Title}» занята операцией — сначала дождитесь её окончания.", LogLevel.Warning);
             return false;
         }
 
         // личная вкладка уходит вместе с вкладкой копирования — сама по себе она ничья
         if (workspace.Personal is { IsBusy: true } busy)
         {
-            AppLog.Warn($"Личная вкладка «{busy.Title}» занята командой — сначала дождитесь её окончания.");
+            AppLog.Hint($"Личная вкладка «{busy.Title}» занята командой — сначала дождитесь её окончания.", LogLevel.Warning);
             return false;
         }
 
@@ -1202,7 +1186,7 @@ public sealed class AppState : ObservableObject
         }
 
         SaveWorkspaces();
-        AppLog.Info($"Вкладка «{workspace.Title}» закрыта.");
+        AppLog.Hint($"Вкладка «{workspace.Title}» закрыта.");
         return true;
     }
 
@@ -1227,7 +1211,7 @@ public sealed class AppState : ObservableObject
     }
 
     /// <summary>Вкладки всех разделов загружены — до этого сохранять и переключать нечего.</summary>
-    private bool TabsLoaded =>
+    internal bool TabsLoaded =>
         Workspaces.Count > 0 && CommandTabs.Count > 0 && DownloadTabs.Count > 0 && ExplorerTabs.Count > 0;
 
     // ── сохранение ─────────────────────────────────────────────────────────────
@@ -1423,7 +1407,7 @@ public sealed class AppState : ObservableObject
 
             ArrangePersonalTabs();
 
-            AppLog.Info($"Вкладок копирования: {Workspaces.Count}, команды: {CommandTabs.Count}, "
+            AppLog.Debug($"Вкладок копирования: {Workspaces.Count}, команды: {CommandTabs.Count}, "
                 + $"скачивания: {DownloadTabs.Count}, проводника: {ExplorerTabs.Count}.");
         }
         finally

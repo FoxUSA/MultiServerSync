@@ -36,6 +36,9 @@ public sealed class WorkspaceState
     /// <summary>Сверять суммы после копирования — проверка того, что уже отправлено.</summary>
     public bool VerifyChecksums { get; set; }
 
+    /// <summary>«Проводник»: заменять файлы в назначении, не спрашивая.</summary>
+    public bool ReplaceWithoutAsking { get; set; }
+
     /// <summary>Исключения при копировании — маски по одной в строке, см. ExcludeRules.</summary>
     public string ExcludeMasks { get; set; } = string.Empty;
 

@@ -1,0 +1,40 @@
+<?xml version="1.0"?>
+<!--
+  Конфиги вида «ключ = значение» и «директива значение;»: ini, systemd, .env, nginx, sshd_config,
+  my.cnf, php.ini. Ключом считается первое слово строки.
+-->
+<SyntaxDefinition name="Conf" extensions=".conf;.cnf;.cfg;.ini;.env;.properties;.toml;.vhost;.htaccess;.service;.socket;.timer;.mount;.target;.path;.slice;.rules;.list;.repo;.sources;.gitconfig;.gitmodules;.editorconfig;.npmrc" xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+  <Color name="Comment" foreground="Green" />
+  <Color name="String" foreground="Brown" />
+  <Color name="Heading" foreground="Purple" fontWeight="bold" />
+  <Color name="FieldName" foreground="SteelBlue" />
+  <Color name="Keywords" foreground="Blue" />
+  <Color name="Bool" foreground="Blue" />
+  <Color name="NumberLiteral" foreground="DarkGreen" />
+  <Color name="Variable" foreground="DarkCyan" />
+  <Color name="Punctuation" foreground="Gray" />
+
+  <RuleSet ignoreCase="true">
+    <Span color="Comment" begin="(?&lt;=^|\s)#|^\s*;" />
+
+    <Span color="String" begin="&quot;" end="&quot;">
+      <RuleSet>
+        <Span begin="\\" end="." />
+        <Rule color="Variable">\$\{[^}]*\}|\$\w+</Rule>
+      </RuleSet>
+    </Span>
+    <Span color="String" begin="(?&lt;=[\s=:(,\[])'" end="'" />
+
+    <Rule color="Heading">^\s*\[[^\]]*\]</Rule>
+    <Rule color="FieldName">^\s*[\w.\-/@*]+(?=\s*[=:](?!:))</Rule>
+    <Rule color="Keywords">^\s*[A-Za-z_][\w.\-]*(?=\s|$)</Rule>
+    <Rule color="Variable">\$\{[^}]*\}|\$\w+|%[\w()]+%?</Rule>
+
+    <Keywords color="Bool">
+      <Word>on</Word><Word>off</Word><Word>true</Word><Word>false</Word><Word>yes</Word><Word>no</Word><Word>none</Word><Word>null</Word>
+    </Keywords>
+
+    <Rule color="NumberLiteral">\b\d+(\.\d+)*[kmgsdhw]?\b</Rule>
+    <Rule color="Punctuation">[{};=]</Rule>
+  </RuleSet>
+</SyntaxDefinition>

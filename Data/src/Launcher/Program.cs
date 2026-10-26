@@ -107,18 +107,22 @@ internal static class Program
             // настроек ещё нет или не читаются — остаётся тёмная, как у программы по умолчанию
         }
 
-        switch (theme)
+        // без подложки, как у программы: WPF-UI без явного указания включает Mica
+        var target = theme switch
         {
-            case "Light":
-                Wpf.Ui.Appearance.ApplicationThemeManager.Apply(Wpf.Ui.Appearance.ApplicationTheme.Light);
-                break;
-            case "System":
-                Wpf.Ui.Appearance.ApplicationThemeManager.ApplySystemTheme();
-                break;
-            default:
-                Wpf.Ui.Appearance.ApplicationThemeManager.Apply(Wpf.Ui.Appearance.ApplicationTheme.Dark);
-                break;
-        }
+            "Light" => Wpf.Ui.Appearance.ApplicationTheme.Light,
+            "System" => Wpf.Ui.Appearance.ApplicationThemeManager.GetSystemTheme() switch
+            {
+                Wpf.Ui.Appearance.SystemTheme.Dark or Wpf.Ui.Appearance.SystemTheme.Glow
+                    or Wpf.Ui.Appearance.SystemTheme.CapturedMotion => Wpf.Ui.Appearance.ApplicationTheme.Dark,
+                Wpf.Ui.Appearance.SystemTheme.HC1 or Wpf.Ui.Appearance.SystemTheme.HC2
+                    or Wpf.Ui.Appearance.SystemTheme.HCBlack or Wpf.Ui.Appearance.SystemTheme.HCWhite
+                    => Wpf.Ui.Appearance.ApplicationTheme.HighContrast,
+                _ => Wpf.Ui.Appearance.ApplicationTheme.Light,
+            },
+            _ => Wpf.Ui.Appearance.ApplicationTheme.Dark,
+        };
+        Wpf.Ui.Appearance.ApplicationThemeManager.Apply(target, Wpf.Ui.Controls.WindowBackdropType.None);
     }
 
     // ── установка обновления ─────────────────────────────────────────────────

@@ -53,6 +53,20 @@ public sealed record UploadOptions(
 
 public sealed record UploadedFile(string LocalPath, string RemotePath, long Size);
 
+/// <summary>Что делать с файлами, которые копирование перезапишет в назначении.</summary>
+public enum ReplaceChoice
+{
+    Replace,
+    Skip,
+    Cancel,
+}
+
+/// <summary>
+/// Вопрос перед заменой. Зовётся из потока копирования, когда уже ясно, какие файлы назначения
+/// будут перезаписаны (с учётом сверки по дате или сумме), и до того, как что-то поехало.
+/// </summary>
+public delegate ReplaceChoice ConfirmReplace(ServerEntry server, IReadOnlyList<string> paths);
+
 /// <summary>
 /// Чем копирование занято прямо сейчас — это и пишется на ярлыке вкладки и в строке
 /// сервера. Порядок значений — порядок шагов, назад они не идут.
@@ -604,7 +618,8 @@ public static class SshService
         Action<string> report,
         CancellationToken ct,
         Action<UploadStep>? step = null,
-        Action<long, long>? progress = null)
+        Action<long, long>? progress = null,
+        ConfirmReplace? confirmReplace = null)
     {
         return Task.Run(
             () =>
@@ -645,6 +660,41 @@ public static class SshService
                     clock.Mark("суммы до");
                 }
 
+                // сначала решаем по каждому файлу, потом везём: так видно, сколько и чего
+                // отправлять, и под это выбирается способ доставки. Решение — до создания папок:
+                // если замену не подтвердят, на сервере не должно остаться ничего нового
+                var redate = new ConcurrentBag<Retouch>();
+                var picked = new ConcurrentBag<SendJob>();
+
+                RunParallel(plan.Files, ct, job =>
+                {
+                    if (Decide(ctx, job, redate) is { } s)
+                    {
+                        picked.Add(s);
+                    }
+                });
+
+                clock.Mark("разбор");
+
+                var send = picked.ToList();
+                var replacing = send.Where(s => s.Remote is not null).Select(s => s.Job.RemotePath).Order(StringComparer.Ordinal).ToList();
+
+                if (confirmReplace is not null && replacing.Count > 0)
+                {
+                    switch (confirmReplace(server, replacing))
+                    {
+                        case ReplaceChoice.Cancel:
+                            report("копирование отменено: замену файлов не подтвердили");
+                            throw new OperationCanceledException();
+
+                        case ReplaceChoice.Skip:
+                            send.RemoveAll(s => s.Remote is not null);
+                            stats.Skipped += replacing.Count;
+                            report($"не заменены, оставлены как есть: {replacing.Count}");
+                            break;
+                    }
+                }
+
                 EnsureDirectory(sftp, root, stats, report);
                 ctx.MarkKnown(root);
 
@@ -660,27 +710,12 @@ public static class SshService
                 }
 
                 clock.Mark("папки");
-
-                // сначала решаем по каждому файлу, потом везём: так видно, сколько и чего
-                // отправлять, и под это выбирается способ доставки
-                var redate = new ConcurrentBag<Retouch>();
-                var send = new ConcurrentBag<SendJob>();
-
-                RunParallel(plan.Files, ct, job =>
-                {
-                    if (Decide(ctx, job, redate) is { } s)
-                    {
-                        send.Add(s);
-                    }
-                });
-
-                clock.Mark("разбор");
                 ApplyDates(ssh, sftp, redate.ToList(), report, ct);
                 clock.Mark("даты");
 
                 var dates = new List<Retouch>();
 
-                if (!send.IsEmpty)
+                if (send.Count > 0)
                 {
                     step?.Invoke(UploadStep.Copying);
 

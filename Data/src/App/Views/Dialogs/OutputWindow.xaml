@@ -17,7 +17,7 @@
   ExtendsContentIntoTitleBar="True"
   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
   ShowInTaskbar="True"
-  WindowBackdropType="Mica"
+  WindowBackdropType="None"
   WindowCornerPreference="Round"
   WindowStartupLocation="CenterOwner">
 
@@ -157,7 +157,7 @@
       Grid.Row="5"
       Padding="12,4"
       Background="{DynamicResource ControlFillColorDefaultBrush}"
-      BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+      BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
       BorderThickness="0,1,0,0">
       <Grid>
         <Grid.ColumnDefinitions>

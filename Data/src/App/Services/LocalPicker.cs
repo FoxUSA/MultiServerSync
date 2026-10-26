@@ -22,12 +22,78 @@ public static class LocalPicker
     private const uint PathMustExist = 0x00000800;
     private const uint ForceFileSystem = 0x00000040;
     private const uint NoValidate = 0x00000100;
+    private const uint FileMustExist = 0x00001000;
+
+    /// <summary>SIGDN_NORMALDISPLAY — имя, как его пишет проводник («Disc (D:)» у диска).</summary>
+    private const uint DisplayName = 0;
 
     /// <summary>SIGDN_FILESYSPATH — путь на диске, а не «Этот компьютер» и не имя библиотеки.</summary>
     private const uint FileSystemPath = 0x80058000;
 
     /// <summary>Windows запоминает по этому ключу, какая папка была открыта в прошлый раз.</summary>
     private static Guid _clientId = new("6f2f1a6e-6c3b-4f6a-9a1e-0d3a5d2f77c1");
+
+    /// <summary>У «Открыть папку» своя память Windows о последней папке.</summary>
+    private static Guid _folderClientId = new("b3c1e2a4-5d6f-4a7b-8c9d-0e1f2a3b4c5d");
+
+    /// <summary>
+    /// «Открыть папку», но с файлами в списке: штатное окно выбора папки файлов не показывает.
+    /// Выбрать можно только папку — ту, что открыта в окне: кнопка «Выбор папки» отдаёт её,
+    /// какой бы файл ни был выделен. Вложенная папка открывается двойным щелчком (или той же
+    /// кнопкой, если она выделена). Пусто — окно закрыли.
+    /// </summary>
+    public static string? PickFolder(IntPtr owner, string? startFolder = null)
+    {
+        IFileOpenDialog? dialog = null;
+        var cookie = 0u;
+
+        try
+        {
+            dialog = (IFileOpenDialog)(object)new FileOpenDialogRcw();
+
+            var events = new FolderEvents(dialog);
+
+            dialog.SetTitle("Открыть папку");
+
+            // имя в поле — не настоящий файл: проверку существования снимаем, иначе «Выбор папки»
+            // упрётся в «файл не найден»
+            dialog.GetOptions(out var options);
+            dialog.SetOptions((options | PathMustExist | ForceFileSystem | NoValidate) & ~FileMustExist);
+            dialog.SetClientGuid(ref _folderClientId);
+
+            OpenAt(dialog, startFolder);
+
+            dialog.SetFileNameLabel("Папка:");
+            dialog.SetOkButtonLabel("Выбор папки");
+            dialog.Advise(events, out cookie);
+
+            return dialog.Show(owner) == 0 ? events.Picked : null;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Hint("Не удалось открыть окно выбора папки: " + ex.Message, LogLevel.Error);
+            return null;
+        }
+        finally
+        {
+            if (dialog is not null)
+            {
+                if (cookie != 0)
+                {
+                    try
+                    {
+                        dialog.Unadvise(cookie);
+                    }
+                    catch (COMException)
+                    {
+                        // окно уже закрыто — отписываться не от чего
+                    }
+                }
+
+                Marshal.ReleaseComObject(dialog);
+            }
+        }
+    }
 
     /// <summary>
     /// Показывает окно и возвращает выбранное. Пустой список — окно закрыли
@@ -86,7 +152,7 @@ public static class LocalPicker
         }
         catch (Exception ex)
         {
-            AppLog.Error("Не удалось открыть окно выбора файлов: " + ex.Message);
+            AppLog.Hint("Не удалось открыть окно выбора файлов: " + ex.Message, LogLevel.Error);
             return [];
         }
         finally
@@ -295,6 +361,67 @@ public static class LocalPicker
         public void OnControlActivating(IntPtr customize, uint id)
         {
         }
+    }
+
+    /// <summary>
+    /// «Открыть папку»: в поле «Папка» всегда имя открытой папки, а «Выбор папки» отдаёт
+    /// открытую папку, а не выделенный файл.
+    /// </summary>
+    private sealed class FolderEvents(IFileOpenDialog dialog) : IFileDialogEvents
+    {
+        public string? Picked { get; private set; }
+
+        public int OnFileOk(IntPtr d)
+        {
+            Picked = Folder(FileSystemPath) is { } path && Directory.Exists(path) ? path : null;
+
+            // открыт раздел без пути на диске («Этот компьютер», «Сеть») — выбирать нечего, окно остаётся
+            return Picked is null ? 1 : 0;
+        }
+
+        public int OnFolderChanging(IntPtr d, IntPtr folder) => 0;
+
+        public void OnFolderChange(IntPtr d)
+        {
+            if (Folder(DisplayName) is { Length: > 0 } name)
+            {
+                dialog.SetFileName(name);
+            }
+        }
+
+        private string? Folder(uint kind)
+        {
+            try
+            {
+                dialog.GetFolder(out var folder);
+
+                try
+                {
+                    folder.GetDisplayName(kind, out var name);
+                    return name;
+                }
+                finally
+                {
+                    Marshal.ReleaseComObject(folder);
+                }
+            }
+            catch (COMException)
+            {
+                return null;
+            }
+        }
+
+        public void OnSelectionChange(IntPtr d)
+        {
+        }
+
+        public void OnShareViolation(IntPtr d, IntPtr item, out int response) => response = 0;
+
+        public void OnTypeChange(IntPtr d)
+        {
+        }
+
+        public void OnOverwrite(IntPtr d, IntPtr item, out int response) => response = 0;
     }
 
     // ── системные интерфейсы ──────────────────────────────────────────────────

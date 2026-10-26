@@ -11,7 +11,7 @@
   ExtendsContentIntoTitleBar="True"
   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
   ShowInTaskbar="False"
-  WindowBackdropType="Mica"
+  WindowBackdropType="None"
   WindowCornerPreference="Round"
   WindowStartupLocation="CenterOwner">
 

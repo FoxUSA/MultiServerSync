@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<SyntaxDefinition name="Dockerfile" extensions=".dockerfile;.containerfile" xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+  <Color name="Comment" foreground="Green" />
+  <Color name="String" foreground="Brown" />
+  <Color name="Keywords" foreground="Blue" />
+  <Color name="Variable" foreground="DarkCyan" />
+  <Color name="NumberLiteral" foreground="DarkGreen" />
+  <Color name="Punctuation" foreground="Gray" />
+
+  <RuleSet ignoreCase="true">
+    <Span color="Comment" begin="^\s*#" />
+
+    <Span color="String" begin="&quot;" end="&quot;">
+      <RuleSet>
+        <Span begin="\\" end="." />
+        <Rule color="Variable">\$\{[^}]*\}|\$\w+</Rule>
+      </RuleSet>
+    </Span>
+    <Span color="String" begin="(?&lt;![\w])'" end="'" />
+
+    <Rule color="Keywords">^\s*(FROM|RUN|CMD|LABEL|MAINTAINER|EXPOSE|ENV|ADD|COPY|ENTRYPOINT|VOLUME|USER|WORKDIR|ARG|ONBUILD|STOPSIGNAL|HEALTHCHECK|SHELL)\b</Rule>
+    <Rule color="Keywords">\bAS\b</Rule>
+    <Rule color="Variable">\$\{[^}]*\}|\$\w+</Rule>
+    <Rule color="NumberLiteral">\b\d+\b</Rule>
+    <Rule color="Punctuation">[\\&amp;|;\[\],]</Rule>
+  </RuleSet>
+</SyntaxDefinition>

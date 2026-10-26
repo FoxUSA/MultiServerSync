@@ -12,79 +12,32 @@
 
   <Page.Resources>
     <BooleanToVisibilityConverter x:Key="BoolToVis" />
-
-    <!--  копирование между панелями: стрелка в сторону назначения и подпись словами  -->
-    <Style
-      x:Key="TransferButtonStyle"
-      BasedOn="{StaticResource {x:Type ui:Button}}"
-      TargetType="ui:Button">
-      <Setter Property="Width" Value="92" />
-      <Setter Property="Padding" Value="4,6" />
-      <Setter Property="Margin" Value="0,4,0,0" />
-      <Setter Property="FontSize" Value="11" />
-      <Setter Property="HorizontalContentAlignment" Value="Center" />
-    </Style>
   </Page.Resources>
 
-  <Grid Margin="12">
+  <!--  всё место — двум панелям, как в WinSCP: копирование и его параметры — кнопками на самих панелях  -->
+  <Grid Margin="4">
     <Grid.RowDefinitions>
       <RowDefinition Height="*" />
       <RowDefinition Height="Auto" />
-      <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
-    <!--  слева этот компьютер, справа сервер — как в WinSCP  -->
+    <!--  слева этот компьютер, справа сервер  -->
     <Grid Grid.Row="0">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" />
-        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="4" />
         <ColumnDefinition Width="*" />
       </Grid.ColumnDefinitions>
 
       <controls:FilePane x:Name="LocalPane" Grid.Column="0" />
-
-      <StackPanel
-        Grid.Column="1"
-        Margin="4,0"
-        VerticalAlignment="Center">
-        <ui:Button
-          x:Name="UploadButton"
-          Click="OnUpload"
-          IsEnabled="False"
-          Style="{StaticResource TransferButtonStyle}"
-          ToolTip="Выделенное слева — в открытую справа папку сервера">
-          <StackPanel>
-            <ui:SymbolIcon HorizontalAlignment="Center" Symbol="ArrowRight24" />
-            <TextBlock TextAlignment="Center" Text="Скопировать&#x0a;на сервер" />
-          </StackPanel>
-        </ui:Button>
-        <ui:Button
-          x:Name="DownloadButton"
-          Click="OnDownload"
-          IsEnabled="False"
-          Style="{StaticResource TransferButtonStyle}"
-          ToolTip="Выделенное справа — в открытую слева папку компьютера">
-          <StackPanel>
-            <ui:SymbolIcon HorizontalAlignment="Center" Symbol="ArrowLeft24" />
-            <TextBlock TextAlignment="Center" Text="Скопировать&#x0a;с сервера" />
-          </StackPanel>
-        </ui:Button>
-      </StackPanel>
-
       <controls:FilePane x:Name="RemotePane" Grid.Column="2" />
     </Grid>
 
-    <!--  параметры копирования — тот же блок, что у «Копирования» и «Скачивания», всегда на виду  -->
-    <controls:TransferOptionsPanel
-      x:Name="Options"
-      Grid.Row="1"
-      Margin="0,4,0,0"
-      Direction="Both" />
-
     <!--  ход копирования  -->
-    <Grid Grid.Row="2" Margin="0,4,0,0">
+    <Grid Grid.Row="1">
       <controls:TransferStrip
         x:Name="ProgressBox"
+        Margin="0,4,0,0"
         Batch="{Binding DataContext.CopyBatch, RelativeSource={RelativeSource AncestorType=Page}}"
         DataContext="{Binding CopyBatch.Results[0], FallbackValue={x:Null}}"
         Visibility="{Binding DataContext.CopyBatch.IsRunning, RelativeSource={RelativeSource AncestorType=Page}, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}" />

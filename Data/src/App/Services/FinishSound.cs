@@ -58,7 +58,7 @@ public static class FinishSound
         catch (Exception ex)
         {
             // без звука работа не страдает — только отметка в файле журнала
-            AppLog.Info("Звук окончания не проигрался: " + ex.Message);
+            AppLog.Debug("Звук окончания не проигрался: " + ex.Message);
         }
     }
 }

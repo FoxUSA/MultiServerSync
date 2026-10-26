@@ -12,7 +12,7 @@
   ResizeMode="NoResize"
   ShowInTaskbar="False"
   SizeToContent="Height"
-  WindowBackdropType="Mica"
+  WindowBackdropType="None"
   WindowCornerPreference="Round"
   WindowStartupLocation="CenterOwner">
 
@@ -58,6 +58,12 @@
           FontSize="13"
           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
           TextWrapping="Wrap" />
+        <!--  «больше не спрашивать» — когда вопрос можно отключить прямо здесь  -->
+        <CheckBox
+          x:Name="OptionBox"
+          Margin="0,12,0,0"
+          FontSize="12"
+          Visibility="Collapsed" />
       </StackPanel>
     </Grid>
 

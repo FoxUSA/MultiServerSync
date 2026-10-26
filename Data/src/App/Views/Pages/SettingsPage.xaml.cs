@@ -122,7 +122,7 @@ public partial class SettingsPage : Page
 
         AppState.Current.Settings.RepeatGuard = on;
         AppState.Current.SaveSettings();
-        AppLog.Info(on
+        AppLog.Hint(on
             ? "Защита от двойного запуска команды включена."
             : "Защита от двойного запуска команды выключена.");
     }
@@ -137,7 +137,7 @@ public partial class SettingsPage : Page
         AppState.Current.Settings.Theme = theme;
         AppState.Current.SaveSettings();
         MainWindow.ApplyTheme(theme);
-        AppLog.Info($"Тема переключена: {theme}.");
+        AppLog.Hint($"Тема переключена: {theme}.");
     }
 
     private void OnNumbersChanged(object sender, RoutedEventArgs e)

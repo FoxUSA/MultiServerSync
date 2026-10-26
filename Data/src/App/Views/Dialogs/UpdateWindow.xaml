@@ -11,7 +11,7 @@
   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
   ResizeMode="NoResize"
   SizeToContent="Height"
-  WindowBackdropType="Mica"
+  WindowBackdropType="None"
   WindowCornerPreference="Round"
   WindowStartupLocation="CenterOwner">
 
@@ -44,7 +44,7 @@
         Margin="0,14,0,0"
         Padding="12,8"
         Background="{DynamicResource ControlFillColorDefaultBrush}"
-        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+        BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
         BorderThickness="1"
         CornerRadius="6">
         <ItemsControl x:Name="StepList">

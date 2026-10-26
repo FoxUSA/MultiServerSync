@@ -10,12 +10,13 @@
     направления, сами параметры и их смысл — одни и те же.
   -->
   <UserControl.Resources>
+    <!--  строки плотно, без растяжки на всю ширину: вторая колонка встаёт сразу за первой  -->
     <Style
       x:Key="OptionStyle"
       BasedOn="{StaticResource {x:Type CheckBox}}"
       TargetType="CheckBox">
-      <Setter Property="Margin" Value="0,2,4,2" />
-      <Setter Property="MinHeight" Value="22" />
+      <Setter Property="Margin" Value="0,1,24,1" />
+      <Setter Property="MinHeight" Value="0" />
       <Setter Property="VerticalContentAlignment" Value="Center" />
       <Setter Property="FontSize" Value="12" />
     </Style>
@@ -24,8 +25,8 @@
       x:Key="ChoiceStyle"
       BasedOn="{StaticResource {x:Type RadioButton}}"
       TargetType="RadioButton">
-      <Setter Property="Margin" Value="0,2,4,2" />
-      <Setter Property="MinHeight" Value="22" />
+      <Setter Property="Margin" Value="0,1,24,1" />
+      <Setter Property="MinHeight" Value="0" />
       <Setter Property="VerticalContentAlignment" Value="Center" />
       <Setter Property="FontSize" Value="12" />
     </Style>
@@ -37,24 +38,72 @@
     BorderThickness="1"
     CornerRadius="4">
     <StackPanel>
-      <Grid Margin="0,0,0,4">
+      <!--  шапка: у «Копирования» и «Скачивания» щелчок сворачивает блок в одну строку,
+            где остаются только выбранные параметры  -->
+      <Grid x:Name="HeaderRow" Margin="0,0,0,4">
         <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="*" />
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
 
+        <Button
+          x:Name="FoldButton"
+          Grid.Column="0"
+          Margin="-4,0,4,0"
+          Click="OnFold"
+          Cursor="Hand"
+          Focusable="False"
+          ToolTip="Свернуть в одну строку"
+          Visibility="Collapsed">
+          <Button.Template>
+            <ControlTemplate TargetType="Button">
+              <Border
+                x:Name="Bd"
+                Width="20"
+                Height="20"
+                Background="Transparent"
+                CornerRadius="4">
+                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                  <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                </Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Button.Template>
+          <ui:SymbolIcon
+            x:Name="FoldIcon"
+            FontSize="12"
+            Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+            Symbol="ChevronDown24" />
+        </Button>
+
         <TextBlock
           x:Name="HeaderText"
+          Grid.Column="1"
           VerticalAlignment="Center"
           FontSize="11"
           FontWeight="SemiBold"
           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
           Text="ПАРАМЕТРЫ КОПИРОВАНИЯ" />
 
+        <!--  свёрнуто: что выбрано, одной строкой  -->
+        <TextBlock
+          x:Name="SummaryText"
+          Grid.Column="2"
+          Margin="12,0,0,0"
+          VerticalAlignment="Center"
+          FontSize="12"
+          TextTrimming="CharacterEllipsis"
+          Visibility="Collapsed" />
+
         <!--  исключения — у проводника здесь же, у вкладок они стоят у списка файлов  -->
         <ui:Button
           x:Name="ExcludeButton"
-          Grid.Column="1"
+          Grid.Column="3"
           Height="24"
           Padding="8,0"
           Click="OnExcludes"
@@ -66,6 +115,7 @@
         </ui:Button>
       </Grid>
 
+      <StackPanel x:Name="Body">
       <TextBlock
         x:Name="ModeTitle"
         Margin="0,0,0,2"
@@ -73,43 +123,81 @@
         Foreground="{DynamicResource TextFillColorSecondaryBrush}"
         Text="Отправлять на сервер:" />
 
-      <UniformGrid x:Name="ModeGrid" Columns="2" Rows="2">
+      <Grid x:Name="ModeGrid">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
         <RadioButton
           x:Name="AllChoice"
+          Grid.Row="0"
+          Grid.Column="0"
           Content="все отмеченные файлы"
           IsChecked="{Binding SendEverything, Mode=TwoWay}"
           Style="{StaticResource ChoiceStyle}" />
         <RadioButton
           x:Name="MissingChoice"
+          Grid.Row="0"
+          Grid.Column="1"
           Content="только те, которых нет на сервере"
           IsChecked="{Binding SendMissingOnly, Mode=TwoWay}"
           Style="{StaticResource ChoiceStyle}" />
         <RadioButton
           x:Name="DateChoice"
+          Grid.Row="1"
+          Grid.Column="0"
           Content="отличающиеся по дате изменения"
           IsChecked="{Binding SendByDate, Mode=TwoWay}"
           Style="{StaticResource ChoiceStyle}" />
         <RadioButton
           x:Name="HashChoice"
+          Grid.Row="1"
+          Grid.Column="1"
           Content="отличающиеся по контрольной сумме"
           IsChecked="{Binding SendByHash, Mode=TwoWay}"
           Style="{StaticResource ChoiceStyle}" />
-      </UniformGrid>
 
-      <Separator Margin="0,2,0,2" Opacity="0.4" />
+        <Separator
+          Grid.Row="2"
+          Grid.ColumnSpan="4"
+          Margin="0,2"
+          Opacity="0.4" />
 
-      <UniformGrid Columns="2" Rows="1">
         <CheckBox
           x:Name="DateOption"
+          Grid.Row="3"
+          Grid.Column="0"
           Content="сохранять дату изменения"
           IsChecked="{Binding PreserveTimestamps, Mode=TwoWay}"
           Style="{StaticResource OptionStyle}" />
         <CheckBox
           x:Name="VerifyOption"
+          Grid.Row="3"
+          Grid.Column="1"
           Content="после копирования сверять суммы"
           IsChecked="{Binding VerifyChecksums, Mode=TwoWay}"
           Style="{StaticResource OptionStyle}" />
-      </UniformGrid>
+        <!--  только у «Проводника»: там копирование может перезаписать файлы одним нажатием  -->
+        <CheckBox
+          x:Name="ReplaceOption"
+          Grid.Row="3"
+          Grid.Column="2"
+          Content="не спрашивать перед заменой"
+          IsChecked="{Binding ReplaceWithoutAsking, Mode=TwoWay}"
+          Style="{StaticResource OptionStyle}"
+          ToolTip="Сняли — копирование, которое перезапишет файлы в папке назначения, сначала спросит. Одинаковые файлы при сверке по дате или сумме заменой не считаются."
+          Visibility="Collapsed" />
+      </Grid>
+      </StackPanel>
     </StackPanel>
   </Border>
 </UserControl>

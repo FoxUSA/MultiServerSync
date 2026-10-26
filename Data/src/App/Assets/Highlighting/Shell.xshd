@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<!--  bash/sh: имена цветов — те же, что во встроенных описаниях, цвета подставляет CodeHighlighting  -->
+<SyntaxDefinition name="Shell" extensions=".sh;.bash;.zsh;.ksh;.bashrc;.profile;.bash_profile;.bash_aliases;.bash_logout;.zshrc" xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+  <Color name="Comment" foreground="Green" />
+  <Color name="String" foreground="Brown" />
+  <Color name="Variable" foreground="SteelBlue" />
+  <Color name="Keywords" foreground="Blue" />
+  <Color name="Command" foreground="DarkGoldenrod" />
+  <Color name="NumberLiteral" foreground="DarkGreen" />
+  <Color name="Punctuation" foreground="Gray" />
+
+  <RuleSet>
+    <Span color="Comment" begin="(?&lt;=^|[\s;|&amp;(])#" />
+
+    <Span color="String" multiline="true" begin="&quot;" end="&quot;">
+      <RuleSet>
+        <Span begin="\\" end="." />
+        <Rule color="Variable">\$\{[^}]*\}|\$\(|\$[\w@#?$!*-]</Rule>
+      </RuleSet>
+    </Span>
+    <Span color="String" multiline="true" begin="(?&lt;![\w\\])'" end="'" />
+    <Span color="String" begin="\$'" end="'">
+      <RuleSet>
+        <Span begin="\\" end="." />
+      </RuleSet>
+    </Span>
+
+    <Keywords color="Keywords">
+      <Word>if</Word><Word>then</Word><Word>else</Word><Word>elif</Word><Word>fi</Word>
+      <Word>for</Word><Word>while</Word><Word>until</Word><Word>do</Word><Word>done</Word>
+      <Word>case</Word><Word>esac</Word><Word>in</Word><Word>function</Word><Word>select</Word>
+      <Word>return</Word><Word>break</Word><Word>continue</Word><Word>exit</Word>
+      <Word>local</Word><Word>export</Word><Word>readonly</Word><Word>declare</Word><Word>typeset</Word>
+      <Word>unset</Word><Word>shift</Word><Word>source</Word><Word>trap</Word><Word>set</Word>
+    </Keywords>
+
+    <Keywords color="Command">
+      <Word>echo</Word><Word>printf</Word><Word>read</Word><Word>cd</Word><Word>test</Word><Word>eval</Word><Word>exec</Word>
+      <Word>sudo</Word><Word>systemctl</Word><Word>service</Word><Word>apt</Word><Word>apt-get</Word><Word>yum</Word><Word>dnf</Word>
+      <Word>grep</Word><Word>sed</Word><Word>awk</Word><Word>cat</Word><Word>cp</Word><Word>mv</Word><Word>rm</Word><Word>mkdir</Word>
+      <Word>chmod</Word><Word>chown</Word><Word>ln</Word><Word>find</Word><Word>xargs</Word><Word>tar</Word><Word>curl</Word><Word>wget</Word>
+      <Word>docker</Word><Word>git</Word><Word>kill</Word><Word>sleep</Word><Word>true</Word><Word>false</Word>
+    </Keywords>
+
+    <Rule color="Variable">\$\{[^}]*\}|\$[\w@#?$!*-]</Rule>
+    <Rule color="NumberLiteral">\b\d+\b</Rule>
+    <Rule color="Punctuation">[;|&amp;&lt;&gt;(){}\[\]]</Rule>
+  </RuleSet>
+</SyntaxDefinition>

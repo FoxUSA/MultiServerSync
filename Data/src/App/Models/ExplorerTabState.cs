@@ -38,6 +38,9 @@ public sealed class ExplorerPaneState
     /// <summary>Имя строки под курсором — по нему курсор встаёт на место.</summary>
     public string Focus { get; set; } = string.Empty;
 
+    /// <summary>Выделенное (отмеченное галочками) в открытой папке — сам выбор человека.</summary>
+    public List<string> Selected { get; set; } = new();
+
     public string SortKey { get; set; } = "Name";
 
     public bool SortDescending { get; set; }
@@ -56,6 +59,7 @@ public sealed class ExplorerPaneState
     {
         Path = Path,
         Focus = Focus,
+        Selected = Selected.ToList(),
         SortKey = SortKey,
         SortDescending = SortDescending,
         FileMask = FileMask,

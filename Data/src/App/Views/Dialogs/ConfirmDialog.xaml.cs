@@ -43,9 +43,29 @@ public partial class ConfirmDialog : FluentWindow
     /// То же с третьей кнопкой между согласием и отказом. 0 — отказ (и Esc, и крестик),
     /// 1 — кнопка действия, 2 — третья кнопка.
     /// </summary>
-    public static int Choose(Window? owner, string headline, string detail, string confirmText, string? extraText, string cancelText = "Отмена")
+    public static int Choose(Window? owner, string headline, string detail, string confirmText, string? extraText, string cancelText = "Отмена") =>
+        Choose(owner, headline, detail, confirmText, extraText, null, out _, cancelText);
+
+    /// <summary>То же с галочкой слева от кнопок — например, «больше не спрашивать».</summary>
+    /// <param name="optionText">Подпись галочки; пусто — галочки нет.</param>
+    /// <param name="option">Стояла ли галочка, когда окно закрыли.</param>
+    public static int Choose(
+        Window? owner,
+        string headline,
+        string detail,
+        string confirmText,
+        string? extraText,
+        string? optionText,
+        out bool option,
+        string cancelText = "Отмена")
     {
         var dialog = new ConfirmDialog(headline, detail, confirmText, extraText, cancelText);
+
+        if (!string.IsNullOrEmpty(optionText))
+        {
+            dialog.OptionBox.Content = optionText;
+            dialog.OptionBox.Visibility = Visibility.Visible;
+        }
 
         if (owner is { IsLoaded: true })
         {
@@ -57,6 +77,7 @@ public partial class ConfirmDialog : FluentWindow
         }
 
         dialog.ShowDialog();
+        option = dialog.OptionBox.IsChecked == true;
         return dialog._choice;
     }
 

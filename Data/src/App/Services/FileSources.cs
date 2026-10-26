@@ -106,6 +106,15 @@ public interface IFileSource
 
     /// <summary>SHA-256 файла.</summary>
     Task<string> HashAsync(string path, CancellationToken ct);
+
+    /// <summary>Файл целиком — для правки. Больше <paramref name="limit"/> байт — ошибка.</summary>
+    Task<byte[]> ReadFileAsync(string path, long limit);
+
+    /// <summary>
+    /// Новое содержимое в тот же файл: не пересоздаётся, поэтому владелец, права и ссылки
+    /// на него остаются как были.
+    /// </summary>
+    Task WriteFileAsync(string path, byte[] data);
 }
 
 // ── этот компьютер ─────────────────────────────────────────────────────────────
@@ -496,6 +505,19 @@ public sealed class LocalSource : IFileSource
 
     public Task<string> HashAsync(string path, CancellationToken ct) =>
         Task.Run(() => SshService.ComputeLocalSha256(path), ct);
+
+    public Task<byte[]> ReadFileAsync(string path, long limit) => Task.Run(() =>
+    {
+        var size = new FileInfo(path).Length;
+        return size > limit ? throw new IOException(TextFile.TooBig(size)) : File.ReadAllBytes(path);
+    });
+
+    public Task WriteFileAsync(string path, byte[] data) => Task.Run(() =>
+    {
+        // Truncate, а не Create: тот же файл, его права и атрибуты не трогаются
+        using var stream = new FileStream(path, FileMode.Truncate, FileAccess.Write, FileShare.Read);
+        stream.Write(data);
+    });
 }
 
 // ── сервер ─────────────────────────────────────────────────────────────────────
@@ -909,6 +931,49 @@ public sealed class RemoteSource(RemoteSession session) : IFileSource
         return hash.Length == 64
             ? hash
             : throw new IOException("сервер не посчитал сумму: " + (error.Split('\n').FirstOrDefault()?.Trim() ?? "нет ответа"));
+    }
+
+    public Task<byte[]> ReadFileAsync(string path, long limit) => Session.SftpAsync(sftp =>
+    {
+        var target = Normalize(path);
+        var size = sftp.GetAttributes(target).Size;
+        return size > limit ? throw new IOException(TextFile.TooBig(size)) : sftp.ReadAllBytes(target);
+    });
+
+    /// <summary>
+    /// Сначала целиком во временный файл в домашней папке (права 600 — до того, как в нём что-то
+    /// появится), потом на сервере <c>cat &gt;</c> поверх файла. Оборвётся связь — недописанным
+    /// останется временный файл, а не правленый конфиг; <c>cat</c> пишет в тот же файл, поэтому
+    /// владелец и права у него прежние.
+    /// </summary>
+    public async Task WriteFileAsync(string path, byte[] data)
+    {
+        var target = Normalize(path);
+        var temp = SshService.CombineRemote(Session.Home ?? "/tmp", ".mss-edit-" + Guid.NewGuid().ToString("N"));
+
+        await Session.SftpAsync(sftp =>
+        {
+            // Create, а не CreateNew: после обрыва сессия повторяет это же с тем же именем
+            using var stream = sftp.Open(temp, FileMode.Create, FileAccess.Write);
+            sftp.ChangePermissions(temp, 0b110_000_000);
+            stream.Write(data, 0, data.Length);
+            return true;
+        });
+
+        var script = $"t={SshService.ShellQuote(temp)}\n"
+            + $"cat -- \"$t\" > {SshService.ShellQuote(target)}\n"
+            + "rc=$?\nrm -f -- \"$t\"\n[ $rc -eq 0 ] || echo MSS-FAIL\n";
+        var (output, error) = await Session.ExecAsync(script);
+
+        Session.Invalidate(SshService.ParentRemote(target));
+
+        if (output.Contains("MSS-FAIL", StringComparison.Ordinal))
+        {
+            var reason = error.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault();
+            throw new IOException(reason?.Contains("Permission denied", StringComparison.OrdinalIgnoreCase) == true
+                ? "нет прав на запись в этот файл"
+                : reason ?? "сервер не записал файл");
+        }
     }
 
     // ── свойства: права и владелец меняются только здесь ──────────────────────

@@ -43,12 +43,18 @@ public sealed class OperationBatch : ObservableObject
     /// <summary>Название вкладки, из которой запущена операция — попадает в строки результатов.</summary>
     public string? Scope { get; set; }
 
+    /// <summary>Раздел вкладки — им помечаются записи журнала об этой операции.</summary>
+    public AppSection? Section { get; set; }
+
     /// <summary>
     /// Команда шла через sudo: её процессы принадлежат root, и kill к ним тоже нужен через sudo.
     /// </summary>
     public bool UsedSudo { get; set; }
 
     public bool HasResults => Results.Count > 0;
+
+    /// <summary>Когда начался последний прогон: команды после копирования показываются, только если они новее его.</summary>
+    public DateTime? StartedAt { get; private set; }
 
     /// <summary>
     /// Сервер, выбранный в таблице терминала, пока он показывал этот прогон. По нему автокопия
@@ -253,12 +259,16 @@ public sealed class OperationBatch : ObservableObject
 
         if (targets.Count == 0)
         {
-            AppLog.Warn(Results.Any(r => r.IsRunning)
+            AppLog.Hint(Results.Any(r => r.IsRunning)
                 ? "Сервер ещё не сообщил, каким процессом идёт команда — повторите через секунду."
-                : "Прерывать нечего: команда сейчас не выполняется.");
-
-            AppState.Current.RequestLog();
+                : "Прерывать нечего: команда сейчас не выполняется.",
+                LogLevel.Warning);
             return;
+        }
+
+        if (Section is { } section)
+        {
+            AppLog.Section = section;
         }
 
         AppLog.Info($"{what} — на {targets.Count} сервере(ах).");
@@ -503,6 +513,14 @@ public sealed class OperationBatch : ObservableObject
         var ct = _cts.Token;
 
         _finishedAt = null;
+        StartedAt = DateTime.Now;
+        Raise(nameof(StartedAt));
+
+        // итоги серверов придут в журнал уже после того, как человек мог уйти в другой раздел
+        if (Section is { } section)
+        {
+            AppLog.Section = section;
+        }
 
         IsRunning = true;
         Total = targets.Count;
@@ -510,7 +528,7 @@ public sealed class OperationBatch : ObservableObject
         SuccessCount = 0;
         FailedCount = 0;
 
-        AppLog.Info($"«{_operationName}» — старт на {Total} сервере(ах), одновременно до {maxParallel}.");
+        AppLog.Debug($"«{_operationName}» — старт на {Total} сервере(ах), одновременно до {maxParallel}.");
 
         using var gate = new SemaphoreSlim(Math.Max(1, maxParallel));
         var doneLock = new Lock();
@@ -531,7 +549,7 @@ public sealed class OperationBatch : ObservableObject
 
                 result.Status = OperationStatus.Running;
                 result.Message = "подключение…";
-                AppLog.Info($"старт: {_operationName}", result.Server.Display);
+                AppLog.Debug($"старт: {_operationName}", result.Server.Display);
 
                 await work(result.Server, result, ct);
 
@@ -547,7 +565,6 @@ public sealed class OperationBatch : ObservableObject
                 result.Status = OperationStatus.Cancelled;
                 result.Message = "отменено";
                 result.Append("Операция отменена.");
-                AppLog.Warn("отменено", result.Server.Display);
             }
             catch (Exception ex)
             {
@@ -581,8 +598,6 @@ public sealed class OperationBatch : ObservableObject
                         }
                     }
                 }
-
-                AppLog.Error(explained, result.Server.Display);
             }
             finally
             {
@@ -604,9 +619,10 @@ public sealed class OperationBatch : ObservableObject
                     }
                 }
 
-                if (result.Status == OperationStatus.Success)
+                // с одним сервером его итог и есть итог операции — он придёт ниже, один раз
+                if (Total > 1)
                 {
-                    AppLog.Success($"готово за {result.Duration.TotalSeconds:0.0} с", result.Server.Display);
+                    AppLog.ServerLine(LevelOf(result), Outcome(result), result.Server.Display);
                 }
 
                 gate.Release();
@@ -619,18 +635,50 @@ public sealed class OperationBatch : ObservableObject
         IsRunning = false;
         Raise(nameof(CanRetry));
 
-        if (FailedCount == 0)
+        if (targets.Count == 1)
         {
-            AppLog.Success($"«{_operationName}» — все {SuccessCount} сервер(ов) приняли успешно.");
+            var only = targets[0];
+            AppLog.Write(LevelOf(only), $"{_operationName}: {Outcome(only)}", only.Server.Display);
+        }
+        else if (FailedCount == 0)
+        {
+            AppLog.Success($"{_operationName}: все {SuccessCount} сервер(ов) — успешно.");
         }
         else
         {
             var bad = Results
                 .Where(r => r.Status is OperationStatus.Failed or OperationStatus.Cancelled)
-                .Select(r => r.Server.Display);
+                .Select(r => r.Server.PaneLabel);
 
-            AppLog.Error($"«{_operationName}» — успешно {SuccessCount} из {Total}, ошибок: {FailedCount}.");
-            AppLog.Error("Не прошли: " + string.Join(", ", bad));
+            AppLog.Error($"{_operationName}: успешно {SuccessCount} из {Total}. Не прошли: {string.Join(", ", bad)}.");
         }
     }
+
+    /// <summary>
+    /// Итог сервера словами — то же, что в его строке терминала: «получено 0 · такие же 3»,
+    /// а не «готово». По нему видно, что именно сделано, без похода в терминал.
+    /// </summary>
+    private static string Outcome(OperationResult result)
+    {
+        var text = result.Message.Trim().TrimEnd('…').Trim();
+
+        if (text.Length == 0)
+        {
+            text = result.Status switch
+            {
+                OperationStatus.Success => "выполнено",
+                OperationStatus.Cancelled => "отменено",
+                _ => "не выполнено",
+            };
+        }
+
+        return $"{text} ({result.Duration.TotalSeconds:0.0} с)";
+    }
+
+    private static LogLevel LevelOf(OperationResult result) => result.Status switch
+    {
+        OperationStatus.Success => LogLevel.Success,
+        OperationStatus.Cancelled => LogLevel.Warning,
+        _ => LogLevel.Error,
+    };
 }

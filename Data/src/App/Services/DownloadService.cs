@@ -61,7 +61,8 @@ public static class DownloadService
         bool verify,
         Action<string> report,
         CancellationToken ct,
-        Action<long, long>? progress = null)
+        Action<long, long>? progress = null,
+        ConfirmReplace? confirmReplace = null)
     {
         return Task.Run(
             () =>
@@ -105,6 +106,28 @@ public static class DownloadService
                     report($"символьные ссылки не скачиваются: {links}");
                 }
 
+                // что качать — до создания папок: если замену не подтвердят, здесь не должно
+                // появиться ничего нового
+                var (jobs, skipped, upToDate) = Decide(ssh, entries.Where(e => !e.IsDirectory).ToList(), localRoot, options, report, ct);
+                var replacing = jobs.Where(j => File.Exists(j.Local)).Select(j => j.Local).Order(StringComparer.OrdinalIgnoreCase).ToList();
+
+                if (confirmReplace is not null && replacing.Count > 0)
+                {
+                    switch (confirmReplace(server, replacing))
+                    {
+                        case ReplaceChoice.Cancel:
+                            report("скачивание отменено: замену файлов не подтвердили");
+                            throw new OperationCanceledException();
+
+                        case ReplaceChoice.Skip:
+                            var kept = replacing.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                            jobs.RemoveAll(j => kept.Contains(j.Local));
+                            skipped += replacing.Count;
+                            report($"не заменены, оставлены как есть: {replacing.Count}");
+                            break;
+                    }
+                }
+
                 Directory.CreateDirectory(localRoot);
 
                 // папки — сразу: пустые тоже должны появиться
@@ -120,8 +143,6 @@ public static class DownloadService
                         dirs++;
                     }
                 }
-
-                var (jobs, skipped, upToDate) = Decide(ssh, entries.Where(e => !e.IsDirectory).ToList(), localRoot, options, report, ct);
 
                 var received = new ConcurrentBag<Job>();
                 long bytes = 0;

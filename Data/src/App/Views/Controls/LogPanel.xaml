@@ -10,78 +10,117 @@
       <RowDefinition Height="*" />
     </Grid.RowDefinitions>
 
-    <StackPanel
-      Grid.Row="0"
-      Margin="0,0,0,6"
-      HorizontalAlignment="Right"
-      Orientation="Horizontal">
-      <CheckBox
-        x:Name="AutoScrollBox"
-        Margin="0,0,12,0"
-        VerticalAlignment="Center"
-        Content="Автопрокрутка"
-        FontSize="11"
-        IsChecked="True" />
-      <ui:Button
-        Margin="0,0,6,0"
-        Padding="8,2"
-        Click="OnCopy"
-        Content="Копировать"
-        FontSize="11"
-        Icon="{ui:SymbolIcon Copy24}" />
-      <ui:Button
-        Margin="0,0,6,0"
-        Padding="8,2"
-        Click="OnOpenFolder"
-        Content="Папка логов"
-        FontSize="11"
-        Icon="{ui:SymbolIcon FolderOpen24}" />
-      <ui:Button
-        Padding="8,2"
-        Click="OnClear"
-        Content="Очистить"
-        FontSize="11"
-        Icon="{ui:SymbolIcon Delete24}" />
-    </StackPanel>
+    <!--  стоит рядом с ярлыками «Терминал / Журнал» — отступ слева под них ставит окно (AlignToolbar)  -->
+    <Grid x:Name="ToolBar" Grid.Row="0" Margin="0,0,0,4">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
 
-    <!--  свежая запись всегда сверху  -->
-    <Border
+      <!--  записи одного раздела: «что было в проводнике» без копирования и команд вперемешку  -->
+      <ComboBox
+        x:Name="SectionFilter"
+        Grid.Column="0"
+        Margin="12,0,0,0"
+        VerticalAlignment="Center"
+        MinWidth="150"
+        Padding="8,2"
+        FontSize="11"
+        SelectionChanged="OnFilterChanged"
+        ToolTip="Показывать записи одного раздела">
+        <ComboBoxItem Content="Все разделы" IsSelected="True" />
+        <ComboBoxItem Content="Проводник" />
+        <ComboBoxItem Content="Копирование" />
+        <ComboBoxItem Content="Скачивание" />
+        <ComboBoxItem Content="Команда" />
+        <ComboBoxItem Content="Серверы" />
+        <ComboBoxItem Content="Настройки" />
+        <ComboBoxItem Content="Программа" />
+      </ComboBox>
+
+      <StackPanel
+        Grid.Column="2"
+        HorizontalAlignment="Right"
+        VerticalAlignment="Center"
+        Orientation="Horizontal">
+        <CheckBox
+          x:Name="AutoScrollBox"
+          Margin="0,0,12,0"
+          VerticalAlignment="Center"
+          Content="Автопрокрутка"
+          FontSize="11"
+          IsChecked="True" />
+        <ui:Button
+          Margin="0,0,4,0"
+          Padding="8,2"
+          Click="OnCopy"
+          Content="Копировать"
+          FontSize="11"
+          Icon="{ui:SymbolIcon Copy24}" />
+        <ui:Button
+          Margin="0,0,4,0"
+          Padding="8,2"
+          Click="OnOpenFolder"
+          Content="Папка логов"
+          FontSize="11"
+          Icon="{ui:SymbolIcon FolderOpen24}" />
+        <ui:Button
+          Padding="8,2"
+          Click="OnClear"
+          Content="Очистить"
+          FontSize="11"
+          Icon="{ui:SymbolIcon Delete24}" />
+      </StackPanel>
+    </Grid>
+
+    <!--  свежая запись всегда сверху; раздел — где сделано, «Где» — сервер, вкладка или компьютер  -->
+    <DataGrid
+      x:Name="LogList"
       Grid.Row="1"
-      BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-      BorderThickness="1">
-      <ListBox
-        x:Name="LogList"
-        Margin="4"
-        Background="Transparent"
-        BorderThickness="0"
-        ScrollViewer.HorizontalScrollBarVisibility="Auto"
-        VirtualizingPanel.IsVirtualizing="True"
-        VirtualizingPanel.VirtualizationMode="Recycling">
-        <ListBox.ItemContainerStyle>
-          <Style TargetType="ListBoxItem">
-            <Setter Property="Padding" Value="2,0" />
-            <Setter Property="MinHeight" Value="0" />
-          </Style>
-        </ListBox.ItemContainerStyle>
-        <ListBox.ItemTemplate>
-          <DataTemplate>
-            <StackPanel Orientation="Horizontal">
-              <TextBlock
-                Margin="0,0,8,0"
-                FontFamily="Consolas"
-                FontSize="12"
-                Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                Text="{Binding TimeText}" />
-              <TextBlock
-                FontFamily="Consolas"
-                FontSize="12"
-                Foreground="{Binding Brush}"
-                Text="{Binding Line}"
-                TextWrapping="NoWrap" />
-            </StackPanel>
-          </DataTemplate>
-        </ListBox.ItemTemplate>
-      </ListBox>
-    </Border>
+      CellStyle="{StaticResource AppDataGridCellStyle}"
+      ColumnHeaderStyle="{StaticResource AppColumnHeaderStyle}"
+      RowHeight="22"
+      RowStyle="{StaticResource AppDataGridRowStyle}"
+      Style="{StaticResource AppDataGridStyle}"
+      VirtualizingPanel.IsVirtualizing="True"
+      VirtualizingPanel.VirtualizationMode="Recycling">
+      <DataGrid.Columns>
+        <DataGridTextColumn
+          Binding="{Binding TimeText}"
+          CanUserSort="False"
+          FontFamily="Consolas"
+          Header="Время" />
+        <DataGridTextColumn
+          Binding="{Binding SectionText}"
+          CanUserSort="False"
+          Header="Раздел" />
+        <DataGridTextColumn
+          MaxWidth="240"
+          Binding="{Binding ScopeText}"
+          CanUserSort="False"
+          Header="Где">
+          <DataGridTextColumn.ElementStyle>
+            <Style TargetType="TextBlock">
+              <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+              <Setter Property="ToolTip" Value="{Binding ScopeText}" />
+            </Style>
+          </DataGridTextColumn.ElementStyle>
+        </DataGridTextColumn>
+        <DataGridTextColumn
+          Width="*"
+          Binding="{Binding Text}"
+          CanUserSort="False"
+          Header="Что сделано">
+          <DataGridTextColumn.ElementStyle>
+            <Style TargetType="TextBlock">
+              <Setter Property="Foreground" Value="{Binding Brush}" />
+              <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+              <Setter Property="ToolTip" Value="{Binding Text}" />
+            </Style>
+          </DataGridTextColumn.ElementStyle>
+        </DataGridTextColumn>
+      </DataGrid.Columns>
+    </DataGrid>
   </Grid>
 </UserControl>

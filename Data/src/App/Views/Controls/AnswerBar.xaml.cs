@@ -54,7 +54,7 @@ public partial class AnswerBar : UserControl
 
             if (targets.Count == 0)
             {
-                AppLog.Warn("Отвечать некому — команда уже ни на одном сервере не идёт.");
+                AppLog.Hint("Отвечать некому — команда уже ни на одном сервере не идёт.", LogLevel.Warning);
                 return;
             }
 
@@ -65,13 +65,13 @@ public partial class AnswerBar : UserControl
         {
             if (DataContext is not OperationResult { Input: { } input } result)
             {
-                AppLog.Warn("Сначала выберите сервер, где идёт команда.");
+                AppLog.Hint("Сначала выберите сервер, где идёт команда.", LogLevel.Warning);
                 return;
             }
 
             if (!input.Send(text))
             {
-                AppLog.Warn($"{result.Server.PaneLabel}: команда уже не принимает ввод.");
+                AppLog.Hint($"{result.Server.PaneLabel}: команда уже не принимает ввод.", LogLevel.Warning);
                 return;
             }
 

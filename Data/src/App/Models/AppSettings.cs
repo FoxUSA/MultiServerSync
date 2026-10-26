@@ -59,25 +59,6 @@ public sealed class AppSettings
 
     public double WindowHeight { get; set; } = 820;
 
-    /// <summary>Размер окна доски вкладок: кирпичи в нём раскладываются по его ширине.</summary>
-    public double BoardWidth { get; set; } = 760;
-
-    public double BoardHeight { get; set; } = 560;
-
-    /// <summary>
-    /// Краткие ярлыки вкладок: только название и статус, без счётчиков серверов и отметок,
-    /// маленькими кирпичиками в два ряда. У каждого раздела свой выбор.
-    /// </summary>
-    public bool CompactTabsServers { get; set; }
-
-    public bool CompactTabsCommand { get; set; }
-
-    public bool CompactTabsFiles { get; set; }
-
-    public bool CompactTabsDownload { get; set; }
-
-    public bool CompactTabsExplorer { get; set; }
-
     /// <summary>Закладки папок проводника на компьютере — общие для всех вкладок.</summary>
     public List<string> ExplorerLocalBookmarks { get; set; } = new();
 
@@ -170,6 +151,14 @@ public sealed class AppSettings
     /// по заголовку, переживает смену вкладки и закрытие программы.
     /// </summary>
     public Dictionary<string, string> GridSort { get; set; } = new();
+
+    /// <summary>Параметры копирования свёрнуты в одну строку: у «Копирования» и у «Скачивания» — свой выбор.</summary>
+    public bool UploadOptionsFolded { get; set; }
+
+    public bool DownloadOptionsFolded { get; set; }
+
+    /// <summary>Порядок кнопок разделов, переставленный мышью: имена кнопок слева направо.</summary>
+    public List<string> SectionOrder { get; set; } = new();
 
     /// <summary>Размер отдельного окна вывода — оно открывается таким же, каким его закрыли.</summary>
     public double OutputWidth { get; set; } = 900;
