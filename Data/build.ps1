@@ -46,8 +46,9 @@ $workspace = Split-Path -Parent $root
 $userDataDir = Join-Path $root 'UserData'
 $manifestPath = Join-Path $dataDir 'manifest.json'
 $assetsDir = Join-Path $dataDir 'src\App\Assets'
-$appProj = Join-Path $dataDir 'src\App\MultiServerSync.csproj'
-$launcherProj = Join-Path $dataDir 'src\Launcher\Launcher.csproj'
+$srcStage = Join-Path $env:TEMP 'multiserversync-src'
+$appProj = Join-Path $srcStage 'App\MultiServerSync.csproj'
+$launcherProj = Join-Path $srcStage 'Launcher\Launcher.csproj'
 $appOut = Join-Path $env:TEMP 'multiserversync-app'
 $launcherOut = Join-Path $env:TEMP 'multiserversync-launcher'
 $packageStage = Join-Path $env:TEMP 'multiserversync-package'
@@ -82,14 +83,16 @@ Write-Host "== Сборка MultiServerSync $Version ($Configuration) ==" -Foreg
 
 New-Item -ItemType Directory -Force $userDataDir | Out-Null
 
-Write-Host "Очистка Data (кроме: $($keep -join ', '))..."
-Get-ChildItem $dataDir -Force |
-    Where-Object { $keep -notcontains $_.Name } |
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+# Собирается копия исходников во временной папке, а не сами исходники: они лежат в Dropbox и
+# открыты в VS Code, а его расширение C# пересобирает проект в тот же obj прямо во время сборки.
+# 27.10.2026 из-за этого второй проход разметки WPF через раз терял BAML (app.baml, FilePane…),
+# и программа падала на старте. Публиковать в Data тоже нельзя: она родительская для src\App,
+# и WPF ломает тот же проход. Поэтому: копия → сборка → проверка → и только потом замена Data.
+Write-Host "Копия исходников для сборки..."
+if (Test-Path $srcStage) { Remove-Item $srcStage -Recurse -Force }
+robocopy (Join-Path $dataDir 'src') $srcStage /MIR /XD bin obj .vs /XF '*_wpftmp.csproj' /NFL /NDL /NJH /NJS /NP | Out-Null
+if ($LASTEXITCODE -ge 8) { throw "Исходники не скопировались во временную папку (robocopy $LASTEXITCODE)." }
 
-# Публиковать напрямую в Data нельзя: Data — родительский каталог для Data\src\App,
-# и тогда WPF ломает второй проход markup-компиляции (BAML страниц не попадает в сборку,
-# приложение молча стартует без окна). Поэтому публикуем во временную папку и копируем.
 Write-Host "Публикация программы..."
 if (Test-Path $appOut) { Remove-Item $appOut -Recurse -Force }
 dotnet publish $appProj -c $Configuration -o $appOut --nologo -p:Version=$Version
@@ -100,13 +103,32 @@ if ((Get-Item $appDll).Length -lt 60kb) {
     throw "Сборка получилась подозрительно маленькой ($((Get-Item $appDll).Length) байт) — XAML не скомпилировался."
 }
 
-Write-Host "Копирование программы в Data..."
-Copy-Item (Join-Path $appOut '*') $dataDir -Recurse -Force
+# Размер не ловит, когда выпала одна разметка: 27.10.2026 сборка вышла без app.baml и
+# программа падала на старте («Не удается найти ресурс app.xaml»). Имена ресурсов в dll — UTF-16.
+$dllBytes = [IO.File]::ReadAllBytes($appDll)
+$dllText = [Text.Encoding]::Unicode.GetString($dllBytes) + [Text.Encoding]::Unicode.GetString($dllBytes, 1, $dllBytes.Length - 1)
+$appSrc = Join-Path $srcStage 'App'
+$missing = Get-ChildItem $appSrc -Recurse -Filter '*.xaml' |
+    Where-Object { $_.FullName -notmatch '\\(bin|obj)\\' } |
+    ForEach-Object { ($_.FullName.Substring($appSrc.Length + 1).Replace('\', '/').ToLowerInvariant()) -replace '\.xaml$', '.baml' } |
+    Where-Object { -not $dllText.Contains($_) }
+if ($missing) {
+    throw "В сборке нет разметки: $($missing -join ', ') — программа не запустится. Data не тронута."
+}
 
 Write-Host "Публикация лаунчера..."
 if (Test-Path $launcherOut) { Remove-Item $launcherOut -Recurse -Force }
 dotnet publish $launcherProj -c $Configuration -o $launcherOut --nologo -p:Version=$Version
 if ($LASTEXITCODE -ne 0) { throw "Сборка лаунчера завершилась с ошибкой ($LASTEXITCODE)." }
+
+# всё собралось и проверено — теперь Data можно заменить; до этого места она цела
+Write-Host "Очистка Data (кроме: $($keep -join ', '))..."
+Get-ChildItem $dataDir -Force |
+    Where-Object { $keep -notcontains $_.Name } |
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+Write-Host "Копирование программы в Data..."
+Copy-Item (Join-Path $appOut '*') $dataDir -Recurse -Force
 
 Copy-Item (Join-Path $launcherOut 'MultiServerSync.exe') $root -Force
 

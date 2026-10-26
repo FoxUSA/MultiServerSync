@@ -13,6 +13,9 @@ public sealed class WorkspaceState
     /// <summary>Первая вкладка: её нельзя закрыть.</summary>
     public bool IsMain { get; set; }
 
+    /// <summary>Ярлык убран в архив под «+». Сама вкладка та же: меняется только, где лежит ярлык.</summary>
+    public bool IsArchived { get; set; }
+
     /// <summary>Серверы, отмеченные в разделе «Копирование».</summary>
     public List<string> SelectedServerIds { get; set; } = new();
 

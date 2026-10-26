@@ -84,14 +84,11 @@ public sealed class AppSettings
     public bool PaneShowUserFiles { get; set; }
 
     /// <summary>
-    /// Высота нижней панели. При окне по умолчанию (820) панель повыше срезала
+    /// Высота нижней панели — одна на все разделы. При окне по умолчанию (820) панель повыше срезала
     /// кнопки запуска на странице копирования, поэтому здесь ровно столько,
     /// чтобы страница помещалась целиком.
     /// </summary>
     public double LogPanelHeight { get; set; } = 220;
-
-    /// <summary>Своя высота нижней панели в проводнике; 0 — пятая часть окна, чтобы панелям было где развернуться.</summary>
-    public double ExplorerLogPanelHeight { get; set; }
 
     public bool LogPanelVisible { get; set; } = true;
 

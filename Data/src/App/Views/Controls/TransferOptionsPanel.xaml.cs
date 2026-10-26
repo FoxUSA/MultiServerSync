@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using MultiServerSync.Services;
 using MultiServerSync.Views.Dialogs;
 
@@ -83,6 +84,26 @@ public partial class TransferOptionsPanel : UserControl
         ApplyFold();
     }
 
+    /// <summary>Надпись «Параметры копирования» — как стрелка: сворачивает и разворачивает.</summary>
+    private void OnHeaderClick(object sender, MouseButtonEventArgs e)
+    {
+        if (CanFold)
+        {
+            e.Handled = true;
+            OnFold(sender, e);
+        }
+    }
+
+    /// <summary>Свёрнутая строка раскрывается щелчком в любом её месте; сворачивается — только стрелкой или надписью.</summary>
+    private void OnFrameClick(object sender, MouseButtonEventArgs e)
+    {
+        if (CanFold && Folded)
+        {
+            e.Handled = true;
+            OnFold(sender, e);
+        }
+    }
+
     /// <summary>Свёрнуто — шапка и строка выбранного; развёрнуто — все параметры.</summary>
     private void ApplyFold()
     {
@@ -94,6 +115,9 @@ public partial class TransferOptionsPanel : UserControl
         Body.Visibility = folded ? Visibility.Collapsed : Visibility.Visible;
         SummaryText.Visibility = folded ? Visibility.Visible : Visibility.Collapsed;
         HeaderRow.Margin = folded ? new Thickness(0) : new Thickness(0, 0, 0, 4);
+        Frame.Cursor = folded ? Cursors.Hand : null;
+        Frame.ToolTip = folded ? "Развернуть параметры" : null;
+        HeaderText.Cursor = CanFold ? Cursors.Hand : null;
 
         UpdateSummary();
     }

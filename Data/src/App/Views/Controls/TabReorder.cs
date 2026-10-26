@@ -53,7 +53,14 @@ public sealed class TabReorder
     private readonly Func<DependencyObject?, FrameworkElement?> _containerOf;
     private readonly Func<FrameworkElement, object?> _itemOf;
     private readonly Func<object, bool> _canDrag;
-    private readonly int _fixedCount;
+    private int _fixedCount;
+
+    /// <summary>Сколько первых элементов закреплено; лента архива — без закреплённых.</summary>
+    public int FixedCount
+    {
+        get => _fixedCount;
+        set => _fixedCount = value;
+    }
     private readonly Action<object, int> _move;
 
     /// <summary>
@@ -179,6 +186,41 @@ public sealed class TabReorder
         host.PreviewKeyDown += OnKeyDown;
     }
 
+    /// <summary>
+    /// Куда ещё можно бросить элемент, кроме места в ряду, — значок архива вкладок. Бросили
+    /// на него — вместо перестановки <see cref="DroppedOut"/>.
+    /// </summary>
+    public FrameworkElement? OutTarget { get; set; }
+
+    public Action<object>? DroppedOut { get; set; }
+
+    /// <summary>Мышь с элементом над <see cref="OutTarget"/> или ушла с него — подсветить цель.</summary>
+    public Action<bool>? OverOutTarget { get; set; }
+
+    private bool _overOut;
+
+    private bool MouseOverOut =>
+        OutTarget is { IsVisible: true } target && new Rect(target.RenderSize).Contains(Mouse.GetPosition(target));
+
+    private void UpdateOverOut()
+    {
+        var over = _dragging && MouseOverOut;
+
+        if (over == _overOut)
+        {
+            return;
+        }
+
+        _overOut = over;
+        OverOutTarget?.Invoke(over);
+
+        if (_items.Count > _from)
+        {
+            // над целью ярлык бледнеет: отпустишь — уйдёт туда, а не на место в ряду
+            _items[_from].Opacity = over ? 0.5 : 1;
+        }
+    }
+
     /// <summary>Относительно чего меряется ход мыши: рамка ленты или, если её нет, сама панель.</summary>
     private FrameworkElement Frame => _scroller ?? _host;
 
@@ -225,6 +267,7 @@ public sealed class TabReorder
         {
             e.Handled = true;
             Follow(e.GetPosition(_panel));
+            UpdateOverOut();
             return;
         }
 
@@ -479,6 +522,16 @@ public sealed class TabReorder
         var from = _from;
         var target = _target;
 
+        // бросили на значок архива: ряд возвращается как был, элемент уходит туда
+        if (MouseOverOut && item is not null && DroppedOut is { } dropOut)
+        {
+            AppLog.Debug($"«{Label(item)}» брошен на {OutTarget?.Name}.");
+            Stop();
+            Reset();
+            dropOut(item);
+            return;
+        }
+
         AppLog.Debug(target == from
             ? $"«{Label(item)}» отпущен на своём месте ({from + 1})."
             : $"«{Label(item)}» отпущен: место {from + 1} → {target + 1}.");
@@ -527,6 +580,7 @@ public sealed class TabReorder
     private void Stop()
     {
         _dragging = false;
+        UpdateOverOut();
         _edgeTimer.Stop();
 
         if (_host.IsMouseCaptured)
@@ -543,6 +597,7 @@ public sealed class TabReorder
 
             container.ClearValue(Panel.ZIndexProperty);
             container.ClearValue(UIElement.EffectProperty);
+            container.ClearValue(UIElement.OpacityProperty);
         }
 
         _items = [];

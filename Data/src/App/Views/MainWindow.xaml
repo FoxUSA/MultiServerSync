@@ -339,10 +339,10 @@
       </Setter>
     </Style>
 
-    <!--  стрелка перехода между вкладкой копирования и её личными командами  -->
+    <!--  стрелка перехода между вкладкой копирования и её личными командами; размером ровно с крестик  -->
     <Style x:Key="TabArrowButtonStyle" TargetType="Button">
-      <Setter Property="Width" Value="22" />
-      <Setter Property="Height" Value="22" />
+      <Setter Property="Width" Value="18" />
+      <Setter Property="Height" Value="18" />
       <Setter Property="Focusable" Value="False" />
       <Setter Property="Cursor" Value="Hand" />
       <Setter Property="Background" Value="Transparent" />
@@ -358,9 +358,11 @@
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
             <ControlTemplate.Triggers>
+              <!--  под мышью — как крестик, только зелёным: на синем белая стрелка терялась. Зелёный тёмный, чтобы белое читалось  -->
               <Trigger Property="IsMouseOver" Value="True">
                 <Setter Property="Opacity" Value="1" />
-                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}" />
+                <Setter Property="Foreground" Value="White" />
+                <Setter TargetName="Bd" Property="Background" Value="#2EA043" />
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -592,7 +594,7 @@
           Style="{StaticResource TabArrowButtonStyle}"
           ToolTip="Личные команды вкладки копирования — перейти к ней"
           Visibility="Collapsed">
-          <ui:SymbolIcon FontSize="14" Symbol="ArrowLeft24" />
+          <ui:SymbolIcon FontSize="10" Symbol="ArrowLeft24" />
         </Button>
 
         <Ellipse
@@ -617,7 +619,7 @@
             Style="{StaticResource TabArrowButtonStyle}"
             ToolTip="Перейти в личные команды этой вкладки"
             Visibility="Collapsed">
-            <ui:SymbolIcon FontSize="14" Symbol="ArrowRight24" />
+            <ui:SymbolIcon FontSize="10" Symbol="ArrowRight24" />
           </Button>
           <Button
             x:Name="Close"
@@ -768,11 +770,12 @@
             Icon="{ui:SymbolIcon Globe24}"
             ToolTip="https://byfox.dev/multiserversync/ — страница утилиты" />
 
-          <!--  настройки и выход — кнопками с рамкой  -->
+          <!--  настройки и выход — с рамкой, но без фона, как шарик: фон только под мышью  -->
           <ui:Button
             Height="28"
             Margin="8,0,0,0"
             Padding="10,0"
+            Appearance="Transparent"
             Click="OnOpenSettings"
             Content="Настройки"
             Icon="{ui:SymbolIcon Settings24}"
@@ -793,7 +796,7 @@
                 <Border
                   x:Name="Bd"
                   Padding="{TemplateBinding Padding}"
-                  Background="{DynamicResource ControlFillColorDefaultBrush}"
+                  Background="Transparent"
                   BorderBrush="{DynamicResource ControlElevationBorderBrush}"
                   BorderThickness="1"
                   CornerRadius="4">
@@ -848,20 +851,61 @@
           <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <!--  «+» той же высоты, что ярлыки, и во все их ряды: отступы те же, что у ярлыка  -->
-        <ui:Button
+        <!--  «+» и под ним архив (щелчок переключает ленту на архивные вкладки и обратно):
+              вместе ровно в высоту ярлыков, сколько бы рядов их ни было;
+              отступы те же, что у ярлыка. У наборов серверов архива нет — там «+» во всю высоту  -->
+        <Grid
           Grid.Column="0"
           Width="44"
-          Margin="0,2,4,2"
-          Padding="0"
-          HorizontalContentAlignment="Center"
-          VerticalAlignment="Stretch"
-          Click="OnAddTab"
-          ToolTip="Новая вкладка (Ctrl+T)">
-          <ui:Button.Icon>
-            <ui:SymbolIcon FontSize="16" Symbol="Add24" />
-          </ui:Button.Icon>
-        </ui:Button>
+          Margin="0,2,4,2">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition x:Name="ArchiveRow" Height="*" />
+          </Grid.RowDefinitions>
+
+          <ui:Button
+            Grid.Row="0"
+            MinHeight="0"
+            Padding="0"
+            HorizontalAlignment="Stretch"
+            HorizontalContentAlignment="Center"
+            VerticalAlignment="Stretch"
+            Click="OnAddTab"
+            ToolTip="Новая вкладка (Ctrl+T)">
+            <ui:Button.Icon>
+              <ui:SymbolIcon FontSize="14" Symbol="Add24" />
+            </ui:Button.Icon>
+          </ui:Button>
+
+          <ui:Button
+            x:Name="ArchiveButton"
+            Grid.Row="1"
+            MinHeight="0"
+            Margin="0,2,0,0"
+            Padding="0"
+            HorizontalAlignment="Stretch"
+            HorizontalContentAlignment="Center"
+            VerticalAlignment="Stretch"
+            Click="OnArchiveClick"
+            RenderTransformOrigin="0.5,0.5"
+            >
+            <ui:Button.RenderTransform>
+              <ScaleTransform />
+            </ui:Button.RenderTransform>
+            <StackPanel Orientation="Horizontal">
+              <ui:SymbolIcon
+                x:Name="ArchiveIcon"
+                FontSize="14"
+                Symbol="Archive24" />
+              <TextBlock
+                x:Name="ArchiveCount"
+                Margin="3,0,0,0"
+                VerticalAlignment="Center"
+                FontSize="10"
+                FontWeight="SemiBold" />
+            </StackPanel>
+          </ui:Button>
+        </Grid>
 
         <!--  наборы серверов: новый — пустой, закрытие уносит его серверы  -->
         <ListBox
@@ -891,7 +935,6 @@
           ItemContainerStyle="{StaticResource WorkspaceTabStyle}"
           ItemTemplate="{StaticResource CompactTabTemplate}"
           ItemsPanel="{StaticResource TabsPanel}"
-          ItemsSource="{Binding State.Tabs}"
           MouseDoubleClick="OnRenameTab"
           PreviewMouseRightButtonDown="OnTabStripRightDown"
           ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -1279,5 +1322,12 @@
         </StackPanel>
       </Grid>
     </Border>
+
+    <!--  слой для полёта ярлыка в архив: поверх всего окна, мышь сквозь него  -->
+    <Canvas
+      x:Name="FxLayer"
+      Grid.RowSpan="6"
+      Panel.ZIndex="1000"
+      IsHitTestVisible="False" />
   </Grid>
 </ui:FluentWindow>

@@ -50,7 +50,7 @@ Add your servers once. After that: check the ones you need, pick files or type a
 - **Commands and scripts** — several commands in one tab run in turn: the next one after the previous succeeds. A script of any length goes whole through stdin; answer `[Y/n]` from the app, the sudo password is supplied for you. Command sets go to favourites.
 - **Each server's output** — live and separate, highlighted, with a zoom for larger text. Copy progress with time left; one **Stop** button.
 - **See what's wrong** — a persistent notice when commands after copying won't run: the tab is empty or the servers differ. Errors in plain words.
-- **Tabs for different jobs** — each tab has its own servers, files, path and command. **Run everywhere** starts all tabs at once; the result shows on the tab labels.
+- **Tabs for different jobs** — each tab has its own servers, files, path and command. **Run everywhere** starts all tabs at once; the result shows on the tab labels. Tabs you rarely need go to an archive strip with a right-click and keep working there.
 - **Connection** — OpenSSH and PuTTY keys or a password, login through a jump host, import from `~/.ssh/config`, PuTTY and WinSCP. The server's host key is remembered — a swap gets noticed.
 - **Passwords encrypted** — under your Windows account or with a master password.
 - **Smart mode** — asks if a command or copy is about to run on a server it doesn't usually go to.

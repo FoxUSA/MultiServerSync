@@ -1190,6 +1190,51 @@ public sealed class AppState : ObservableObject
         return true;
     }
 
+    /// <summary>
+    /// Ярлык — в архив или из архива обратно в основную ленту. Вкладка не меняется ничем, кроме
+    /// того, в какой ленте её ярлык. Была открыта — открывается соседняя в той же ленте, а если
+    /// там больше никого, вкладка остаётся открытой и лента уходит вслед за ней.
+    /// </summary>
+    public bool SetArchived(Workspace workspace, bool archived)
+    {
+        if (archived && workspace.IsMain)
+        {
+            AppLog.Hint("Основная вкладка в архив не убирается.", LogLevel.Warning);
+            return false;
+        }
+
+        var tabs = TabsOf(workspace);
+        var index = tabs.IndexOf(workspace);
+
+        if (index < 0 || workspace.IsArchived == archived)
+        {
+            return false;
+        }
+
+        var wasOpen = ReferenceEquals(_active, workspace) || ReferenceEquals(_activeCommand, workspace)
+            || ReferenceEquals(_activeDownload, workspace) || ReferenceEquals(_activeExplorer, workspace);
+
+        // сначала открыть соседнюю в той же ленте, потом перенести ярлык: лента не остаётся без выбранного
+        if (wasOpen
+            && (tabs.Take(index).LastOrDefault(t => t.IsArchived == workspace.IsArchived)
+                ?? tabs.Skip(index + 1).FirstOrDefault(t => t.IsArchived == workspace.IsArchived)) is { } next)
+        {
+            ActiveWorkspace = next;
+        }
+
+        workspace.IsArchived = archived;
+
+        SaveWorkspaces();
+        AppLog.Hint(archived
+            ? $"«{workspace.Title}» — в архиве. Вкладка работает как прежде."
+            : $"«{workspace.Title}» — снова в основной ленте.");
+        ArchiveChanged?.Invoke(workspace);
+        return true;
+    }
+
+    /// <summary>Ярлык перешёл между основной лентой и архивом — окно перестраивает ленту.</summary>
+    public event Action<Workspace>? ArchiveChanged;
+
     public void SaveWorkspaces()
     {
         if (_loading || !TabsLoaded)

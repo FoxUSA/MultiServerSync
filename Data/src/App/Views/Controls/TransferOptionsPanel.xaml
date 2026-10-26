@@ -33,10 +33,13 @@
   </UserControl.Resources>
 
   <Border
+    x:Name="Frame"
     Padding="12,8"
+    Background="Transparent"
     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
     BorderThickness="1"
-    CornerRadius="4">
+    CornerRadius="4"
+    MouseLeftButtonUp="OnFrameClick">
     <StackPanel>
       <!--  шапка: у «Копирования» и «Скачивания» щелчок сворачивает блок в одну строку,
             где остаются только выбранные параметры  -->
@@ -84,6 +87,7 @@
         <TextBlock
           x:Name="HeaderText"
           Grid.Column="1"
+          MouseLeftButtonUp="OnHeaderClick"
           VerticalAlignment="Center"
           FontSize="11"
           FontWeight="SemiBold"

@@ -1,6 +1,12 @@
-﻿using System.ComponentModel;
+﻿using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Windows;
+using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Media.Imaging;
 using MultiServerSync.Core;
 using MultiServerSync.Services;
 using MultiServerSync.Views.Dialogs;
@@ -31,7 +37,6 @@ public partial class MainWindow : FluentWindow
 
         BottomRow.Height = new GridLength(Math.Max(0, settings.LogPanelHeight));
         SetBottomVisible(settings.LogPanelVisible);
-        SwitchBottomHeight();
 
         // умный режим спрашивает посреди окна; фокус на «Отменить», так что случайный Enter не запустит
         SmartSwitch.IsChecked = settings.SmartMode;
@@ -53,7 +58,14 @@ public partial class MainWindow : FluentWindow
         // ярлык вкладки ведут от состояния, а не наоборот: двусторонняя привязка SelectedItem
         // умеет записать в ActiveWorkspace свой null при перестроении списка, и тогда текущей
         // становится первая вкладка — переход по разделам слева сбивал открытую вкладку
-        AppState.Current.ActiveWorkspaceChanged += workspace => TabStrip.SelectedItem = workspace;
+        AppState.Current.ActiveWorkspaceChanged += workspace =>
+        {
+            // открыли вкладку из архива (или из основной ленты) — лента показывает её сторону
+            (workspace.IsArchived ? _lastArchived : _lastMain)[State.TabsOf(workspace)] = workspace;
+            FollowActive();
+            TabStrip.SelectedItem = workspace;
+        };
+        AppState.Current.ArchiveChanged += _ => FollowActive();
 
         // проводник просит открыть вкладку другого раздела — например, команду «здесь»
         AppState.Current.TabShowRequested += tab => ShowTab(tab, State.SectionOfTab(tab) switch
@@ -446,19 +458,39 @@ public partial class MainWindow : FluentWindow
             },
             grabButtons: true);
 
-        _ = new Controls.TabReorder(
+        _tabReorder = new Controls.TabReorder(
             TabStrip,
             null,
             item => item is Workspace { IsMain: false },
             fixedCount: 1,
             (item, to) =>
             {
-                if (item is Workspace workspace && State.MoveWorkspace(workspace, to))
+                // место в ленте → место в списке раздела: архивных в ленте нет, а в списке они есть
+                if (item is Workspace workspace
+                    && TabStrip.Items.Count > 0
+                    && TabStrip.Items[Math.Min(to, TabStrip.Items.Count - 1)] is Workspace anchor
+                    && State.MoveWorkspace(workspace, State.Tabs.IndexOf(anchor)))
                 {
                     // перестановка сбивает выделение списка — возвращаем его на текущую вкладку
                     TabStrip.SelectedItem = State.ActiveWorkspace;
                 }
-            });
+            })
+        {
+            // ярлык, брошенный на значок, уходит в другую ленту: из основной — в архив, из архива — обратно
+            OutTarget = ArchiveButton,
+            DroppedOut = item =>
+            {
+                if (item is Workspace workspace && State.SetArchived(workspace, !workspace.IsArchived))
+                {
+                    PulseArchive();
+                }
+            },
+            OverOutTarget = over =>
+            {
+                _dropOver = over;
+                UpdateArchiveButton();
+            },
+        };
 
         _ = new Controls.TabReorder(
             SetStrip,
@@ -506,12 +538,16 @@ public partial class MainWindow : FluentWindow
         {
             if (e.PropertyName == nameof(AppState.Section))
             {
-                SwitchBottomHeight();
                 ApplyServerPane();
+            }
+            else if (e.PropertyName == nameof(AppState.Tabs))
+            {
+                ShowTabs();
             }
         };
 
         ApplyServerPane();
+        ShowTabs();
     }
 
     /// <summary>У «Проводника» карточки «Целевые сервера» нет: сервер выбирается в самой правой панели.</summary>
@@ -548,8 +584,237 @@ public partial class MainWindow : FluentWindow
         BottomRow.Height = new GridLength(Math.Max(0, bottom - delta * bottom / (page + bottom)));
     }
 
-    /// <summary>Правый щелчок по ярлыку вкладку не переключает.</summary>
-    private void OnTabStripRightDown(object sender, MouseButtonEventArgs e) => e.Handled = true;
+    /// <summary>
+    /// Правый щелчок по ярлыку вкладку не переключает, а переносит её в другую ленту: из основной —
+    /// в архив, из архива — обратно. Ярлык улетает к значку. У наборов серверов архива нет.
+    /// </summary>
+    private void OnTabStripRightDown(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+
+        if (!ReferenceEquals(sender, TabStrip)
+            || System.Windows.Controls.ItemsControl.ContainerFromElement(TabStrip, e.OriginalSource as DependencyObject)
+                is not System.Windows.Controls.ListBoxItem { DataContext: Workspace workspace } container)
+        {
+            return;
+        }
+
+        if (workspace.IsMain)
+        {
+            AppLog.Hint("Основная вкладка в архив не убирается.", LogLevel.Warning);
+            return;
+        }
+
+        // снимок ярлыка — до того, как он уйдёт из ленты
+        var flight = FlyToArchive(container);
+
+        if (!State.SetArchived(workspace, !workspace.IsArchived))
+        {
+            flight?.Invoke();
+        }
+    }
+
+    // ── архив вкладок ─────────────────────────────────────────────────────────
+
+    private readonly Dictionary<ObservableCollection<Workspace>, ListCollectionView> _tabViews = [];
+
+    /// <summary>Последняя открытая вкладка основной ленты и архива — в каждом разделе своя.</summary>
+    private readonly Dictionary<ObservableCollection<Workspace>, Workspace> _lastMain = [];
+    private readonly Dictionary<ObservableCollection<Workspace>, Workspace> _lastArchived = [];
+
+    private Controls.TabReorder? _tabReorder;
+
+    /// <summary>Лента показывает архив, а не основные вкладки.</summary>
+    private bool _archiveMode;
+
+    /// <summary>Над значком держат перетаскиваемый ярлык.</summary>
+    private bool _dropOver;
+
+    /// <summary>
+    /// Лента — основные вкладки раздела или архивные. Выглядят и работают одинаково: вкладки
+    /// остаются в списке раздела как были, меняется только, в какой ленте виден ярлык.
+    /// </summary>
+    private void ShowTabs()
+    {
+        var tabs = State.Tabs;
+
+        if (!_tabViews.TryGetValue(tabs, out var view))
+        {
+            view = new ListCollectionView(tabs)
+            {
+                Filter = item => item is Workspace workspace && workspace.IsArchived == _archiveMode,
+                IsLiveFiltering = true,
+            };
+            view.LiveFilteringProperties.Add(nameof(Workspace.IsArchived));
+            ((System.Collections.Specialized.INotifyCollectionChanged)view).CollectionChanged += (_, _) => UpdateArchiveButton();
+            _tabViews[tabs] = view;
+        }
+
+        _archiveMode = State.ShowsWorkspaceTabs && State.ActiveWorkspace.IsArchived;
+        view.Refresh();
+
+        if (!ReferenceEquals(TabStrip.ItemsSource, view))
+        {
+            // выбор ведёт состояние, а не «текущий элемент» представления — иначе выбиралась бы первая
+            TabStrip.IsSynchronizedWithCurrentItem = false;
+            TabStrip.ItemsSource = view;
+        }
+
+        ApplyArchiveMode();
+    }
+
+    /// <summary>Лента идёт за открытой вкладкой: открыта архивная — показан архив, и наоборот.</summary>
+    private void FollowActive()
+    {
+        var archive = State.ShowsWorkspaceTabs && State.ActiveWorkspace.IsArchived;
+
+        if (archive != _archiveMode)
+        {
+            _archiveMode = archive;
+
+            if (_tabViews.TryGetValue(State.Tabs, out var view))
+            {
+                view.Refresh();
+            }
+
+            ApplyArchiveMode();
+        }
+        else
+        {
+            UpdateArchiveButton();
+        }
+    }
+
+    private void ApplyArchiveMode()
+    {
+        // в основной ленте первая (основная) вкладка закреплена, в архиве закреплённых нет
+        if (_tabReorder is not null)
+        {
+            _tabReorder.FixedCount = _archiveMode ? 0 : 1;
+        }
+
+        TabStrip.SelectedItem = State.ActiveWorkspace;
+        UpdateArchiveButton();
+    }
+
+    /// <summary>
+    /// Значок под «+» — только у разделов с вкладками. В основной ленте — архив и число вкладок
+    /// в нём, в архиве — «назад к основной ленте».
+    /// </summary>
+    private void UpdateArchiveButton()
+    {
+        var shown = State.ShowsWorkspaceTabs;
+        var archived = shown ? State.Tabs.Count(t => t.IsArchived) : 0;
+
+        ArchiveButton.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
+        ArchiveRow.Height = shown ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        ArchiveIcon.Symbol = _archiveMode ? SymbolRegular.TabArrowLeft24 : SymbolRegular.Archive24;
+        ArchiveCount.Text = archived.ToString();
+        ArchiveCount.Visibility = archived > 0 && !_archiveMode ? Visibility.Visible : Visibility.Collapsed;
+        ArchiveButton.Opacity = archived > 0 || _archiveMode ? 1 : 0.6;
+        ArchiveButton.Appearance = _dropOver ? ControlAppearance.Success
+            : _archiveMode ? ControlAppearance.Primary
+            : ControlAppearance.Secondary;
+        ArchiveButton.ToolTip = _archiveMode
+            ? "Открыт архив. Щелчок — назад к основной ленте. Правый щелчок по ярлыку или перетаскивание сюда — вернуть вкладку в основную ленту"
+            : "Архив вкладок: щелчок — открыть. Убрать сюда — правый щелчок по ярлыку или перетащить ярлык на этот значок";
+    }
+
+    /// <summary>Значок переключает ленту: основная ↔ архив. Открывается вкладка, что была открыта там последней.</summary>
+    private void OnArchiveClick(object sender, RoutedEventArgs e)
+    {
+        var tabs = State.Tabs;
+
+        if (_archiveMode)
+        {
+            State.ActiveWorkspace = _lastMain.GetValueOrDefault(tabs) is { IsArchived: false } back && tabs.Contains(back)
+                ? back
+                : State.MainWorkspace;
+            return;
+        }
+
+        var archived = tabs.Where(t => t.IsArchived).ToList();
+
+        if (archived.Count == 0)
+        {
+            AppLog.Hint("Архив пуст. Сюда вкладку убирает правый щелчок по ярлыку или перетаскивание на этот значок.");
+            return;
+        }
+
+        State.ActiveWorkspace = _lastArchived.GetValueOrDefault(tabs) is { IsArchived: true } last && tabs.Contains(last)
+            ? last
+            : archived[0];
+    }
+
+    /// <summary>
+    /// Ярлык улетает к значку архива: летит его снимок, уменьшаясь и бледнея, значок в конце
+    /// вздрагивает. Возвращает, как убрать снимок, если в архив вкладку не пустили.
+    /// </summary>
+    private Action? FlyToArchive(FrameworkElement from)
+    {
+        if (from.ActualWidth < 1 || ArchiveButton.Visibility != Visibility.Visible)
+        {
+            return null;
+        }
+
+        var dpi = VisualTreeHelper.GetDpi(from);
+        var shot = new RenderTargetBitmap(
+            (int)Math.Ceiling(from.ActualWidth * dpi.DpiScaleX),
+            (int)Math.Ceiling(from.ActualHeight * dpi.DpiScaleY),
+            dpi.PixelsPerInchX,
+            dpi.PixelsPerInchY,
+            PixelFormats.Pbgra32);
+        shot.Render(from);
+
+        var scale = new ScaleTransform(1, 1);
+        var image = new System.Windows.Controls.Image
+        {
+            Source = shot,
+            Width = from.ActualWidth,
+            Height = from.ActualHeight,
+            RenderTransform = scale,
+            RenderTransformOrigin = new Point(0.5, 0.5),
+        };
+
+        var start = from.TranslatePoint(default, FxLayer);
+        var end = ArchiveButton.TranslatePoint(
+            new Point((ArchiveButton.ActualWidth - from.ActualWidth) / 2, (ArchiveButton.ActualHeight - from.ActualHeight) / 2),
+            FxLayer);
+
+        System.Windows.Controls.Canvas.SetLeft(image, start.X);
+        System.Windows.Controls.Canvas.SetTop(image, start.Y);
+        FxLayer.Children.Add(image);
+
+        var time = new Duration(TimeSpan.FromMilliseconds(420));
+        var ease = new CubicEase { EasingMode = EasingMode.EaseIn };
+        var left = new DoubleAnimation(end.X, time) { EasingFunction = ease };
+        left.Completed += (_, _) =>
+        {
+            FxLayer.Children.Remove(image);
+            PulseArchive();
+        };
+
+        image.BeginAnimation(System.Windows.Controls.Canvas.LeftProperty, left);
+        image.BeginAnimation(System.Windows.Controls.Canvas.TopProperty, new DoubleAnimation(end.Y, time) { EasingFunction = ease });
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.15, time) { EasingFunction = ease });
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(0.15, time) { EasingFunction = ease });
+        image.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0.3, time));
+
+        return () => FxLayer.Children.Remove(image);
+    }
+
+    /// <summary>Значок архива вздрагивает: вкладка долетела.</summary>
+    private void PulseArchive()
+    {
+        if (ArchiveButton.RenderTransform is not ScaleTransform { IsFrozen: false } scale)
+        {
+            return;
+        }
+
+        var pulse = new DoubleAnimation(1, 1.3, new Duration(TimeSpan.FromMilliseconds(130))) { AutoReverse = true };
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, pulse);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, pulse);
+    }
 
     /// <summary>
     /// Свитч на ярлыке копирования. Первое включение создаёт пустую личную вкладку команд
@@ -691,50 +956,25 @@ public partial class MainWindow : FluentWindow
 
     private void SetBottomVisible(bool visible)
     {
+        // спрятали — натянутая высота не теряется, панель вернётся такой же
+        if (!visible)
+        {
+            RememberBottom();
+        }
+
         BottomPanel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         BottomSplitter.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
 
         BottomRow.Height = new GridLength(visible ? StoredBottom() : 0);
     }
 
-    /// <summary>Нижняя панель сейчас стоит с высотой проводника.</summary>
-    private bool _explorerBottom;
-
     /// <summary>
-    /// Проводнику окно нужно под две панели, а не под вывод: у него своя высота терминала,
-    /// по умолчанию пятая часть. Остальные разделы делят одну общую.
+    /// Высота нижней панели одна на все разделы, как у панели в VS Code: при переходе между
+    /// разделами она не прыгает. Что натянул разделителем — то и запоминается.
     /// </summary>
-    private void SwitchBottomHeight()
-    {
-        var explorer = State.Section == AppSection.Explorer;
-
-        if (explorer == _explorerBottom)
-        {
-            return;
-        }
-
-        RememberBottom();
-        _explorerBottom = explorer;
-
-        if (BottomPanel.Visibility == Visibility.Visible)
-        {
-            BottomRow.Height = new GridLength(StoredBottom());
-        }
-    }
-
-    /// <summary>Что натянул разделителем — запоминается для своего вида: проводника или остальных.</summary>
     private void RememberBottom()
     {
-        if (BottomPanel.Visibility != Visibility.Visible || BottomRow.ActualHeight <= 40)
-        {
-            return;
-        }
-
-        if (_explorerBottom)
-        {
-            AppState.Current.Settings.ExplorerLogPanelHeight = BottomRow.ActualHeight;
-        }
-        else
+        if (BottomPanel.Visibility == Visibility.Visible && BottomRow.ActualHeight > 40)
         {
             AppState.Current.Settings.LogPanelHeight = BottomRow.ActualHeight;
         }
@@ -742,25 +982,10 @@ public partial class MainWindow : FluentWindow
 
     private double StoredBottom()
     {
-        var settings = AppState.Current.Settings;
-
-        if (_explorerBottom)
-        {
-            if (settings.ExplorerLogPanelHeight >= 120)
-            {
-                return settings.ExplorerLogPanelHeight;
-            }
-
-            // пятая часть того, что делят страница и панель; до первой раскладки — от высоты окна
-            var page = PageRow.ActualHeight;
-            var shared = page > 0 ? page + BottomRow.ActualHeight : Height - 120;
-
-            return Math.Max(120, Math.Round(shared / 5));
-        }
-
         // панель не должна съедать кнопки запуска на странице копирования:
         // при окне по умолчанию 220 точек — предел, который она может занять
-        return settings.LogPanelHeight < 120 ? 220 : settings.LogPanelHeight;
+        var stored = AppState.Current.Settings.LogPanelHeight;
+        return stored < 120 ? 220 : stored;
     }
 
     /// <summary>Разворачивает нижнюю панель на вкладке «Терминал».</summary>

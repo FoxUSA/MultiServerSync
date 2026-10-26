@@ -2314,98 +2314,120 @@ public partial class FilePane : UserControl
         menu.IsOpen = true;
     }
 
+    /// <summary>
+    /// Меню правой кнопки: у каждого пункта значок, как в меню Windows, — пункт находится
+    /// глазами по значку, а не чтением всего столбца. Подписи короткие, клавиши справа.
+    /// </summary>
     private ContextMenu BuildMenu()
     {
         var menu = new ContextMenu();
         var picked = TargetEntries;
         var single = picked.Count == 1 ? picked[0] : null;
         var remote = IsRemote;
+        var canCreate = _current.Length > 0 || remote;
 
-        void Add(string header, string gesture, Action action, bool enabled = true)
+        void Add(Wpf.Ui.Controls.SymbolRegular icon, string header, string gesture, Action action, bool enabled = true)
         {
-            var item = new MenuItem { Header = new TextBlock { Text = header }, InputGestureText = gesture, IsEnabled = enabled };
+            var item = new MenuItem
+            {
+                Header = new TextBlock { Text = header },
+                Icon = new Wpf.Ui.Controls.SymbolIcon { Symbol = icon, FontSize = 16 },
+                InputGestureText = gesture,
+                IsEnabled = enabled,
+            };
             item.Click += (_, _) => action();
             menu.Items.Add(item);
         }
+
+        void Line() => menu.Items.Add(new Separator());
 
         void Ask(PaneCommand command) => CommandRequested?.Invoke(this, command);
 
         var editable = picked.Where(p => !p.IsDirectory && TextFile.IsEditable(p.Name)).ToList();
 
+        // открыть
         if (single is not null)
         {
-            Add("Открыть", "Enter", () => _ = OpenRowAsync(new PaneRow(single, remote)));
+            Add(single.IsDirectory ? Wpf.Ui.Controls.SymbolRegular.FolderOpen24 : Wpf.Ui.Controls.SymbolRegular.Open24,
+                "Открыть", "Enter", () => _ = OpenRowAsync(new PaneRow(single, remote)));
 
             if (!single.IsDirectory)
             {
-                Add("Открыть с помощью…", string.Empty, () => Ask(PaneCommand.OpenWith));
+                Add(Wpf.Ui.Controls.SymbolRegular.AppsList24, "Открыть с помощью…", string.Empty, () => Ask(PaneCommand.OpenWith));
             }
-
-            if (editable.Count == 1)
-            {
-                Add("Править", string.Empty, () => EditFiles(editable));
-            }
-
-            if (remote && single.IsLink && single.LinkTarget.Length > 0)
-            {
-                Add("Перейти к цели ссылки", string.Empty, () => _ = GoToLinkTargetAsync(single));
-            }
-
-            menu.Items.Add(new Separator());
         }
-        else if (editable.Count > 1)
+
+        if (editable.Count > 0)
         {
-            Add($"Править ({editable.Count})", string.Empty, () => EditFiles(editable));
-            menu.Items.Add(new Separator());
+            Add(Wpf.Ui.Controls.SymbolRegular.DocumentEdit24, editable.Count == 1 ? "Править" : $"Править ({editable.Count})",
+                string.Empty, () => EditFiles(editable));
         }
 
+        if (remote && single is { IsLink: true } link && link.LinkTarget.Length > 0)
+        {
+            Add(Wpf.Ui.Controls.SymbolRegular.ArrowForward24, "Перейти к цели ссылки", string.Empty, () => _ = GoToLinkTargetAsync(link));
+        }
+
+        if (single is not null || editable.Count > 0)
+        {
+            Line();
+        }
+
+        // копирование и буфер
         if (picked.Count > 0)
         {
-            Add(remote ? "Скачать на компьютер" : "Отправить на сервер", string.Empty, () => Ask(PaneCommand.TransferToOther));
-            Add("Копировать", "Ctrl+C", () => Ask(PaneCommand.Copy));
-            Add("Вырезать", "Ctrl+X", () => Ask(PaneCommand.Cut));
+            Add(remote ? Wpf.Ui.Controls.SymbolRegular.ArrowDownload24 : Wpf.Ui.Controls.SymbolRegular.ArrowUpload24,
+                remote ? "Скачать на компьютер" : "Отправить на сервер",
+                TransferButton.Visibility == Visibility.Visible ? "F5" : string.Empty,
+                () => Ask(PaneCommand.TransferToOther));
+            Add(Wpf.Ui.Controls.SymbolRegular.Copy24, "Копировать", "Ctrl+C", () => Ask(PaneCommand.Copy));
+            Add(Wpf.Ui.Controls.SymbolRegular.Cut24, "Вырезать", "Ctrl+X", () => Ask(PaneCommand.Cut));
         }
 
-        Add("Вставить", "Ctrl+V", () => Ask(PaneCommand.Paste), _current.Length > 0 || remote);
+        Add(Wpf.Ui.Controls.SymbolRegular.ClipboardPaste24, "Вставить", "Ctrl+V", () => Ask(PaneCommand.Paste), canCreate);
 
+        // правка самих файлов
         if (picked.Count > 0)
         {
-            menu.Items.Add(new Separator());
-            Add("Переименовать", "F2", BeginRename, single is not null);
-            Add(remote ? "Удалить" : "Удалить в корзину", "Del", () => _ = DeleteSelectedAsync());
+            Line();
+            Add(Wpf.Ui.Controls.SymbolRegular.Rename24, "Переименовать", "F2", BeginRename, single is not null);
+            Add(Wpf.Ui.Controls.SymbolRegular.Delete24, remote ? "Удалить" : "Удалить в корзину", "Del", () => _ = DeleteSelectedAsync());
         }
 
-        menu.Items.Add(new Separator());
-        Add("Новая папка", "F7", () => _ = CreateAsync(folder: true), _current.Length > 0 || remote);
-        Add("Новый файл", string.Empty, () => _ = CreateAsync(folder: false), _current.Length > 0 || remote);
-        menu.Items.Add(new Separator());
-        Add("Скопировать путь", string.Empty, CopyPath);
+        Line();
+        Add(Wpf.Ui.Controls.SymbolRegular.FolderAdd24, "Новая папка", "F7", () => _ = CreateAsync(folder: true), canCreate);
+        Add(Wpf.Ui.Controls.SymbolRegular.DocumentAdd24, "Новый файл", string.Empty, () => _ = CreateAsync(folder: false), canCreate);
+
+        // путь и сравнение
+        Line();
+        Add(Wpf.Ui.Controls.SymbolRegular.Link24, "Скопировать путь", string.Empty, CopyPath);
 
         if (single is { IsDirectory: false })
         {
-            Add("Сравнить с файлом под курсором в другой панели", string.Empty, () => Ask(PaneCommand.Compare));
+            Add(Wpf.Ui.Controls.SymbolRegular.BranchCompare24, "Сравнить с соседней панелью", string.Empty, () => Ask(PaneCommand.Compare));
         }
 
+        // сервер и другие разделы
         if (remote)
         {
-            menu.Items.Add(new Separator());
+            Line();
 
             if (single is { IsDirectory: false, IsExecutable: true })
             {
-                Add("Выполнить на сервере…", string.Empty, () => Ask(PaneCommand.Run));
+                Add(Wpf.Ui.Controls.SymbolRegular.Play24, "Выполнить на сервере…", string.Empty, () => Ask(PaneCommand.Run));
             }
 
-            Add("Открыть здесь вкладку команды", string.Empty, () => Ask(PaneCommand.CommandTabHere));
-            Add("Путь — назначением вкладки «Копирования»", string.Empty, () => Ask(PaneCommand.SendToCopy));
+            Add(Wpf.Ui.Controls.SymbolRegular.WindowConsole20, "Команда в этой папке", string.Empty, () => Ask(PaneCommand.CommandTabHere));
+            Add(Wpf.Ui.Controls.SymbolRegular.FolderArrowRight24, "Папка назначения в «Копировании»", string.Empty, () => Ask(PaneCommand.SendToCopy));
 
             if (picked.Count > 0)
             {
-                Add("Добавить в список «Скачивания»", string.Empty, () => Ask(PaneCommand.SendToDownload));
+                Add(Wpf.Ui.Controls.SymbolRegular.ArrowDownload24, "Добавить в «Скачивание»", string.Empty, () => Ask(PaneCommand.SendToDownload));
             }
         }
 
-        menu.Items.Add(new Separator());
-        Add("Свойства", "Alt+Enter", () => Ask(PaneCommand.Properties));
+        Line();
+        Add(Wpf.Ui.Controls.SymbolRegular.Info24, "Свойства", "Alt+Enter", () => Ask(PaneCommand.Properties));
 
         return menu;
     }

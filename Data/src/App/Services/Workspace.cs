@@ -77,6 +77,24 @@ public sealed class Workspace : ObservableObject
 
     public bool CanClose => !IsMain;
 
+    private bool _isArchived;
+
+    /// <summary>
+    /// Ярлык в архиве под «+», а не в ленте. Больше ничего не меняется: память, отметки,
+    /// идущая работа, команды после копирования — всё как у вкладки в ленте.
+    /// </summary>
+    public bool IsArchived
+    {
+        get => _isArchived;
+        set
+        {
+            if (Set(ref _isArchived, value && !IsMain))
+            {
+                Save();
+            }
+        }
+    }
+
     public string Title
     {
         get => _title;
@@ -2394,6 +2412,7 @@ public sealed class Workspace : ObservableObject
         LocalFolder = LocalFolder,
         Explorer = Explorer.Clone(),
         IsMain = IsMain,
+        IsArchived = IsArchived,
         SelectedServerIds = CopyServers.Where(c => c.IsSelected).Select(c => c.Server.Id).ToList(),
         CommandServerIds = CommandServers.Where(c => c.IsSelected).Select(c => c.Server.Id).ToList(),
         CopyList = Items.Select(i => new SavedTransferItem { Path = i.FullPath, IsSelected = i.IsSelected }).ToList(),
@@ -2430,6 +2449,7 @@ public sealed class Workspace : ObservableObject
         _matchByHash = state.MatchByHash;
         _afterCopyTabId = state.AfterCopyTabId ?? string.Empty;
         _afterCopyEnabled = state.AfterCopyEnabled && _afterCopyTabId.Length > 0;
+        _isArchived = state.IsArchived && !IsMain;
         OwnerCopyTabId = state.OwnerCopyTabId ?? string.Empty;
 
         _localFolder = state.LocalFolder ?? string.Empty;
