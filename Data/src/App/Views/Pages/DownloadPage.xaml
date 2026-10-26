@@ -63,6 +63,12 @@
         Content="Очистить"
         Icon="{ui:SymbolIcon Delete24}"
         Style="{StaticResource ToolButtonStyle}" />
+      <ui:Button
+        Click="OnRefresh"
+        Content="Обновить"
+        Icon="{ui:SymbolIcon ArrowClockwise24}"
+        Style="{StaticResource ToolButtonStyle}"
+        ToolTip="Перечитать с серверов размер, число файлов и дату изменения; пока страница открыта, это происходит само каждые 30 секунд" />
     </StackPanel>
 
     <!--  таблица того же вида, что список файлов на «Копировании»: строка — файл или папка

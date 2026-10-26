@@ -43,7 +43,7 @@ Add your servers once. After that: check the ones you need, pick files or type a
 - **Many streams** — small files travel as compressed tar batches over three streams, large files in chunks over four connections. No rsync needed on the server.
 - **Only what changed** — compare by modification time or by SHA-256: matching files aren't sent. Checksums can be verified again after copying.
 - **Permissions, owner and date stay put** — a replaced file keeps its permissions and owner, a new one takes them from the folder it lands in.
-- **Download** — from servers to your PC the same way: only what changed, checksum check; from several servers — each into its own subfolder.
+- **Download** — from servers to your PC the same way: only what changed, checksum check; from several servers — each into its own subfolder. Sizes and dates in the list refresh from the servers on their own.
 - **Explorer** — two panes, your PC and a server, with Windows look and keys; as many tabs as you like. Permissions and owner change only in the Properties window. A server file opens in any Windows app and goes back on save.
 - **Exclusions** — masks like `node_modules` and `*.log` stay out both ways.
 - **Commands and scripts** — several commands in one tab run in turn: the next one after the previous succeeds. A script of any length goes whole through stdin; answer `[Y/n]` from the app, the sudo password is supplied for you. Command sets go to favourites.

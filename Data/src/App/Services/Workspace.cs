@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.IO;
+using System.Text;
 using System.Windows;
 using MultiServerSync.Core;
 using MultiServerSync.Models;
@@ -616,6 +617,86 @@ public sealed class Workspace : ObservableObject
         return added;
     }
 
+    private bool _checkingDownloads;
+
+    /// <summary>
+    /// Список скачивания — заново с серверов: размер, число файлов в папке, дата самого свежего
+    /// файла, пропавшие пути. Одна команда на сервер; на время скачивания не трогаем.
+    /// </summary>
+    public async Task RefreshDownloadsAsync()
+    {
+        if (_checkingDownloads || CopyBatch.IsRunning || Downloads.Count == 0)
+        {
+            return;
+        }
+
+        _checkingDownloads = true;
+
+        try
+        {
+            var settings = AppState.Current.Settings;
+
+            await Task.WhenAll(Downloads
+                .GroupBy(d => d.ServerId)
+                .Select(g => (Server: AppState.Current.Servers.FirstOrDefault(s => s.Id == g.Key), Items: g.ToList()))
+                .Where(g => g.Server is not null)
+                .Select(g => CheckDownloadsAsync(g.Server!, g.Items, settings)));
+        }
+        finally
+        {
+            _checkingDownloads = false;
+        }
+    }
+
+    private static async Task CheckDownloadsAsync(ServerEntry server, List<DownloadItem> items, AppSettings settings)
+    {
+        // строка ответа: вид|файлов|байт|дата|номер строки — по номеру, путь может содержать «|»
+        var script = new StringBuilder();
+
+        for (var i = 0; i < items.Count; i++)
+        {
+            var p = SshService.ShellQuote(items[i].Path);
+            script.Append("p=").Append(p).Append("; if [ -d \"$p\" ]; then find \"$p\" -type f -printf '%s %T@\\n' 2>/dev/null")
+                .Append(" | awk 'BEGIN{n=0;s=0;m=0} {n++; s+=$1; if ($2>m) m=$2} END{printf \"D|%d|%.0f|%d|").Append(i).Append("\\n\", n, s, m}'")
+                .Append("; elif [ -e \"$p\" ]; then stat -L -c 'F|1|%s|%Y|").Append(i).Append("' \"$p\"")
+                .Append("; else echo 'X|0|0|0|").Append(i).Append("'; fi\n");
+        }
+
+        var session = RemoteSession.Acquire(server, settings);
+
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var (output, _) = await session.ExecAsync(script.ToString(), cts.Token);
+
+            foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var f = line.Trim().Split('|');
+
+                if (f.Length != 5
+                    || !int.TryParse(f[4], out var i) || i < 0 || i >= items.Count
+                    || !int.TryParse(f[1], out var files)
+                    || !long.TryParse(f[2], out var size)
+                    || !long.TryParse(f[3], out var mtime))
+                {
+                    continue;
+                }
+
+                var when = mtime > 0 ? DateTime.UnixEpoch.AddSeconds(mtime).ToLocalTime() : default;
+                items[i].Update(size, when, f[0] == "D" ? files : -1, missing: f[0] == "X");
+            }
+        }
+        catch (Exception ex)
+        {
+            // сервер не ответил — в списке остаются прежние сведения, разбираться тут нечего
+            AppLog.Debug($"Проверка списка скачивания не удалась: {ex.Message}", server.Display);
+        }
+        finally
+        {
+            session.Release();
+        }
+    }
+
     /// <summary>Имя подпапки сервера: его имя в списке, без знаков, которых не любит Windows.</summary>
     private static string FolderName(ServerEntry server)
     {
@@ -1138,9 +1219,7 @@ public sealed class Workspace : ObservableObject
                     $"Отмечено: {Items.Count(i => i.IsSelected)} · Серверов: {SelectedServers.Count}",
                 AppSection.Download =>
                     $"Отмечено: {PickedDownloads.Count()} · Серверов: {PickedDownloads.Select(d => d.ServerId).Distinct().Count()}",
-                AppSection.Explorer => ExplorerServer is { } server
-                    ? $"{server.PaneLabel} · {(Explorer.Remote.Path.Length > 0 ? Explorer.Remote.Path : "~")}"
-                    : "сервер не выбран",
+                AppSection.Explorer => ExplorerServer?.PaneLabel ?? "сервер не выбран",
                 AppSection.Command when Steps.Count > 1 => $"{servers} · окон {Steps.Count}",
                 AppSection.Command => string.IsNullOrWhiteSpace(CommandText)
                     ? $"{servers} · нет команды"
@@ -1150,7 +1229,39 @@ public sealed class Workspace : ObservableObject
         }
     }
 
-    public void RaiseTabCounts() => RaiseMany(nameof(TabCounts), nameof(TabTooltip));
+    public void RaiseTabCounts() => RaiseMany(nameof(TabCounts), nameof(TabDetail), nameof(HasTabDetail), nameof(TabTooltip));
+
+    /// <summary>
+    /// Вторая строка под названием — у проводника открытая на сервере папка, коротко:
+    /// «…/папка». Полный путь — в подсказке ярлыка и в самой панели.
+    /// </summary>
+    public string TabDetail
+    {
+        get
+        {
+            if (AppState.Current.Section != AppSection.Explorer || ExplorerServer is null)
+            {
+                return string.Empty;
+            }
+
+            var path = Explorer.Remote.Path.TrimEnd('/');
+
+            if (Explorer.Remote.Path.Length == 0)
+            {
+                return "~";
+            }
+
+            if (path.Length == 0)
+            {
+                return "/";
+            }
+
+            var last = path.LastIndexOf('/');
+            return last <= 0 ? path : "…/" + path[(last + 1)..];
+        }
+    }
+
+    public bool HasTabDetail => TabDetail.Length > 0;
 
     /// <summary>
     /// Открыли другой раздел — панель серверов должна показать его набор галочек.
@@ -1169,8 +1280,13 @@ public sealed class Workspace : ObservableObject
         : IsPersonal
             ? $"{Title} — команды после копирования этой вкладки. {TabCounts}"
         : IsMain
-            ? $"{Title} — {TabCounts}. Первая вкладка: её нельзя закрыть и переставить"
-            : $"{Title} — {TabCounts}. Перетащите мышью, чтобы поменять вкладки местами";
+            ? $"{Title} — {TabSummary}. Первая вкладка: её нельзя закрыть и переставить"
+            : $"{Title} — {TabSummary}. Перетащите мышью, чтобы поменять вкладки местами";
+
+    /// <summary>Строки ярлыка целиком — у проводника с полным путём, который на ярлык не влез.</summary>
+    private string TabSummary => HasTabDetail
+        ? $"{TabCounts} · {(Explorer.Remote.Path.Length > 0 ? Explorer.Remote.Path : "~")}"
+        : TabCounts;
 
     /// <summary>
     /// Статус на ярлыке цветом не выделяется — только жирным шрифтом. Само значение
@@ -1179,10 +1295,21 @@ public sealed class Workspace : ObservableObject
     public WorkspaceStatus Status
     {
         get => _status;
-        private set { if (Set(ref _status, value)) { Raise(nameof(HasStatus)); } }
+        private set { if (Set(ref _status, value)) { RaiseMany(nameof(HasStatus), nameof(ShowsTabStatus), nameof(HidesTabCounts)); } }
     }
 
     public bool HasStatus => Status != WorkspaceStatus.None;
+
+    /// <summary>
+    /// Статус виден на ярлыке вместо строк под названием. У проводника — только пока идёт
+    /// перенос: потом на месте снова сервер и папка, по ним вкладку и узнают.
+    /// </summary>
+    public bool ShowsTabStatus => HasStatus && (Status == WorkspaceStatus.Running || !IsExplorerTab);
+
+    /// <summary>У проводника на время переноса статус встаёт на место строк «сервер / папка».</summary>
+    public bool HidesTabCounts => Status == WorkspaceStatus.Running && IsExplorerTab;
+
+    private bool IsExplorerTab => AppState.Current.ExplorerTabs.Contains(this);
 
     public bool IsBusy => CopyBatch.IsRunning || CommandBatch.IsRunning || CheckBatch.IsRunning;
 

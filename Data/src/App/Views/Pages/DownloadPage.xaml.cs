@@ -21,7 +21,15 @@ public partial class DownloadPage : Page
         InitializeComponent();
 
         DataContext = AppState.Current.ActiveWorkspace;
-        AppState.Current.ActiveWorkspaceChanged += workspace => DataContext = workspace;
+        AppState.Current.ActiveWorkspaceChanged += workspace =>
+        {
+            DataContext = workspace;
+            Check();
+        };
+
+        // с сервера изменений не пришлют — пока страница на виду, список перечитывается сам
+        _checkTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+        _checkTimer.Tick += (_, _) => Check();
 
         // ярлыки вкладок пишут статистику по открытому разделу
         IsVisibleChanged += (_, _) =>
@@ -29,9 +37,28 @@ public partial class DownloadPage : Page
             if (IsVisible)
             {
                 AppState.Current.Section = AppSection.Download;
+                Check();
+                _checkTimer.Start();
+            }
+            else
+            {
+                _checkTimer.Stop();
             }
         };
     }
+
+    private readonly System.Windows.Threading.DispatcherTimer _checkTimer;
+
+    /// <summary>Размер, файлы и даты в списке — заново с серверов, если открыта вкладка скачивания.</summary>
+    private void Check()
+    {
+        if (IsVisible && Workspace is { } workspace && AppState.Current.DownloadTabs.Contains(workspace))
+        {
+            _ = workspace.RefreshDownloadsAsync();
+        }
+    }
+
+    private void OnRefresh(object sender, RoutedEventArgs e) => Check();
 
     private Workspace? Workspace => DataContext as Workspace;
 
@@ -110,6 +137,9 @@ public partial class DownloadPage : Page
                 ? $"Добавлено для скачивания с «{dialog.Server.PaneLabel}»: {added}."
                 : "Всё выбранное уже есть в списке.",
             workspace.Title);
+
+        // у новых папок сразу видны число файлов и размер
+        Check();
     }
 
     private void OnToggleAll(object sender, RoutedEventArgs e)

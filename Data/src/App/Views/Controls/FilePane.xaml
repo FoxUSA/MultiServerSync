@@ -228,6 +228,11 @@
             Style="{StaticResource PaneButtonStyle}"
             ToolTip="Новый файл" />
           <ui:Button
+            Click="OnDelete"
+            Icon="{ui:SymbolIcon Delete24}"
+            Style="{StaticResource PaneButtonStyle}"
+            ToolTip="Удалить выделенное (Del): с компьютера — в корзину, на сервере — безвозвратно, после подтверждения" />
+          <ui:Button
             x:Name="TreeButton"
             Click="OnToggleTree"
             Icon="{ui:SymbolIcon TextBulletListTree24}"

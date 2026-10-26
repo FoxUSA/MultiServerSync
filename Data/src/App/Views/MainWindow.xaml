@@ -478,10 +478,10 @@
           Высота ряда задана жёстко: при масштабе экрана 150% рамка округляется до пикселя, кирпичик
           выходит на долю точки выше, и по своему размеру второй ряд уже не влезал.  -->
     <ItemsPanelTemplate x:Key="CompactTabsPanel">
-      <WrapPanel
+      <controls:SplitTabsPanel
         Height="90"
-        ItemHeight="45"
-        Orientation="Vertical" />
+        RowHeight="45"
+        Rows="2" />
     </ItemsPanelTemplate>
 
     <!--  краткий ярлык вкладки: название, под ним статус, если есть. Счётчиков нет — они в подсказке.
@@ -496,34 +496,35 @@
           <RowDefinition Height="*" />
           <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <!--  на ярлыках текст не обрезается: что не влезло в строку — чуть ужимается (Viewbox)  -->
+        <!--  на ярлыках шрифт не ужимается: что не влезло в строку — обрезается троеточием,
+              целиком текст — в подсказке ярлыка  -->
         <StackPanel
           x:Name="Texts"
           Margin="20,0,20,0"
           VerticalAlignment="Center">
-          <Viewbox HorizontalAlignment="Center" StretchDirection="DownOnly">
-            <TextBlock
-              FontSize="12"
-              FontWeight="SemiBold"
-              Text="{Binding Title}" />
-          </Viewbox>
+          <TextBlock
+            HorizontalAlignment="Center"
+            FontSize="12"
+            FontWeight="SemiBold"
+            Text="{Binding Title}"
+            TextTrimming="CharacterEllipsis" />
           <!--  одна строка статуса: если есть ошибки — «Ошибок N», иначе итог  -->
-          <Viewbox HorizontalAlignment="Center" StretchDirection="DownOnly">
-            <Grid>
-              <TextBlock
-                x:Name="BadgeText"
-                FontSize="11"
-                FontWeight="SemiBold"
-                Text="{Binding StatusBadge}"
-                Visibility="Collapsed" />
-              <TextBlock
-                x:Name="CaptionText"
-                FontSize="11"
-                FontWeight="SemiBold"
-                Text="{Binding StatusCaption}"
-                Visibility="Collapsed" />
-            </Grid>
-          </Viewbox>
+          <Grid HorizontalAlignment="Center">
+            <TextBlock
+              x:Name="BadgeText"
+              FontSize="11"
+              FontWeight="SemiBold"
+              Text="{Binding StatusBadge}"
+              TextTrimming="CharacterEllipsis"
+              Visibility="Collapsed" />
+            <TextBlock
+              x:Name="CaptionText"
+              FontSize="11"
+              FontWeight="SemiBold"
+              Text="{Binding StatusCaption}"
+              TextTrimming="CharacterEllipsis"
+              Visibility="Collapsed" />
+          </Grid>
         </StackPanel>
 
         <!--  копирование: свитч личных команд слева; личная команда — стрелка назад  -->
@@ -651,16 +652,14 @@
         Width="140"
         Height="39"
         ToolTip="{Binding TabTooltip}">
-        <Viewbox
+        <TextBlock
           Margin="20,0,20,0"
           HorizontalAlignment="Center"
           VerticalAlignment="Center"
-          StretchDirection="DownOnly">
-          <TextBlock
-            FontSize="12"
-            FontWeight="SemiBold"
-            Text="{Binding Title}" />
-        </Viewbox>
+          FontSize="12"
+          FontWeight="SemiBold"
+          Text="{Binding Title}"
+          TextTrimming="CharacterEllipsis" />
 
         <Button
           x:Name="Close"
@@ -904,15 +903,13 @@
                       Text="{Binding Title}"
                       TextAlignment="Center"
                       TextWrapping="Wrap" />
-                    <Viewbox
+                    <TextBlock
                       Margin="-10,3,-10,0"
                       HorizontalAlignment="Center"
-                      StretchDirection="DownOnly">
-                      <TextBlock
-                        FontSize="11"
-                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                        Text="{Binding TabCounts}" />
-                    </Viewbox>
+                      FontSize="11"
+                      Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                      Text="{Binding TabCounts}"
+                      TextTrimming="CharacterEllipsis" />
                   </StackPanel>
 
                   <Button
@@ -981,8 +978,8 @@
                     x:Name="Texts"
                     Margin="20,0,20,0"
                     VerticalAlignment="Center">
-                    <!--  на ярлыках текст не обрезается: длинное название — в две строки,
-                          остальное при нехватке места чуть ужимается (Viewbox)  -->
+                    <!--  длинное название — в две строки; остальное шрифт не ужимает,
+                          а обрезает троеточием — целиком в подсказке ярлыка  -->
                     <TextBlock
                       x:Name="TitleText"
                       HorizontalAlignment="Center"
@@ -999,35 +996,40 @@
                       x:Name="StatusPanel"
                       Margin="-8,2,-8,0"
                       Visibility="Collapsed">
-                      <Viewbox HorizontalAlignment="Center" StretchDirection="DownOnly">
-                        <TextBlock
-                          FontSize="12"
-                          FontWeight="SemiBold"
-                          Text="{Binding StatusBadge}" />
-                      </Viewbox>
-                      <Viewbox
+                      <TextBlock
                         HorizontalAlignment="Center"
-                        StretchDirection="DownOnly"
-                        Visibility="{Binding StatusCaptionVisibility}">
-                        <TextBlock
-                          FontSize="12"
-                          FontWeight="SemiBold"
-                          Text="{Binding StatusCaption}" />
-                      </Viewbox>
+                        FontSize="12"
+                        FontWeight="SemiBold"
+                        Text="{Binding StatusBadge}"
+                        TextTrimming="CharacterEllipsis" />
+                      <TextBlock
+                        HorizontalAlignment="Center"
+                        FontSize="12"
+                        FontWeight="SemiBold"
+                        Text="{Binding StatusCaption}"
+                        TextTrimming="CharacterEllipsis"
+                        Visibility="{Binding StatusCaptionVisibility}" />
                     </StackPanel>
 
-                    <!--  что на вкладке отмечено — зависит от открытого раздела.
-                          Отступ отрицательный по той же причине, что и у статуса:
-                          строке нужно больше места, чем названию, иначе она обрезается  -->
-                    <Viewbox
-                      Margin="-10,3,-10,0"
-                      HorizontalAlignment="Center"
-                      StretchDirection="DownOnly">
+                    <!--  что на вкладке отмечено — зависит от открытого раздела; у проводника
+                          две строки: сервер и «…/папка». Шрифт не ужимается — длинное обрезается
+                          троеточием. Отступ отрицательный по той же причине, что и у статуса:
+                          строке нужно больше места, чем названию. Пока на ярлыке статус — строк нет  -->
+                    <StackPanel x:Name="CountsPanel" Margin="-10,3,-10,0">
                       <TextBlock
+                        HorizontalAlignment="Center"
                         FontSize="11"
                         Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                        Text="{Binding TabCounts}" />
-                    </Viewbox>
+                        Text="{Binding TabCounts}"
+                        TextTrimming="CharacterEllipsis" />
+                      <TextBlock
+                        HorizontalAlignment="Center"
+                        FontSize="11"
+                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                        Text="{Binding TabDetail}"
+                        TextTrimming="CharacterEllipsis"
+                        Visibility="{Binding HasTabDetail, Converter={StaticResource BoolToVis}}" />
+                    </StackPanel>
                   </StackPanel>
 
                   <!--  огонёк «идёт работа»: виден, пока на вкладке копирование или команда, потом гаснет.
@@ -1112,8 +1114,11 @@
                 </Grid>
 
                 <DataTemplate.Triggers>
-                  <DataTrigger Binding="{Binding HasStatus}" Value="True">
+                  <DataTrigger Binding="{Binding ShowsTabStatus}" Value="True">
                     <Setter TargetName="StatusPanel" Property="Visibility" Value="Visible" />
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding HidesTabCounts}" Value="True">
+                    <Setter TargetName="CountsPanel" Property="Visibility" Value="Collapsed" />
                   </DataTrigger>
                   <DataTrigger Binding="{Binding IsCopyTab}" Value="True">
                     <Setter TargetName="Switch" Property="Visibility" Value="Visible" />

@@ -1350,6 +1350,9 @@ public partial class FilePane : UserControl
 
     private async void OnRefresh(object sender, RoutedEventArgs e) => await RefreshAllAsync();
 
+    /// <summary>Корзина в шапке — то же, что Del.</summary>
+    private async void OnDelete(object sender, RoutedEventArgs e) => await DeleteSelectedAsync();
+
     /// <summary>F5: папка с сервера заново и дерево — там могли появиться новые ветки.</summary>
     public async Task RefreshAllAsync()
     {
