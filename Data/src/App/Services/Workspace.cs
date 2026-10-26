@@ -2706,7 +2706,8 @@ public sealed class Workspace : ObservableObject
 
         foreach (var key in _localHashes.Keys)
         {
-            if (string.Equals(key, item.FullPath, StringComparison.OrdinalIgnoreCase)
+            // ключ — путь, за ним через перевод строки размер и дата (SshService.HashKey)
+            if (string.Equals(key.Split('\n')[0], item.FullPath, StringComparison.OrdinalIgnoreCase)
                 || key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             {
                 _localHashes.TryRemove(key, out _);

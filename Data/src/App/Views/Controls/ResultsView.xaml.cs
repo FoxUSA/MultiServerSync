@@ -21,10 +21,8 @@ public partial class ResultsView : UserControl
 
         DataContextChanged += OnDataContextChanged;
 
-        // порядок в таблице выбирается щелчком по заголовку и не сбрасывается; строка команд
-        // после копирования в сортировке не участвует — стоит под строкой своего копирования
-        GridSort.Keep(ResultsGrid, "results",
-            byColumn => ReferenceEquals(ResultsGrid.ItemsSource, _rows) ? new PairOrder(byColumn, _heads, _queue) : null);
+        // без сортировки: строка встаёт туда, где появилась, и там остаётся — запуски идут
+        // сверху вниз по времени, команды после копирования — под строкой своего копирования
 
         // вывод может жить в отдельном окне: панель тогда пустая, а кнопка возвращает его назад
         OutputWindow.OpenChanged += ApplyDetachState;
@@ -79,41 +77,6 @@ public partial class ResultsView : UserControl
 
     /// <summary>Строки таблицы, когда у копирования есть команды после него: сервер, под ним его команды.</summary>
     private readonly ObservableCollection<OperationResult> _rows = new();
-
-    /// <summary>Строка команд → строка её копирования.</summary>
-    private readonly Dictionary<OperationResult, OperationResult> _heads = new(ReferenceEqualityComparer.Instance);
-
-    /// <summary>Место строки копирования в очереди — порядок, когда по столбцу строки равны.</summary>
-    private readonly Dictionary<OperationResult, int> _queue = new(ReferenceEqualityComparer.Instance);
-
-    /// <summary>
-    /// Порядок связками: копирования сравниваются по выбранному столбцу, строка команд
-    /// идёт сразу под своим копированием, как бы ни менялись её собственные значения.
-    /// </summary>
-    private sealed class PairOrder(
-        System.Collections.IComparer byColumn,
-        Dictionary<OperationResult, OperationResult> heads,
-        Dictionary<OperationResult, int> queue) : System.Collections.IComparer
-    {
-        public int Compare(object? x, object? y)
-        {
-            if (ReferenceEquals(x, y) || x is not OperationResult a || y is not OperationResult b)
-            {
-                return 0;
-            }
-
-            var headA = heads.GetValueOrDefault(a, a);
-            var headB = heads.GetValueOrDefault(b, b);
-
-            if (!ReferenceEquals(headA, headB))
-            {
-                var order = byColumn.Compare(headA, headB);
-                return order != 0 ? order : queue.GetValueOrDefault(headA).CompareTo(queue.GetValueOrDefault(headB));
-            }
-
-            return ReferenceEquals(a, headA) ? -1 : 1;
-        }
-    }
 
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
@@ -196,29 +159,12 @@ public partial class ResultsView : UserControl
         OperationBatch following = _chain;
 
         _rows.Clear();
-        _heads.Clear();
-        _queue.Clear();
 
-        var pairs = shown.Results
-            .Select(row => (row, after: AppState.AfterRowOf(shown, row, following)))
-            .ToList();
-
-        // связки заполняются раньше строк: таблица ставит строку на место уже при добавлении
-        foreach (var (row, after) in pairs)
-        {
-            _queue[row] = _queue.Count;
-
-            if (after is not null)
-            {
-                _heads[after] = row;
-            }
-        }
-
-        foreach (var (row, after) in pairs)
+        foreach (var row in shown.Results)
         {
             _rows.Add(row);
 
-            if (after is not null)
+            if (AppState.AfterRowOf(shown, row, following) is { } after)
             {
                 _rows.Add(after);
             }

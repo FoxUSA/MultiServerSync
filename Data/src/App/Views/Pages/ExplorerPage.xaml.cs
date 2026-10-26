@@ -54,13 +54,17 @@ public partial class ExplorerPage : Page
             pane.StateChanged += OnPaneState;
         }
 
-        LocalPane.ShowTransfer(toRight: true, "Отмеченное — в открытую справа папку сервера. F5 — то же, а без галочек — строку под курсором");
-        RemotePane.ShowTransfer(toRight: false, "Отмеченное — в открытую слева папку компьютера. F5 — то же, а без галочек — строку под курсором");
+        LocalPane.ShowTransfer(toRight: true, "Отмеченное, а без галочек — строку под курсором, в открытую справа папку сервера (F5). Можно и перетащить мышью");
+        RemotePane.ShowTransfer(toRight: false, "Отмеченное, а без галочек — строку под курсором, в открытую слева папку компьютера (F5). Можно и перетащить мышью");
         RemotePane.EnableTitlePicker("Сменить сервер");
         RemotePane.TitleClicked += OnRemoteTitleClicked;
 
-        LocalPane.List.SelectionChanged += (_, _) => UpdateTransferButtons();
-        RemotePane.List.SelectionChanged += (_, _) => UpdateTransferButtons();
+        // кнопка копирования живёт и от галочек, и от строки под курсором — как F5
+        foreach (var pane in new[] { LocalPane, RemotePane })
+        {
+            pane.List.SelectionChanged += (_, _) => UpdateTransferButtons();
+            pane.List.CurrentCellChanged += (_, _) => UpdateTransferButtons();
+        }
 
         PreviewKeyDown += OnPageKeyDown;
 
@@ -235,8 +239,8 @@ public partial class ExplorerPage : Page
 
     private void UpdateTransferButtons()
     {
-        LocalPane.CanTransfer = _remote is not null && LocalPane.SelectedEntries.Count > 0;
-        RemotePane.CanTransfer = _remote is not null && RemotePane.SelectedEntries.Count > 0
+        LocalPane.CanTransfer = _remote is not null && LocalPane.TargetEntries.Count > 0;
+        RemotePane.CanTransfer = _remote is not null && RemotePane.TargetEntries.Count > 0
             && LocalPane.CurrentPath.Length > 0;
     }
 

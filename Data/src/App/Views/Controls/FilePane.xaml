@@ -148,6 +148,11 @@
         <DataTrigger Binding="{Binding IsCursor}" Value="True">
           <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
         </DataTrigger>
+        <!--  папка, на которую сейчас бросят перетаскиваемое  -->
+        <DataTrigger Binding="{Binding IsDropTarget}" Value="True">
+          <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+          <Setter Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+        </DataTrigger>
       </Style.Triggers>
     </Style>
   </UserControl.Resources>
@@ -555,6 +560,7 @@
           AllowDrop="True"
           CellStyle="{StaticResource AppDataGridCellStyle}"
           ColumnHeaderStyle="{StaticResource ResizableColumnHeaderStyle}"
+          DragLeave="OnListDragLeave"
           DragOver="OnListDragOver"
           Drop="OnListDrop"
           GotKeyboardFocus="OnListFocused"

@@ -196,6 +196,7 @@
         <DataGrid
           x:Name="ResultsGrid"
           Background="Transparent"
+          CanUserSortColumns="False"
           BorderThickness="0"
           ColumnHeaderStyle="{StaticResource AppColumnHeaderStyle}"
           ColumnHeaderHeight="{StaticResource IconButtonSize}"

@@ -66,6 +66,15 @@ public sealed class PaneRow : ObservableObject
         set => Set(ref _isCursor, value);
     }
 
+    private bool _isDropTarget;
+
+    /// <summary>Над этой папкой держат перетаскиваемое — подсвечена, как в проводнике.</summary>
+    public bool IsDropTarget
+    {
+        get => _isDropTarget;
+        set => Set(ref _isDropTarget, value);
+    }
+
     public string Name => _entry.Name;
 
     public string FullPath => _entry.FullPath;
@@ -2491,16 +2500,18 @@ public partial class FilePane : UserControl
         }
     }
 
-    // ── мышь: рамка выделения и приём файлов из проводника Windows ───────────
+    // ── мышь: рамка выделения, перетаскивание файлов, приём из проводника Windows ──
 
     /// <summary>
-    /// Протяжка левой кнопкой — всегда рамка выделения, с любого места строки и с пустого
-    /// места под строками. Галочка добавляет или снимает свою строку.
+    /// Протяжка левой кнопкой за имя — перетаскивание файлов, как в проводнике; за другие
+    /// столбцы и с пустого места под строками — рамка выделения. Галочка добавляет или снимает
+    /// свою строку.
     /// </summary>
     private void OnListMouseDown(object sender, MouseButtonEventArgs e)
     {
         Activated?.Invoke(this);
         _marqueeFrom = null;
+        _dragFrom = null;
 
         var hit = e.OriginalSource as DependencyObject;
 
@@ -2552,6 +2563,15 @@ public partial class FilePane : UserControl
         }
 
         var from = e.GetPosition(List);
+
+        if (plain && row is { Item: PaneRow { IsParent: false, Entry.Kind: FsKind.Normal } grabbed }
+            && FindParent<DataGridCell>(hit)?.Column == NameColumn)
+        {
+            _dragFrom = from;
+            _dragRow = grabbed;
+            return;
+        }
+
         var index = row is null ? List.Items.Count : List.ItemContainerGenerator.IndexFromContainer(row);
 
         _marqueeFrom = from;
@@ -2567,6 +2587,25 @@ public partial class FilePane : UserControl
 
     private void OnListMouseMove(object sender, MouseEventArgs e)
     {
+        if (_dragFrom is { } grab)
+        {
+            var moved = e.GetPosition(List);
+
+            if (e.LeftButton != MouseButtonState.Pressed)
+            {
+                _dragFrom = null;
+            }
+            else if (Math.Abs(moved.X - grab.X) >= SystemParameters.MinimumHorizontalDragDistance
+                || Math.Abs(moved.Y - grab.Y) >= SystemParameters.MinimumVerticalDragDistance)
+            {
+                _dragFrom = null;
+                e.Handled = true;
+                StartDrag(_dragRow!);
+            }
+
+            return;
+        }
+
         if (_marqueeFrom is not { } origin || e.LeftButton != MouseButtonState.Pressed)
         {
             return;
@@ -2601,31 +2640,175 @@ public partial class FilePane : UserControl
         return _current.Length > 0 || IsRemote ? _current : null;
     }
 
-    /// <summary>Файлы, брошенные из проводника Windows: на сервер — заливкой, сюда — копией.</summary>
+    /// <summary>Свои строки в перетаскивании: откуда и что. Рядом — пути для проводника Windows, если это файлы компьютера.</summary>
+    private sealed record PaneDrag(FilePane From, IReadOnlyList<FsEntry> Items);
+
+    private const string PaneDragFormat = "MultiServerSync.PaneDrag";
+
+    /// <summary>Нажали на имя строки — с этой точки пойдёт перетаскивание, а не рамка.</summary>
+    private Point? _dragFrom;
+    private PaneRow? _dragRow;
+
+    /// <summary>Куда упадёт — пишет панель под мышью, показывает подпись у курсора.</summary>
+    private static string? _dropHint;
+    private static long _dropHintAt;
+
+    /// <summary>
+    /// Перетаскивание мышью — то же копирование, что F5 и кнопка: с галочками — отмеченное,
+    /// без них — строка, за которую взяли. В соседнюю панель, в папку этой или в проводник Windows.
+    /// </summary>
+    private void StartDrag(PaneRow grabbed)
+    {
+        var items = SelectedEntries is { Count: > 0 } picked ? picked : [grabbed.Entry];
+        var first = items.Count == 1 ? grabbed : List.SelectedItems.OfType<PaneRow>().FirstOrDefault() ?? grabbed;
+        var title = items.Count == 1 ? items[0].Name : $"{items.Count} {Plural(items.Count, "объект", "объекта", "объектов")}";
+
+        var data = new DataObject();
+        data.SetData(PaneDragFormat, new PaneDrag(this, items));
+
+        // файлы компьютера можно бросить и в проводник Windows
+        if (!IsRemote)
+        {
+            var paths = new System.Collections.Specialized.StringCollection();
+            paths.AddRange(items.Select(i => i.FullPath).ToArray());
+            data.SetFileDropList(paths);
+        }
+
+        var ghost = new DragGhost(this, first.Icon, title, items.Count);
+
+        void OnFeedback(object sender, GiveFeedbackEventArgs e)
+        {
+            ghost.Follow();
+            var fresh = Environment.TickCount64 - _dropHintAt < 400;
+            ghost.SetAction(e.Effects == DragDropEffects.None ? null : fresh ? _dropHint : "Копировать");
+        }
+
+        List.GiveFeedback += OnFeedback;
+
+        try
+        {
+            DragDrop.DoDragDrop(List, data, DragDropEffects.Copy);
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            // принимающая программа оборвала перетаскивание — ничего не делаем
+        }
+        finally
+        {
+            List.GiveFeedback -= OnFeedback;
+            ghost.Close();
+            _dropHint = null;
+        }
+    }
+
+    /// <summary>Можно ли бросить свои строки в эту папку: не в ту же, где они лежат, и не в саму себя.</summary>
+    private bool CanDrop(PaneDrag drag, string target)
+    {
+        if (DropRequested is null || drag.From._source is not { } from || _source is not { } to)
+        {
+            return false;
+        }
+
+        var sameSide = ReferenceEquals(from, to) || from is RemoteSource a && to is RemoteSource b && a.Server == b.Server;
+
+        if (!sameSide)
+        {
+            return true;
+        }
+
+        var comparison = to.IsRemote ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        var separator = to.IsRemote ? "/" : "\\";
+        var into = to.Normalize(target);
+
+        return drag.Items.All(item =>
+        {
+            var path = to.Normalize(item.FullPath);
+            return !string.Equals(to.Parent(path), into, comparison)
+                && !string.Equals(path, into, comparison)
+                && !into.StartsWith(path.TrimEnd('/', '\\') + separator, comparison);
+        });
+    }
+
+    /// <summary>Свои строки — копированием, как F5; файлы из проводника Windows — на сервер заливкой, сюда — копией.</summary>
     private void OnListDragOver(object sender, DragEventArgs e)
     {
         var target = DropFolder(e);
+        e.Handled = true;
+
+        if (e.Data.GetData(PaneDragFormat) is PaneDrag drag)
+        {
+            var ok = target is not null && CanDrop(drag, target);
+            e.Effects = ok ? DragDropEffects.Copy : DragDropEffects.None;
+            MarkDropRow(ok ? e : null);
+            _dropHint = ok ? $"Копировать в {_source!.Display(target!)}" : null;
+            _dropHintAt = Environment.TickCount64;
+            return;
+        }
 
         e.Effects = target is null || _source is null || !e.Data.GetDataPresent(DataFormats.FileDrop)
             ? DragDropEffects.None
             : (e.KeyStates & DragDropKeyStates.ShiftKey) != 0 && !IsRemote ? DragDropEffects.Move : DragDropEffects.Copy;
-
-        e.Handled = true;
+        MarkDropRow(e.Effects == DragDropEffects.None ? null : e);
     }
+
+    private void OnListDragLeave(object sender, DragEventArgs e) => MarkDropRow(null);
 
     private void OnListDrop(object sender, DragEventArgs e)
     {
+        MarkDropRow(null);
+
         if (DropFolder(e) is not { } target || _source is null)
         {
             return;
         }
 
         e.Handled = true;
+
+        if (e.Data.GetData(PaneDragFormat) is PaneDrag drag)
+        {
+            if (CanDrop(drag, target))
+            {
+                DropRequested?.Invoke(this, new PaneDrop(drag.From, drag.Items, [], target, Move: false));
+            }
+
+            return;
+        }
+
         var move = (e.KeyStates & DragDropKeyStates.ShiftKey) != 0;
 
         if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } files)
         {
             DropRequested?.Invoke(this, new PaneDrop(null, [], files, target, move));
+        }
+    }
+
+    private PaneRow? _dropRow;
+
+    /// <summary>Папка под мышью, в которую упадёт перетаскиваемое, — подсвечена. Null — подсветку снять.</summary>
+    private void MarkDropRow(DragEventArgs? e)
+    {
+        var row = e is null ? null : FindRow(e.OriginalSource as DependencyObject)?.Item as PaneRow;
+
+        if (row is not null && DropFolder(e!) != row.FullPath)
+        {
+            row = null;
+        }
+
+        if (ReferenceEquals(row, _dropRow))
+        {
+            return;
+        }
+
+        if (_dropRow is not null)
+        {
+            _dropRow.IsDropTarget = false;
+        }
+
+        _dropRow = row;
+
+        if (row is not null)
+        {
+            row.IsDropTarget = true;
         }
     }
 
@@ -2996,6 +3179,8 @@ public partial class FilePane : UserControl
 
     private void OnListMouseUp(object sender, MouseButtonEventArgs e)
     {
+        _dragFrom = null;
+
         if (_marqueeOn)
         {
             EndMarquee();

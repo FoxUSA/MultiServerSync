@@ -2804,17 +2804,30 @@ public static class SshService
     /// </summary>
     private static string LocalSha256(ConcurrentDictionary<string, string> cache, string path)
     {
-        if (cache.TryGetValue(path, out var known))
+        // сумма помнится вместе с размером и временем записи: файл, пересобранный по тому же
+        // пути, считается заново — иначе сверка сравнивала сервер с суммой прежней версии
+        var key = HashKey(path);
+
+        if (cache.TryGetValue(key, out var known))
         {
             return known;
         }
 
-        lock (HashLocks.GetOrAdd(path, _ => new object()))
+        lock (HashLocks.GetOrAdd(key, _ => new object()))
         {
-            var hash = cache.GetOrAdd(path, ComputeLocalSha256);
-            HashLocks.TryRemove(path, out _);
+            var hash = cache.GetOrAdd(key, _ => ComputeLocalSha256(path));
+            HashLocks.TryRemove(key, out _);
             return hash;
         }
+    }
+
+    /// <summary>Ключ кэша сумм: путь, за ним через перевод строки размер и время записи.</summary>
+    internal static string HashKey(string path)
+    {
+        var info = new FileInfo(path);
+        return info.Exists
+            ? $"{path}\n{info.Length}\n{info.LastWriteTimeUtc.Ticks}"
+            : path;
     }
 
     internal static string ComputeLocalSha256(string path)
