@@ -21,8 +21,10 @@ public partial class ExplorerPage : Page
     /// <summary>Этот компьютер — один на все вкладки: кэш папок общий.</summary>
     private static readonly LocalSource Local = new();
 
-    /// <summary>Переносы одной вкладки идут по очереди: канал до сервера один.</summary>
-    private static readonly Dictionary<Workspace, Task> Queues = new();
+    /// <summary>Идущие копирования вкладки: куда пишут и что читают — по ним решается, ждать ли новому.</summary>
+    private static readonly Dictionary<Workspace, List<Transfer>> Active = new();
+
+    private sealed record Transfer(Task Task, IReadOnlyList<string> Dests, IReadOnlyList<string> Sources);
 
     private readonly DispatcherTimer _saveDelay;
     private Workspace? _tab;
@@ -291,17 +293,71 @@ public partial class ExplorerPage : Page
             AppLog.Hint("Между компьютером и сервером только копирование: исходные файлы остаются на месте.");
         }
 
-        if (tab.CopyBatch.IsRunning)
-        {
-            AppLog.Hint("Копирование встало в очередь — начнётся, когда закончится текущее.");
-        }
-
         var server = remote.Server;
         var options = tab.CurrentOptions;
         var verify = tab.VerifyChecksums;
         var names = items.Select(i => i.Name).ToList();
 
-        return Enqueue(tab, async () =>
+        // копирования идут рядом; ждёт только то, что пишет в те же файлы (или читает их), что идущее
+        var dests = items.Select(i => to.Source?.Combine(targetDir, i.Name) ?? targetDir).ToList();
+        var sources = items.Select(i => i.FullPath).ToList();
+        var running = Active.TryGetValue(tab, out var list) ? list : Active[tab] = [];
+        running.RemoveAll(r => r.Task.IsCompleted);
+
+        var blockers = running
+            .Where(r => Overlap(dests, r.Dests.Concat(r.Sources)) || Overlap(sources, r.Dests))
+            .Select(r => r.Task)
+            .ToList();
+
+        // строка «в очереди» — сразу, в момент нажатия: без похода на сервер, интерфейс не ждёт
+        OperationResult? waiting = null;
+
+        if (blockers.Count > 0)
+        {
+            AppLog.Hint("Копирование встало в очередь: те же файлы ещё копируются — начнётся следом.");
+            waiting = tab.CopyBatch.AddWaiting(server, $"{Count(items)} → {targetDir}");
+        }
+
+        var task = RunAsync();
+        running.Add(new Transfer(task, dests, sources));
+        return task;
+
+        async Task RunAsync()
+        {
+            if (blockers.Count > 0)
+            {
+                try
+                {
+                    await Task.WhenAll(blockers);
+                }
+                catch
+                {
+                    // прошлое копирование уже рассказало о своей ошибке
+                }
+            }
+
+            try
+            {
+                // остановили, пока ждало: строка уже «не запускалось», копировать не надо
+                if (waiting is { Status: OperationStatus.Cancelled })
+                {
+                    return;
+                }
+
+                // запуск займёт свою строку «в очереди», а не чужую на том же сервере
+                OperationBatch.ClaimedRow.Value = waiting;
+                await RunTransferAsync();
+            }
+            finally
+            {
+                if (waiting is not null)
+                {
+                    tab.CopyBatch.DropWaiting(waiting);
+                }
+            }
+        }
+
+        async Task RunTransferAsync()
         {
             AppLog.Section = AppSection.Explorer;
             ConfirmReplace ask = (_, paths) => AskReplace(tab, paths, targetDir);
@@ -310,19 +366,24 @@ public partial class ExplorerPage : Page
             {
                 AppLog.Info($"Копирование на сервер: {Count(items)} → {targetDir}", server.Display);
                 var payload = items.Select(i => new TransferItem(i.FullPath)).ToList();
-                await tab.UploadCoreAsync(payload, targetDir, [server], options, verify, ask);
+                await tab.UploadCoreAsync(payload, targetDir, [server], options, verify, ask, concurrent: true);
                 remote.Invalidate(targetDir);
             }
             else
             {
                 AppLog.Info($"Копирование с сервера: {Count(items)} → {targetDir}", server.Display);
                 var plan = new Dictionary<ServerEntry, List<string>> { [server] = items.Select(i => i.FullPath).ToList() };
-                await tab.DownloadCoreAsync(plan, targetDir, options, verify, ask);
+                await tab.DownloadCoreAsync(plan, targetDir, options, verify, ask, concurrent: true);
             }
 
-            AppState.Current.NotifyFinished(tab.CopyBatch);
+            // звук и «авто»-копия — когда закончилось последнее из шедших рядом
+            if (!tab.CopyBatch.IsRunning)
+            {
+                AppState.Current.NotifyFinished(tab.CopyBatch);
+            }
+
             await RefreshShowingAsync(to, targetDir, names);
-        });
+        }
     }
 
     /// <summary>
@@ -365,26 +426,20 @@ public partial class ExplorerPage : Page
             };
         });
 
-    private static Task Enqueue(Workspace tab, Func<Task> work)
+    /// <summary>Пути пересекаются: один и тот же, или один лежит внутри другого.</summary>
+    private static bool Overlap(IEnumerable<string> a, IEnumerable<string> b)
     {
-        var previous = Queues.GetValueOrDefault(tab) ?? Task.CompletedTask;
-        var next = After(previous, work);
-        Queues[tab] = next;
-        return next;
+        var right = b.Select(Trim).ToList();
 
-        static async Task After(Task previous, Func<Task> work)
-        {
-            try
-            {
-                await previous;
-            }
-            catch
-            {
-                // прошлая операция уже рассказала о своей ошибке
-            }
+        return a.Select(Trim).Any(x => right.Any(y =>
+            string.Equals(x, y, StringComparison.OrdinalIgnoreCase) || Inside(x, y) || Inside(y, x)));
 
-            await work();
-        }
+        static string Trim(string path) => path.TrimEnd('/', '\\');
+
+        static bool Inside(string path, string dir) =>
+            path.Length > dir.Length
+            && path.StartsWith(dir, StringComparison.OrdinalIgnoreCase)
+            && path[dir.Length] is '/' or '\\';
     }
 
     /// <summary>

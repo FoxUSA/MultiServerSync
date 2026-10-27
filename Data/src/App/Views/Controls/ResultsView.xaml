@@ -39,6 +39,41 @@
       </Setter>
     </Style>
 
+    <!--  стоп в строке: как кнопки на ярлыках — под мышью залитый красный фон и белый значок  -->
+    <Style x:Key="RowStopStyle" TargetType="Button">
+      <Setter Property="Width" Value="20" />
+      <Setter Property="Height" Value="20" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Bd"
+              Background="Transparent"
+              CornerRadius="4">
+              <ui:SymbolIcon
+                x:Name="Glyph"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                FontSize="12"
+                Foreground="{TemplateBinding Foreground}"
+                Symbol="Stop24" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#C42B1C" />
+                <Setter TargetName="Glyph" Property="Foreground" Value="White" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <!--  у обычной ячейки padding 8 по бокам — иконке статуса не остаётся места  -->
     <Style
       x:Key="IconCellStyle"
@@ -279,6 +314,19 @@
                 </Style>
               </DataGridTextColumn.ElementStyle>
             </DataGridTextColumn>
+
+            <!--  стоп одной строки: только у ждущих и идущих; общий «Остановить» — всё сразу  -->
+            <DataGridTemplateColumn Width="30" CellStyle="{StaticResource IconCellStyle}">
+              <DataGridTemplateColumn.CellTemplate>
+                <DataTemplate>
+                  <Button
+                    Click="OnRowStop"
+                    Style="{StaticResource RowStopStyle}"
+                    ToolTip="Остановить только эту строку: идущая — оборвётся (команде — Ctrl+C), ждущая очереди — не начнётся"
+                    Visibility="{Binding CanStop, Converter={StaticResource BoolToVis}}" />
+                </DataTemplate>
+              </DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
           </DataGrid.Columns>
         </DataGrid>
       </Border>

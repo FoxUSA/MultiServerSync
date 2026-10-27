@@ -109,6 +109,12 @@ public sealed class OperationResult : ObservableObject
                     _transferTotal = 0;
                 }
 
+                // остановка закончилась — так или иначе
+                if (value != OperationStatus.Running)
+                {
+                    _stopping = false;
+                }
+
                 Raise(nameof(HasTransfer));
 
                 // закончил — с этого момента идёт столбец «Прошло»; снова в очереди или в работе — пусто
@@ -123,6 +129,7 @@ public sealed class OperationResult : ObservableObject
                     nameof(StatusText),
                     nameof(ShortStatus),
                     nameof(IsRunning),
+                    nameof(CanStop),
                     nameof(ElapsedText),
                     nameof(DurationText));
             }
@@ -155,18 +162,101 @@ public sealed class OperationResult : ObservableObject
             {
                 OperationStatus.Success => string.IsNullOrWhiteSpace(Message) ? "успешно" : Message,
                 OperationStatus.Failed => "ошибка",
+                OperationStatus.Running when Stopping => "останавливается…",
                 OperationStatus.Running => string.IsNullOrWhiteSpace(Message) ? "выполняется" : Message,
-                OperationStatus.Cancelled => "отменено",
-                _ => "в очереди",
+
+                // «остановлено · передано 2 МБ из 20 МБ», «не запускалось»
+                OperationStatus.Cancelled => string.IsNullOrWhiteSpace(Message) ? "отменено" : Message,
+
+                // ждущий своей очереди запуск пишет, что и куда пойдёт
+                _ => string.IsNullOrWhiteSpace(Message) ? "в очереди" : Message,
             };
 
             return text.Length > 60 ? text[..57] + "…" : text;
         }
     }
 
+    // ── остановка одной строки ────────────────────────────────────────────────
+
+    /// <summary>Прогон, который выполняет эту строку: стоп в строке останавливает её через него.</summary>
+    internal OperationBatch? Batch { get; set; }
+
+    /// <summary>Работа этой строки — повтор упавших повторяет у каждой её собственную.</summary>
+    internal ServerWork? Work { get; set; }
+
+    /// <summary>Отмена только этой строки; связана с общей отменой прогона.</summary>
+    internal CancellationTokenSource? Stopper { get; set; }
+
+    private bool _skipped;
+
+    /// <summary>Остановили раньше, чем строка началась: «не запускалось», серым.</summary>
+    public bool Skipped
+    {
+        get => _skipped;
+        set { if (Set(ref _skipped, value)) { RaiseMany(nameof(StatusBrush), nameof(StatusSymbol), nameof(ShortStatus), nameof(StatusText)); } }
+    }
+
+    private bool _stopping;
+
+    /// <summary>
+    /// Стоп нажат, строка ещё идёт: команде послан Ctrl+C, ждём, пока свернётся. Видно сразу —
+    /// «останавливается…», а кнопка стопа уходит, чтобы не жать её снова и снова.
+    /// </summary>
+    public bool Stopping
+    {
+        get => _stopping;
+        private set { if (Set(ref _stopping, value)) { RaiseMany(nameof(CanStop), nameof(ShortStatus), nameof(StatusText)); } }
+    }
+
+    /// <summary>Пошла остановка: эта строка и её идущая команда цепочки — «останавливается…».</summary>
+    internal void BeginStopping()
+    {
+        if (!IsRunning)
+        {
+            return;
+        }
+
+        Stopping = true;
+
+        foreach (var step in Steps.Where(s => s.IsRunning))
+        {
+            step.Stopping = true;
+        }
+    }
+
+    /// <summary>Строку ещё можно остановить: ждёт своей очереди или идёт и стоп ещё не нажат.</summary>
+    public bool CanStop => !Stopping && Status is OperationStatus.Pending or OperationStatus.Running;
+
+    /// <summary>
+    /// Стоп в строке. Команда цепочки, что ещё не пошла, не пойдёт — и нижние тоже: они ждут её итога,
+    /// как при ошибке. Идущая останавливает свой сервер в цепочке.
+    /// </summary>
+    public Task StopAsync()
+    {
+        if (StepNumber > 0 && Status == OperationStatus.Pending)
+        {
+            Parent?.CancelStepsFrom(StepNumber);
+            return Task.CompletedTask;
+        }
+
+        var row = Parent ?? this;
+        return row.Batch?.StopRowAsync(row) ?? Task.CompletedTask;
+    }
+
+    /// <summary>Итог оборванной строки: сколько успело уйти — то, что уже передано, лежит на месте.</summary>
+    internal string StoppedText => _transferTotal > 0
+        ? $"остановлено · передано {TransferItem.Format(_transferDone)} из {TransferItem.Format(_transferTotal)}"
+        : "остановлено";
+
     // ── команда цепочки — своей строкой ───────────────────────────────────────
 
     private readonly List<OperationResult> _steps = [];
+
+    /// <summary>
+    /// Строка сервера в цепочке, если это строка одной её команды. Пока команды ждут копирования —
+    /// строка копирования, с началом цепочки — строка цепочки.
+    /// </summary>
+    public OperationResult? Parent { get; private set; }
 
     /// <summary>Номер команды в цепочке, если это строка одной команды; 0 — обычная строка сервера.</summary>
     public int StepNumber { get; private init; }
@@ -192,11 +282,124 @@ public sealed class OperationResult : ObservableObject
     /// <summary>Появилась строка команды или прогон начался заново.</summary>
     public event Action<OperationResult>? StepsChanged;
 
-    /// <summary>Команда цепочки пошла: её строка. Повтор той же команды заменяет прежнюю строку.</summary>
+    /// <summary>
+    /// Команда цепочки пошла: её строка. Заранее поставленная («ждёт копирования») идёт в ход,
+    /// повтор той же команды заменяет прежнюю строку.
+    /// </summary>
     public OperationResult BeginStep(int number, string command)
+    {
+        var step = StepAt(number) is { Status: OperationStatus.Pending } planned ? planned : NewStep(number, command);
+        step.Message = string.Empty;
+        step.Status = OperationStatus.Running;
+        StepsChanged?.Invoke(this);
+        return step;
+    }
+
+    /// <summary>Цепочка встала раньше этой команды: её строка «#3 не запускалась». Отменённая стопом так и остаётся.</summary>
+    public void SkipStep(int number, string command)
+    {
+        var step = StepAt(number);
+
+        if (step is { Status: OperationStatus.Cancelled })
+        {
+            return;
+        }
+
+        if (step is not { Status: OperationStatus.Pending })
+        {
+            step = NewStep(number, command);
+        }
+
+        step.Message = string.Empty;
+        step.Skipped = true;
+        step.Status = OperationStatus.Cancelled;
+        StepsChanged?.Invoke(this);
+    }
+
+    /// <summary>
+    /// Команды после копирования встают строками сразу, со стартом копирования, — «ждёт копирования».
+    /// Их видно заранее и любую можно остановить, пока она не пошла.
+    /// </summary>
+    public void PlanSteps(IEnumerable<(int Number, string Text)> steps)
+    {
+        foreach (var (number, text) in steps)
+        {
+            NewStep(number, text).Message = "ждёт копирования";
+        }
+
+        StepsChanged?.Invoke(this);
+    }
+
+    /// <summary>Цепочка пошла: заранее поставленные строки команд переходят к её строке — «в очереди».</summary>
+    public void AdoptSteps(OperationResult planned)
+    {
+        lock (_sync)
+        {
+            foreach (var step in planned.Steps)
+            {
+                step.Parent = this;
+
+                if (step.Status == OperationStatus.Pending)
+                {
+                    step.Message = string.Empty;
+                }
+
+                _steps.RemoveAll(s => s.StepNumber == step.StepNumber);
+                _steps.Add(step);
+            }
+        }
+
+        StepsChanged?.Invoke(this);
+    }
+
+    /// <summary>Стоп по ещё не начатой команде: не пойдут ни она, ни нижние — «#2 отменена».</summary>
+    public void CancelStepsFrom(int number)
+    {
+        foreach (var step in Steps.Where(s => s.StepNumber >= number && s.Status == OperationStatus.Pending))
+        {
+            step.Skipped = true;
+            step.Message = "отменена";
+            step.Status = OperationStatus.Cancelled;
+        }
+    }
+
+    /// <summary>Цепочка до этих команд не дошла (копирование не прошло): ждущие — «не запускалась».</summary>
+    public void SkipPlanned()
+    {
+        foreach (var step in Steps.Where(s => s.Status == OperationStatus.Pending))
+        {
+            step.Message = string.Empty;
+            step.Skipped = true;
+            step.Status = OperationStatus.Cancelled;
+        }
+    }
+
+    /// <summary>Эту команду цепочки остановили, пока она ждала.</summary>
+    public bool StepStopped(int number) => StepAt(number) is { Status: OperationStatus.Cancelled };
+
+    /// <summary>Остановлены все заранее поставленные команды — на сервере цепочке делать нечего.</summary>
+    public bool StepsStopped
+    {
+        get
+        {
+            var steps = Steps;
+            return steps.Count > 0 && steps.All(s => s.Status == OperationStatus.Cancelled);
+        }
+    }
+
+    private OperationResult? StepAt(int number)
+    {
+        lock (_sync)
+        {
+            return _steps.FirstOrDefault(s => s.StepNumber == number);
+        }
+    }
+
+    private OperationResult NewStep(int number, string command)
     {
         var step = new OperationResult(Server, Scope)
         {
+            Parent = this,
             StepNumber = number,
             StepCommand = command.Replace("\r\n", "\n").Split('\n')[0].Trim(),
             Message = string.Empty,
@@ -208,8 +411,6 @@ public sealed class OperationResult : ObservableObject
             _steps.Add(step);
         }
 
-        step.Status = OperationStatus.Running;
-        StepsChanged?.Invoke(this);
         return step;
     }
 
@@ -238,9 +439,15 @@ public sealed class OperationResult : ObservableObject
             {
                 OperationStatus.Success => $"{label} успешно · {StepCommand}",
                 OperationStatus.Failed => string.IsNullOrWhiteSpace(Message) ? $"{label} ошибка" : $"{label} ошибка · {Message}",
+                OperationStatus.Running when Stopping => $"{label} останавливается…",
                 OperationStatus.Running => $"{label} " + (string.IsNullOrWhiteSpace(Message) ? "выполняется…" : Message),
+
+                // «#2 отменена» — остановили, пока ждала; «#3 не запускалась» — цепочка встала раньше
+                OperationStatus.Cancelled when Skipped => $"{label} " + (string.IsNullOrWhiteSpace(Message) ? "не запускалась" : Message),
                 OperationStatus.Cancelled => $"{label} прервано",
-                _ => $"{label} в очереди",
+
+                // «#1 ждёт копирования», «#2 в очереди»
+                _ => $"{label} " + (string.IsNullOrWhiteSpace(Message) ? "в очереди" : Message),
             };
 
             return text.Length > 90 ? text[..87] + "…" : text;
@@ -419,6 +626,7 @@ public sealed class OperationResult : ObservableObject
 
     public SymbolRegular StatusSymbol => Status switch
     {
+        OperationStatus.Cancelled when Skipped => SymbolRegular.Circle24,
         OperationStatus.Success => SymbolRegular.CheckmarkCircle24,
         OperationStatus.Failed => SymbolRegular.ErrorCircle24,
         OperationStatus.Running => SymbolRegular.ArrowSync24,
@@ -428,6 +636,7 @@ public sealed class OperationResult : ObservableObject
 
     public Brush StatusBrush => Status switch
     {
+        OperationStatus.Cancelled when Skipped => Grey,
         OperationStatus.Success => Green,
         OperationStatus.Failed => Red,
         OperationStatus.Running => Blue,
@@ -445,8 +654,10 @@ public sealed class OperationResult : ObservableObject
             {
                 OperationStatus.Success => "успешно",
                 OperationStatus.Failed => "ошибка",
-                OperationStatus.Running => "выполняется",
-                OperationStatus.Cancelled => "отменено",
+                OperationStatus.Running => Stopping ? "останавливается…" : "выполняется",
+
+                // своё сообщение остановки целиком: «остановлено · передано …», «не запускалось»
+                OperationStatus.Cancelled => string.IsNullOrWhiteSpace(Message) ? "отменено" : Message,
                 _ => "в очереди",
             });
 
@@ -523,6 +734,7 @@ public sealed class OperationResult : ObservableObject
 
         Duration = TimeSpan.Zero;
         Message = string.Empty;
+        Skipped = false;
         Status = OperationStatus.Pending;
         ClearSteps();
         Raise(nameof(Output));
@@ -538,6 +750,7 @@ public sealed class OperationResult : ObservableObject
 
         Duration = TimeSpan.Zero;
         Message = string.Empty;
+        Skipped = false;
         Status = OperationStatus.Pending;
         ClearSteps();
         Raise(nameof(Output));

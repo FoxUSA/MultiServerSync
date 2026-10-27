@@ -891,7 +891,8 @@ public sealed class Workspace : ObservableObject
         string folder,
         UploadOptions options,
         bool verify,
-        ConfirmReplace? confirmReplace = null)
+        ConfirmReplace? confirmReplace = null,
+        bool concurrent = false)
     {
         var targets = plan.Keys.ToList();
         var settings = AppState.Current.Settings;
@@ -950,7 +951,14 @@ public sealed class Workspace : ObservableObject
                     + (stats.Skipped > 0 ? $" · уже были, не тронуты {stats.Skipped}" : string.Empty);
                 result.Status = OperationStatus.Success;
             },
-            settings.MaxParallel);
+            settings.MaxParallel,
+            concurrent: concurrent);
+
+        // запуски «Проводника» идут рядом — итог на ярлыке, когда закончился последний
+        if (CopyBatch.IsRunning)
+        {
+            return;
+        }
 
         FinishStatus(
             CopyBatch,
@@ -1718,7 +1726,7 @@ public sealed class Workspace : ObservableObject
             + (options.MatchByDate && !options.MatchByHash ? ", только отличающиеся по дате" : string.Empty)
             + (verify ? ", с проверкой копий" : string.Empty), Title);
 
-        await UploadCoreAsync(payload, remotePath, targets, options, verify);
+        await UploadCoreAsync(payload, remotePath, targets, options, verify, prepare: ChainPlan());
 
         // с галочкой «+ команды» автокопия ждёт личные команды: отчёт один, копирование и команды
         var together = _afterCopyEnabled && Personal is not null && AppState.Current.Settings.CopyWithChain;
@@ -1752,7 +1760,9 @@ public sealed class Workspace : ObservableObject
         IReadOnlyList<ServerEntry> targets,
         UploadOptions options,
         bool verify,
-        ConfirmReplace? confirmReplace = null)
+        ConfirmReplace? confirmReplace = null,
+        bool concurrent = false,
+        Action<OperationResult>? prepare = null)
     {
         var settings = AppState.Current.Settings;
 
@@ -1921,7 +1931,15 @@ public sealed class Workspace : ObservableObject
                 result.Message = summary;
                 result.Status = OperationStatus.Success;
             },
-            settings.MaxParallel);
+            settings.MaxParallel,
+            concurrent: concurrent,
+            prepare: prepare);
+
+        // запуски «Проводника» идут рядом — итог на ярлыке, когда закончился последний
+        if (CopyBatch.IsRunning)
+        {
+            return;
+        }
 
         // итог задачи, а не число серверов: по «0 из 5» сразу видно, что ничего не ушло.
         // Слово «скопировано» не пишем — на узкой плашке оно не влезает, а смысл и так ясен
@@ -1950,8 +1968,38 @@ public sealed class Workspace : ObservableObject
     }
 
     /// <summary>
+    /// Строки команд после копирования — под строкой копирования каждого сервера, где они пойдут,
+    /// сразу со стартом копирования: видно, что будет дальше, и любую можно остановить заранее.
+    /// Null — команды после копирования не пойдут.
+    /// </summary>
+    private Action<OperationResult>? ChainPlan()
+    {
+        if (!_afterCopyEnabled || Personal is not { } personal || personal.CommandBatch.IsRunning || personal.HeldSteps is not null)
+        {
+            return null;
+        }
+
+        var steps = personal.RunnableSteps(null, onlyThis: false).Select(s => (s.Number, s.Text)).ToList();
+        var servers = personal.CommandTargets;
+
+        if (steps.Count == 0 || servers.Count == 0)
+        {
+            return null;
+        }
+
+        return row =>
+        {
+            if (servers.Contains(row.Server))
+            {
+                row.PlanSteps(steps);
+            }
+        };
+    }
+
+    /// <summary>
     /// Личные команды после копирования — только на тех серверах, где копирование
     /// (и сверка сумм, если она включена) прошло. Умный режим уже спросил до копирования.
+    /// Команды, остановленные заранее в строке терминала, не пойдут — ни они, ни нижние.
     /// </summary>
     /// <param name="notifyCommands">Сообщить об окончании команд отдельно (иначе — вместе с копированием).</param>
     private async Task RunChainAsync(bool notifyCommands)
@@ -1986,8 +2034,29 @@ public sealed class Workspace : ObservableObject
             .Select(r => r.Server)
             .ToHashSet();
 
+        // где копирование не прошло, команды не пойдут — их строки «не запускалась»
+        foreach (var row in CopyBatch.LastRun.Where(r => failed.Contains(r.Server)))
+        {
+            row.SkipPlanned();
+        }
+
+        // заранее поставленные строки команд переходят к цепочке; все остановлены — сервер ей не нужен
+        var copyRows = CopyBatch.LastRun.GroupBy(r => r.Server).ToDictionary(g => g.Key, g => g.Last());
+        var stopped = copyRows.Values.Where(r => r.StepsStopped).Select(r => r.Server).ToHashSet();
+
         // у личной вкладки свои отметки; сервер, где копирование не прошло, из них выпадает
-        var targets = personal.CommandTargets.Where(s => !failed.Contains(s)).ToList();
+        var targets = personal.CommandTargets.Where(s => !failed.Contains(s) && !stopped.Contains(s)).ToList();
+
+        // команды остановили сами — не сбой, объяснять нечего
+        if (CopyBatch.RunSuccess > 0 && targets.Count == 0 && stopped.Count > 0)
+        {
+            foreach (var step in personal.Steps)
+            {
+                step.Clear();
+            }
+
+            return;
+        }
 
         if (CopyBatch.RunSuccess == 0 || targets.Count == 0)
         {
@@ -2008,7 +2077,23 @@ public sealed class Workspace : ObservableObject
             AppLog.Info($"Команды после копирования — на {targets.Count} сервере(ах); где копирование не прошло, пропущено.", Title);
         }
 
-        await personal.RunCommandAsync(notify: notifyCommands, approved: true, servers: targets);
+        await personal.RunCommandAsync(
+            notify: notifyCommands,
+            approved: true,
+            servers: targets,
+            prepare: row =>
+            {
+                if (copyRows.GetValueOrDefault(row.Server) is { } copy)
+                {
+                    row.AdoptSteps(copy);
+                }
+            });
+
+        // цепочка отказала или до сервера не дошла — ждать его командам больше нечего
+        foreach (var copy in copyRows.Values)
+        {
+            copy.SkipPlanned();
+        }
     }
 
     /// <summary>
@@ -2022,6 +2107,7 @@ public sealed class Workspace : ObservableObject
         foreach (var result in CopyBatch.LastRun)
         {
             result.Append(Views.Controls.OutputColoring.WarningMark + line + " —");
+            result.SkipPlanned();
         }
 
         AppLog.Warn(line, Title);
@@ -2078,12 +2164,14 @@ public sealed class Workspace : ObservableObject
     /// <param name="onlyThis">Только окно <paramref name="from"/>, без нижних.</param>
     /// <param name="approved">Умный режим уже спросил.</param>
     /// <param name="servers">Свои серверы вместо отмеченных — для команд после копирования.</param>
+    /// <param name="prepare">Строке сервера до старта — команды после копирования забирают свои заранее поставленные строки.</param>
     public async Task<bool> RunCommandAsync(
         bool notify = true,
         CommandStep? from = null,
         bool onlyThis = false,
         bool approved = false,
-        IReadOnlyList<ServerEntry>? servers = null)
+        IReadOnlyList<ServerEntry>? servers = null,
+        Action<OperationResult>? prepare = null)
     {
         if (CommandBatch.IsRunning)
         {
@@ -2244,6 +2332,16 @@ public sealed class Workspace : ObservableObject
                         var label = numbered ? $"#{step.Number} " : string.Empty;
                         var clock = System.Diagnostics.Stopwatch.StartNew();
 
+                        // остановили в строке терминала, пока ждала: не пойдёт ни она, ни нижние
+                        if (result.StepStopped(step.Number))
+                        {
+                            Write($"— #{step.Number} отменена: следующие окна на этом сервере не запускаются —");
+                            result.Message = label + "отменено";
+                            result.Status = OperationStatus.Cancelled;
+                            step.ServerSkipped();
+                            return;
+                        }
+
                         // процесс прошлого окна уже кончился — Ctrl+C не должен уйти в него
                         result.ResetJob();
                         step.ServerStarted();
@@ -2369,14 +2467,21 @@ public sealed class Workspace : ObservableObject
                     for (var rest = index + 1; rest < steps.Count; rest++)
                     {
                         steps[rest].ServerSkipped();
+
+                        // в терминале копирования — «#3 не запускалась»: видно, что не успело
+                        result.SkipStep(steps[rest].Number, steps[rest].Text);
                     }
+
+                    // заранее поставленная строка, до которой так и не дошло (оборвалось подключение)
+                    result.SkipPlanned();
 
                     resume[server] = index;
                 }
             },
             settings.MaxParallel,
             BeforeRetry,
-            Finish);
+            Finish,
+            prepare: prepare);
 
         Finish();
 

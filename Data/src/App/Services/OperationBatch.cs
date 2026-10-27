@@ -297,6 +297,19 @@ public sealed class OperationBatch : ObservableObject
             return;
         }
 
+        // «Остановить» — всё во вкладке: ждущие очереди не начнутся, иначе тут же стартовал бы следующий
+        foreach (var waiting in _waiting.ToList())
+        {
+            CancelWaiting(waiting);
+        }
+
+        // ждущие команды цепочки не пойдут; идущие строки — «останавливается…» сразу
+        foreach (var row in Results.ToList())
+        {
+            row.CancelStepsFrom(1);
+            row.BeginStopping();
+        }
+
         if (!IsRunning)
         {
             return;
@@ -354,7 +367,8 @@ public sealed class OperationBatch : ObservableObject
     /// канал команды занят её выводом, а «нажать Ctrl+C» в него нельзя — стандартный ввод
     /// закрыт сразу после передачи скрипта.
     /// </summary>
-    private async Task SignalAsync(string signal, string what)
+    /// <param name="only">Только этим строкам — стоп в строке; без него — всем идущим.</param>
+    private async Task SignalAsync(string signal, string what, IReadOnlyList<OperationResult>? only = null)
     {
         // сводный прогон ничего не выполняет сам — прерывают те, кто выполняет
         if (_sources.Count > 0)
@@ -363,7 +377,7 @@ public sealed class OperationBatch : ObservableObject
             return;
         }
 
-        var targets = Results.Where(r => r.IsRunning && r.RemoteGroup > 0).ToList();
+        var targets = (only ?? Results).Where(r => r.IsRunning && r.RemoteGroup > 0).ToList();
 
         if (targets.Count == 0)
         {
@@ -496,15 +510,22 @@ public sealed class OperationBatch : ObservableObject
         IsRunning = running;
     }
 
+    /// <param name="concurrent">
+    /// Можно стартовать, пока идёт прошлый запуск: оба идут рядом в одной таблице («Проводник»).
+    /// Без него идущий прогон второй запуск не принимает.
+    /// </param>
+    /// <param name="prepare">Каждой строке до старта: так встают строки команд после копирования.</param>
     public async Task RunAsync(
         string operationName,
         IReadOnlyList<ServerEntry> servers,
         ServerWork work,
         int maxParallel,
         Action<IReadOnlyList<ServerEntry>>? beforeRetry = null,
-        Action? afterRetry = null)
+        Action? afterRetry = null,
+        bool concurrent = false,
+        Action<OperationResult>? prepare = null)
     {
-        if (IsRunning || servers.Count == 0)
+        if (IsRunning && !concurrent || servers.Count == 0)
         {
             return;
         }
@@ -520,19 +541,159 @@ public sealed class OperationBatch : ObservableObject
         // срока «Хранить лог» после окончания прошлого (пока что-то идёт, сюда не попасть).
         var life = AppState.Current.OutputLife;
 
-        if (!KeepLog && (_lifeFrom is not { } last || DateTime.Now - last > life))
+        if (!IsRunning && !KeepLog && (_lifeFrom is not { } last || DateTime.Now - last > life))
         {
             Results.Clear();
+
+            // ждущие своей очереди — не прошлое, их строки остаются
+            foreach (var waiting in _waiting)
+            {
+                Results.Add(waiting);
+            }
         }
 
-        var run = servers.Select(s => new OperationResult(s, Scope)).ToList();
+        // вставший в очередь запуск уже виден строкой «в очереди» — он занимает её, а не добавляет новую.
+        // Только свою: копирование, стартовавшее рядом на тот же сервер, чужую ждущую строку не берёт
+        var run = new List<OperationResult>();
+        var claimed = ClaimedRow.Value;
 
-        foreach (var row in run)
+        foreach (var server in servers)
         {
-            Results.Add(row);
+            var row = claimed is not null && _waiting.Contains(claimed) && ReferenceEquals(claimed.Server, server)
+                ? claimed
+                : null;
+
+            if (row is not null)
+            {
+                _waiting.Remove(row);
+                row.Message = string.Empty;
+            }
+            else
+            {
+                row = new OperationResult(server, Scope);
+                Results.Add(row);
+            }
+
+            row.Batch = this;
+            row.Work = work;
+            prepare?.Invoke(row);
+            run.Add(row);
         }
 
         await ExecuteAsync(run, work, maxParallel);
+    }
+
+    /// <summary>Строки запусков, вставших в очередь за идущим: видны в терминале сразу, а не со стартом.</summary>
+    private readonly List<OperationResult> _waiting = [];
+
+    /// <summary>
+    /// Строка «в очереди», которую займёт запуск из этого хода работы. AsyncLocal: значение видно
+    /// только вызовам, ушедшим из того места, где его поставили, — соседний запуск его не увидит.
+    /// </summary>
+    public static readonly AsyncLocal<OperationResult?> ClaimedRow = new();
+
+    /// <summary>Запуск встал в очередь — его строка «в очереди · что и куда» появляется сразу.</summary>
+    public OperationResult AddWaiting(ServerEntry server, string what)
+    {
+        var row = new OperationResult(server, Scope) { Message = "в очереди · " + what, Batch = this };
+        _waiting.Add(row);
+        Results.Add(row);
+        return row;
+    }
+
+    /// <summary>Очередь дошла, а запуск не состоялся (нечего копировать, отказ) — строка уходит.</summary>
+    public void DropWaiting(OperationResult row)
+    {
+        if (_waiting.Remove(row))
+        {
+            Results.Remove(row);
+        }
+    }
+
+    /// <summary>Ждущий в очереди запуск остановили: он не начнётся, строка остаётся «не запускалось».</summary>
+    private void CancelWaiting(OperationResult row)
+    {
+        if (!_waiting.Remove(row))
+        {
+            return;
+        }
+
+        row.Skipped = true;
+        row.Message = "не запускалось";
+        row.Status = OperationStatus.Cancelled;
+    }
+
+    /// <summary>
+    /// Стоп в строке — только она, остальные идут дальше. Ждёт очереди — не начнётся. Идёт команда —
+    /// так же, как общий «Остановить»: Ctrl+C, через 3 с KILL, ещё через 2 с — закрыть канал.
+    /// Копирование и скачивание обрываются сразу.
+    /// </summary>
+    public async Task StopRowAsync(OperationResult row)
+    {
+        if (_waiting.Contains(row))
+        {
+            CancelWaiting(row);
+            return;
+        }
+
+        // встал сервер — его команды цепочки, что ещё ждут, не пойдут
+        row.CancelStepsFrom(1);
+
+        if (row.Status == OperationStatus.Pending)
+        {
+            CancelRow(row);
+            return;
+        }
+
+        if (row.Status != OperationStatus.Running || row.Stopping)
+        {
+            return;
+        }
+
+        // Ctrl+C идёт отдельным подключением, а команда сворачивается не мгновенно — видно сразу
+        row.BeginStopping();
+
+        if (row.RemoteGroup <= 0)
+        {
+            CancelRow(row);
+            return;
+        }
+
+        await SignalAsync("INT", "Ctrl+C (сигнал INT)", [row]);
+
+        if (await RowRunningAfter(row, TimeSpan.FromSeconds(3)))
+        {
+            await SignalAsync("KILL", "снятие (сигнал KILL)", [row]);
+
+            if (await RowRunningAfter(row, TimeSpan.FromSeconds(2)))
+            {
+                CancelRow(row);
+            }
+        }
+    }
+
+    private static void CancelRow(OperationResult row)
+    {
+        try
+        {
+            row.Stopper?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // строка как раз закончилась сама
+        }
+    }
+
+    private static async Task<bool> RowRunningAfter(OperationResult row, TimeSpan wait)
+    {
+        var until = DateTime.UtcNow + wait;
+
+        while (row.IsRunning && DateTime.UtcNow < until)
+        {
+            await Task.Delay(100);
+        }
+
+        return row.IsRunning;
     }
 
     public async Task RetryFailedAsync(int maxParallel)
@@ -578,7 +739,11 @@ public sealed class OperationBatch : ObservableObject
 
         try
         {
-            await ExecuteAsync(failed, _lastWork, maxParallel);
+            // у запусков, шедших рядом («Проводник»), работа своя — каждая строка повторяет свою
+            var lastWork = _lastWork;
+            await Task.WhenAll(failed
+                .GroupBy(r => r.Work ?? lastWork)
+                .Select(g => ExecuteAsync(g.ToList(), g.Key, maxParallel)));
         }
         finally
         {
@@ -607,13 +772,24 @@ public sealed class OperationBatch : ObservableObject
         return ex;
     }
 
+    /// <summary>Запусков, идущих сейчас: «Проводник» пускает несколько рядом.</summary>
+    private int _activeRuns;
+
     private async Task ExecuteAsync(IReadOnlyList<OperationResult> targets, ServerWork work, int maxParallel)
     {
-        _cts?.Dispose();
-        _cts = new CancellationTokenSource();
-        var ct = _cts.Token;
+        // первый запуск — новая общая отмена и новый счёт; следующий рядом — к идущим
+        var first = _activeRuns == 0;
 
-        _finishedAt = null;
+        if (first)
+        {
+            _cts?.Dispose();
+            _cts = new CancellationTokenSource();
+            _finishedAt = null;
+        }
+
+        var ct = _cts!.Token;
+        _activeRuns++;
+
         StartedAt = DateTime.Now;
         Raise(nameof(StartedAt));
 
@@ -623,57 +799,83 @@ public sealed class OperationBatch : ObservableObject
             AppLog.Section = section;
         }
 
-        // счёт — по всей таблице: прошлые прогоны в ней уже закончены, «готово 3 из 4» видно сразу
-        var earlier = Results.Where(r => !targets.Contains(r)).ToList();
-
-        if (!ReferenceEquals(targets, _lastRun) && !targets.All(_lastRun.Contains))
+        if (first)
         {
-            _lastRun = targets.ToList();
+            // счёт — по всей таблице: прошлые прогоны в ней уже закончены, «готово 3 из 4» видно сразу;
+            // ждущие очереди — ещё не начаты, их нет в счёте
+            var earlier = Results.Where(r => !targets.Contains(r) && !_waiting.Contains(r)).ToList();
+
+            if (!ReferenceEquals(targets, _lastRun) && !targets.All(_lastRun.Contains))
+            {
+                _lastRun = targets.ToList();
+            }
+
+            IsRunning = true;
+            Total = earlier.Count + targets.Count;
+            Done = earlier.Count;
+            SuccessCount = earlier.Count(r => r.Status == OperationStatus.Success);
+            FailedCount = Done - SuccessCount;
+        }
+        else
+        {
+            _lastRun = _lastRun.Concat(targets.Where(r => !_lastRun.Contains(r))).ToList();
+            Total += targets.Count;
         }
 
-        IsRunning = true;
-        Total = Results.Count;
-        Done = earlier.Count;
-        SuccessCount = earlier.Count(r => r.Status == OperationStatus.Success);
-        FailedCount = Done - SuccessCount;
-
-        AppLog.Debug($"«{_operationName}» — старт на {Total} сервере(ах), одновременно до {maxParallel}.");
+        // серверов этого запуска, а не строк в таблице: прошлые запуски в ней тоже лежат
+        AppLog.Debug($"«{_operationName}» — старт на {targets.Count} сервере(ах), одновременно до {maxParallel}.");
 
         using var gate = new SemaphoreSlim(Math.Max(1, maxParallel));
         var doneLock = new Lock();
 
         var tasks = targets.Select(async result =>
         {
-            await gate.WaitAsync(CancellationToken.None);
-            var sw = Stopwatch.StartNew();
+            // своя отмена у строки — стоп в строке; общая «Остановить» гасит и её
+            using var rowCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            result.Stopper = rowCts;
+            var rowCt = rowCts.Token;
+            var entered = false;
+            var sw = new Stopwatch();
 
             try
             {
-                if (ct.IsCancellationRequested)
+                try
                 {
-                    result.Status = OperationStatus.Cancelled;
+                    await gate.WaitAsync(rowCt);
+                    entered = true;
+                }
+                catch (OperationCanceledException)
+                {
+                    // остановили, пока ждала своей очереди среди серверов
+                }
+
+                if (!entered || rowCt.IsCancellationRequested)
+                {
+                    result.Skipped = true;
                     result.Message = "не запускалось";
+                    result.Status = OperationStatus.Cancelled;
                     return;
                 }
 
+                sw.Start();
                 result.Status = OperationStatus.Running;
                 result.Message = "подключение…";
                 AppLog.Debug($"старт: {_operationName}", result.Server.Display);
 
-                await work(result.Server, result, ct);
+                await work(result.Server, result, rowCt);
 
                 if (result.Status == OperationStatus.Running)
                 {
                     result.Status = OperationStatus.Success;
                 }
             }
-            catch (Exception ex) when (ex is OperationCanceledException || ct.IsCancellationRequested)
+            catch (Exception ex) when (ex is OperationCanceledException || rowCt.IsCancellationRequested)
             {
                 // после «Остановить» всё, что оборвалось, — выполненная просьба, а не сбой:
-                // закрытый канал SSH.NET сообщает своей ошибкой, а не отменой
+                // закрытый канал SSH.NET сообщает своей ошибкой, а не отменой. Что успело уйти — на месте
+                result.Message = result.StoppedText;
                 result.Status = OperationStatus.Cancelled;
-                result.Message = "отменено";
-                result.Append("Операция отменена.");
+                result.Append("— остановлено —");
             }
             catch (Exception ex)
             {
@@ -712,6 +914,7 @@ public sealed class OperationBatch : ObservableObject
             {
                 sw.Stop();
                 result.Duration = sw.Elapsed;
+                result.Stopper = null;
                 result.Server.LastStatus = result.StatusText;
 
                 lock (doneLock)
@@ -734,15 +937,23 @@ public sealed class OperationBatch : ObservableObject
                     AppLog.ServerLine(LevelOf(result), Outcome(result), result.Server.Display);
                 }
 
-                gate.Release();
+                if (entered)
+                {
+                    gate.Release();
+                }
             }
         });
 
         await Task.WhenAll(tasks);
 
-        _finishedAt = DateTime.Now;
-        _lifeFrom = _finishedAt;
-        IsRunning = false;
+        // прогон закончился, когда закончился последний из шедших рядом
+        if (--_activeRuns == 0)
+        {
+            _finishedAt = DateTime.Now;
+            _lifeFrom = _finishedAt;
+            IsRunning = false;
+        }
+
         Raise(nameof(CanRetry));
 
         if (targets.Count == 1)

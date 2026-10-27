@@ -46,6 +46,15 @@ public partial class ResultsView : UserControl
 
     private OperationBatch? Batch => DataContext as OperationBatch;
 
+    /// <summary>Стоп в строке — только она; строка команды цепочки останавливает свой сервер в цепочке.</summary>
+    private async void OnRowStop(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: OperationResult row })
+        {
+            await row.StopAsync();
+        }
+    }
+
     /// <summary>
     /// Строка кнопок стоит в одной строке с ярлыками «Терминал / Журнал»: слева отступ
     /// на их ширину, высота — как у них, чтобы кнопки встали по их середине.
@@ -186,6 +195,17 @@ public partial class ResultsView : UserControl
                     {
                         _rows.Add(step);
                     }
+                }
+            }
+            else
+            {
+                // цепочка ещё не пошла — её команды стоят строками «ждёт копирования» с самого старта
+                // копирования; строка копирования получает их сразу после появления — следим за ней
+                watched.Add(row);
+
+                foreach (var step in row.Steps)
+                {
+                    _rows.Add(step);
                 }
             }
         }
