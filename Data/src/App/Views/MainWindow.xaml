@@ -477,6 +477,36 @@
       <Setter Property="GroupName" Value="Sections" />
     </Style>
 
+    <!--  сервер «Проводника» у правого края ряда разделов: плоская подпись, подсветка под мышью  -->
+    <Style x:Key="ServerTagStyle" TargetType="Button">
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Bd"
+              Padding="10,5"
+              Background="Transparent"
+              CornerRadius="4">
+              <ContentPresenter VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <!--  шапка блока в боковой панели — как «ПАРАМЕТРЫ КОПИРОВАНИЯ» на страницах  -->
     <Style x:Key="PaneHeaderStyle" TargetType="TextBlock">
       <Setter Property="FontSize" Value="11" />
@@ -954,6 +984,50 @@
       BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
       BorderThickness="1"
       CornerRadius="8">
+      <DockPanel>
+      <!--
+        «Проводник»: сервер правой панели — у правого края ряда, как раз над ней. Название, логин,
+        адрес; стрелка вниз — подпись про блок ниже. Щелчок — список серверов, как значок у адреса
+      -->
+      <Button
+        x:Name="ExplorerServerTag"
+        Click="OnExplorerServerTag"
+        DockPanel.Dock="Right"
+        Style="{StaticResource ServerTagStyle}"
+        ToolTip="Сервер правой панели — щелчок открывает список серверов"
+        Visibility="Collapsed">
+        <StackPanel Orientation="Horizontal">
+          <!--  тот же значок, что у сервера в панели «Проводника»  -->
+          <Image
+            x:Name="ExplorerServerIcon"
+            Width="16"
+            Height="16"
+            Margin="0,0,8,0"
+            VerticalAlignment="Center" />
+          <TextBlock
+            x:Name="ExplorerServerName"
+            VerticalAlignment="Center"
+            FontWeight="SemiBold" />
+          <TextBlock
+            x:Name="ExplorerServerUser"
+            Margin="4,0,0,0"
+            VerticalAlignment="Center"
+            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+          <TextBlock
+            x:Name="ExplorerServerAddress"
+            Margin="10,0,0,0"
+            VerticalAlignment="Center"
+            FontFamily="Consolas"
+            Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+          <ui:SymbolIcon
+            Margin="10,0,0,0"
+            VerticalAlignment="Center"
+            FontSize="12"
+            Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+            Symbol="ArrowDown24" />
+        </StackPanel>
+      </Button>
+
       <!--  кнопки переставляются мышью, порядок запоминается  -->
       <StackPanel x:Name="SectionBar" Orientation="Horizontal">
         <RadioButton
@@ -1011,6 +1085,7 @@
           </StackPanel>
         </RadioButton>
       </StackPanel>
+      </DockPanel>
     </Border>
 
     <!--  рабочая область: слева целевые серверы своей карточкой, справа страница раздела.

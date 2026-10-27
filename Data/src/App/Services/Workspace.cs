@@ -2213,11 +2213,27 @@ public sealed class Workspace : ObservableObject
                 var index = retrying ? resume.GetValueOrDefault(server) : 0;
                 var open = false;
 
+                // строка этой команды — терминал копирования показывает команды по одной
+                OperationResult? row = null;
+                var rowClock = new System.Diagnostics.Stopwatch();
+
                 // окно на этом сервере закончилось — в счёт окна
                 void Close(bool ok)
                 {
                     steps[index].ServerFinished(ok);
                     open = false;
+
+                    if (row is not null)
+                    {
+                        row.Duration = rowClock.Elapsed;
+                    }
+                }
+
+                // вывод — и в общую строку сервера, и в строку команды
+                void Write(string line)
+                {
+                    result.Append(line);
+                    row?.Append(line);
                 }
 
                 try
@@ -2238,9 +2254,12 @@ public sealed class Workspace : ObservableObject
                             result.Append($"───── #{step.Number} · {DateTime.Now:HH:mm:ss} ─────");
                         }
 
+                        var current = row = result.BeginStep(step.Number, step.Text);
+                        rowClock.Restart();
+
                         foreach (var line in step.Text.Replace("\r\n", "\n").Split('\n'))
                         {
-                            result.Append("$ " + line);
+                            Write("$ " + line);
                         }
 
                         result.Message = label + "выполняется…";
@@ -2250,7 +2269,7 @@ public sealed class Workspace : ObservableObject
                             settings,
                             step.Text,
                             step.UseSudo,
-                            line => result.Append(line),
+                            Write,
                             ct,
                             (pid, group) =>
                             {
@@ -2262,6 +2281,7 @@ public sealed class Workspace : ObservableObject
                             {
                                 result.IsWaitingInput = waiting;
                                 result.Message = label + (waiting ? "ждёт ответа" : "выполняется…");
+                                current.Message = waiting ? "ждёт ответа" : string.Empty;
 
                                 if (waiting)
                                 {
@@ -2270,16 +2290,21 @@ public sealed class Workspace : ObservableObject
                                         Title);
                                 }
                             },
-                            tail => result.SetTail(tail));
+                            tail =>
+                            {
+                                result.SetTail(tail);
+                                current.SetTail(tail);
+                            });
 
                         // оборвали нашей же кнопкой — это не ошибка, а выполненная просьба.
                         // Проверяется до всего прочего: после kill сервер может и не успеть
                         // сообщить, каким сигналом всё закончилось
                         if (result.Interrupted && !outcome.TimedOut)
                         {
-                            result.Append("— команда прервана —");
+                            Write("— команда прервана —");
                             result.Message = label + "прервано";
                             result.Status = OperationStatus.Cancelled;
+                            current.Status = OperationStatus.Cancelled;
                             Close(false);
                             return;
                         }
@@ -2288,11 +2313,14 @@ public sealed class Workspace : ObservableObject
                         // не дождались. Что команда написала в вывод — её дело
                         if (outcome.Interruption is { } trouble)
                         {
-                            result.Append("— " + trouble + " —");
-                            result.Message = label + (outcome.TimedOut
+                            Write("— " + trouble + " —");
+                            var why = outcome.TimedOut
                                 ? $"не дождались ответа ({settings.CommandTimeoutSeconds} с)"
-                                : trouble);
+                                : trouble;
+                            result.Message = label + why;
                             result.Status = OperationStatus.Failed;
+                            current.Message = why;
+                            current.Status = OperationStatus.Failed;
                             Close(false);
                             return;
                         }
@@ -2300,11 +2328,13 @@ public sealed class Workspace : ObservableObject
                         if (chain && outcome.ExitCode is int code && code != 0)
                         {
                             var last = index == steps.Count - 1;
-                            result.Append(last
+                            Write(last
                                 ? $"— #{step.Number} завершилась с кодом {code} —"
                                 : $"— #{step.Number} завершилась с кодом {code}: следующие окна на этом сервере не запускаются —");
                             result.Message = $"#{step.Number}: код {code}";
                             result.Status = OperationStatus.Failed;
+                            current.Message = $"код {code} · {current.StepCommand}";
+                            current.Status = OperationStatus.Failed;
                             Close(false);
                             return;
                         }
@@ -2313,8 +2343,10 @@ public sealed class Workspace : ObservableObject
 
                         if (numbered)
                         {
-                            result.Append($"— #{step.Number} ок · {clock.Elapsed:m\\:ss} —");
+                            Write($"— #{step.Number} ок · {clock.Elapsed:m\\:ss} —");
                         }
+
+                        current.Status = OperationStatus.Success;
                     }
 
                     result.Message = string.Empty;
@@ -2326,6 +2358,12 @@ public sealed class Workspace : ObservableObject
                     if (open)
                     {
                         steps[index].ServerFinished(false);
+                    }
+
+                    if (row is { IsRunning: true })
+                    {
+                        row.Duration = rowClock.Elapsed;
+                        row.Status = ct.IsCancellationRequested ? OperationStatus.Cancelled : OperationStatus.Failed;
                     }
 
                     for (var rest = index + 1; rest < steps.Count; rest++)

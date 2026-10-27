@@ -807,7 +807,7 @@ public partial class CommandPage : Page
         }
     }
 
-    /// <summary>Значок над первым окном: то же, что «Копировать. Текущее окно» в терминале внизу.</summary>
+    /// <summary>Значок над первым окном: то же, что «Текущий лог» в терминале внизу.</summary>
     private void OnCopyOutput(object sender, RoutedEventArgs e)
     {
         if (Window.GetWindow(this) is MainWindow main)

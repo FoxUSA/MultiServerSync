@@ -88,6 +88,60 @@
       </Setter>
     </Style>
 
+    <!--
+      значки в контейнерах у адреса и в ряду под ним: прозрачные, подсветка под мышью.
+      Значки — SymbolIcon WPF UI (один набор везде), белые; размер задаёт сам значок: у адреса 16, в ряду 20
+    -->
+    <Style x:Key="PathIconButtonStyle" TargetType="Button">
+      <Setter Property="Width" Value="28" />
+      <Setter Property="Height" Value="26" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Bd"
+              Background="{TemplateBinding Background}"
+              CornerRadius="4">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="Bd" Property="Opacity" Value="0.35" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style
+      x:Key="GroupIconButtonStyle"
+      BasedOn="{StaticResource PathIconButtonStyle}"
+      TargetType="Button">
+      <Setter Property="Width" Value="34" />
+      <Setter Property="Height" Value="32" />
+    </Style>
+
+    <!--  контейнер значков у адреса — тот же фон и рамка, что у самого пути  -->
+    <Style x:Key="PathGroupStyle" TargetType="Border">
+      <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="4,0" />
+    </Style>
+
     <!--  стрелка раскрытия в дереве  -->
     <Style x:Key="TreeExpanderStyle" TargetType="ToggleButton">
       <Setter Property="Width" Value="16" />
@@ -172,201 +226,122 @@
         <RowDefinition Height="Auto" />
       </Grid.RowDefinitions>
 
-      <!--  шапка: панель инструментов от левого края — у обеих панелей одинаково.
-            Панель узкая — ряд ужимается целиком вместе со значками, а не прячет кнопки  -->
-      <Grid
-        Grid.Row="0"
-        Margin="8,4,4,0">
-        <Viewbox
-          HorizontalAlignment="Left"
-          Stretch="Uniform"
-          StretchDirection="DownOnly">
-        <StackPanel Orientation="Horizontal">
-          <!--  копирование в соседнюю панель и его параметры — только в «Проводнике»  -->
-          <ui:Button
-            x:Name="TransferButton"
-            Height="{StaticResource IconButtonSize}"
-            Margin="0,0,4,0"
-            Padding="10,0"
-            Click="OnTransfer"
-            Content="Копировать"
-            FontSize="12"
-            Focusable="False"
-            IsEnabled="False"
-            Visibility="Collapsed" />
-          <ui:Button
-            x:Name="OptionsButton"
-            Margin="0,0,12,0"
-            Click="OnTransferOptions"
-            Icon="{ui:SymbolIcon Settings24}"
-            Style="{StaticResource PaneButtonStyle}"
-            ToolTip="Параметры копирования и исключения"
-            Visibility="Collapsed" />
-          <ui:Button
-            x:Name="BackButton"
-            Click="OnBack"
-            Icon="{ui:SymbolIcon ArrowLeft24}"
-            Style="{StaticResource PaneButtonStyle}"
-            ToolTip="Назад (Alt+←)" />
-          <ui:Button
-            x:Name="ForwardButton"
-            Click="OnForward"
-            Icon="{ui:SymbolIcon ArrowRight24}"
-            Style="{StaticResource PaneButtonStyle}"
-            ToolTip="Вперёд (Alt+→)" />
-          <ui:Button
-            Click="OnUp"
-            Icon="{ui:SymbolIcon ArrowUp24}"
-            Style="{StaticResource PaneButtonStyle}"
-            ToolTip="На уровень вверх (Backspace)" />
-          <ui:Button
-            Click="OnHome"
-            Icon="{ui:SymbolIcon Home24}"
-            Style="{StaticResource PaneButtonStyle}"
-            ToolTip="Домашняя папка" />
-          <ui:Button
-            Click="OnRoot"
-            Icon="{ui:SymbolIcon ArrowUpload24}"
-            Style="{StaticResource PaneButtonStyle}"
-            ToolTip="В корень: на сервере — /, на компьютере — корень диска, из него — «Этот компьютер»" />
-          <ui:Button
-            Click="OnRefresh"
-            Icon="{ui:SymbolIcon ArrowClockwise24}"
-            Style="{StaticResource PaneButtonStyle}"
-            ToolTip="Обновить (Ctrl+R)" />
-          <ui:Button
-            Click="OnNewFolder"
-            Icon="{ui:SymbolIcon FolderAdd24}"
-            Style="{StaticResource PaneButtonStyle}"
-            ToolTip="Новая папка (F7)" />
-          <ui:Button
-            Click="OnNewFile"
-            Icon="{ui:SymbolIcon DocumentAdd24}"
-            Style="{StaticResource PaneButtonStyle}"
-            ToolTip="Новый файл" />
-          <ui:Button
-            Click="OnEdit"
-            Icon="{ui:SymbolIcon DocumentEdit24}"
-            Style="{StaticResource PaneButtonStyle}"
-            ToolTip="Править файл под курсором во встроенном редакторе: номера строк, подсветка, поиск. Права и кодировка не меняются" />
-          <ui:Button
-            Click="OnDelete"
-            Icon="{ui:SymbolIcon Delete24}"
-            Style="{StaticResource PaneButtonStyle}"
-            ToolTip="Удалить выделенное (Del): с компьютера — в корзину, на сервере — безвозвратно, после подтверждения" />
-          <ui:Button
-            x:Name="TreeButton"
-            Click="OnToggleTree"
-            Icon="{ui:SymbolIcon TextBulletListTree24}"
-            Style="{StaticResource PaneButtonStyle}"
-            ToolTip="Дерево папок слева" />
-          <ui:Button
-            x:Name="BookmarkButton"
-            Click="OnBookmarks"
-            Icon="{ui:SymbolIcon Star24}"
-            Style="{StaticResource PaneButtonStyle}"
-            ToolTip="Закладки и последние папки" />
-        </StackPanel>
-        </Viewbox>
-      </Grid>
-
       <!--
-        Адрес как в проводнике: части пути — кнопки, щелчок по пустому месту (Ctrl+L, F4)
-        открывает поле ввода с подсказками подпапок. Поле скрыто, но не убрано — строка
-        берёт высоту по нему, и при переключении ничего не прыгает.
+        Адрес — первой строкой. У сервера слева его значок (щелчок — список серверов) и домашняя
+        папка. В самом адресе: у компьютера слева «Открыть», справа — копировать и вписать путь.
+        Части пути — кнопки, щелчок по пустому месту (Ctrl+L, F4) открывает ввод пути на месте частей.
       -->
       <Grid
-        Grid.Row="1"
-        Height="32"
+        Grid.Row="0"
+        Height="{StaticResource IconButtonSize}"
         Margin="8,4,8,0">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <!--  у сервера на том же месте — чей он: щелчок открывает список серверов  -->
-        <ui:Button
-          x:Name="TitleButton"
+        <Border
+          x:Name="ServerGroup"
           Grid.Column="0"
-          MaxWidth="280"
-          Height="32"
           Margin="0,0,4,0"
-          Padding="10,0"
-          Click="OnTitleClick"
-          FontSize="12"
-          Focusable="False"
-          IsHitTestVisible="False"
+          Style="{StaticResource PathGroupStyle}"
           Visibility="Collapsed">
-          <DockPanel>
-            <Image
-              x:Name="TitleIcon"
-              Width="16"
-              Height="16"
-              Margin="0,0,6,0"
-              VerticalAlignment="Center"
-              DockPanel.Dock="Left" />
-            <ui:SymbolIcon
-              x:Name="TitleChevron"
-              Margin="6,0,0,0"
-              VerticalAlignment="Center"
-              DockPanel.Dock="Right"
-              FontSize="12"
-              Symbol="ChevronDown24"
-              Visibility="Collapsed" />
-            <TextBlock
-              x:Name="TitleText"
-              VerticalAlignment="Center"
-              TextTrimming="CharacterEllipsis" />
-          </DockPanel>
-        </ui:Button>
+          <StackPanel VerticalAlignment="Center" Orientation="Horizontal">
+            <Button
+              x:Name="TitleButton"
+              Click="OnTitleClick"
+              Cursor="Arrow"
+              Style="{StaticResource PathIconButtonStyle}">
+              <Image
+                x:Name="TitleIcon"
+                Width="16"
+                Height="16" />
+            </Button>
+            <Button
+              Click="OnHome"
+              Style="{StaticResource PathIconButtonStyle}"
+              ToolTip="Домашняя папка">
+              <ui:SymbolIcon FontSize="16" Symbol="Home24" />
+            </Button>
+          </StackPanel>
+        </Border>
 
-        <!--  у компьютера вместо «Этот компьютер» — системное окно «Открыть папку»  -->
-        <ui:Button
-          x:Name="WindowsExplorerButton"
-          Grid.Column="0"
-          Height="32"
-          Margin="0,0,4,0"
-          Padding="10,0"
-          Click="OnOpenInWindows"
-          Content="Открыть"
-          FontSize="12"
-          Focusable="False"
-          Icon="{ui:SymbolIcon FolderOpen24}"
-          ToolTip="Выбрать папку в окне Windows — она откроется здесь"
-          Visibility="Collapsed" />
-
-        <ui:TextBox
-          x:Name="PathBox"
-          Grid.Column="1"
-          VerticalContentAlignment="Center"
-          ClearButtonEnabled="False"
-          KeyDown="OnPathKeyDown"
-          LostKeyboardFocus="OnPathLostFocus"
-          PreviewKeyDown="OnPathPreviewKeyDown"
-          TextChanged="OnPathTextChanged"
-          ToolTip="Адрес папки. Впишите путь и нажмите Enter"
-          Visibility="Hidden" />
-
+        <!--  фон светлее кнопок — путь читается полем адреса, а не ещё одной кнопкой  -->
         <Border
           x:Name="CrumbBar"
           Grid.Column="1"
-          Background="{DynamicResource ControlFillColorDefaultBrush}"
-          BorderBrush="{DynamicResource ControlElevationBorderBrush}"
-          BorderThickness="1"
-          CornerRadius="4"
           Cursor="IBeam"
           MouseLeftButtonDown="OnCrumbBarClick"
+          Style="{StaticResource PathGroupStyle}"
           ToolTip="Щелчок по части пути — перейти, по пустому месту — вписать путь">
-          <ScrollViewer
-            x:Name="CrumbScroll"
-            HorizontalScrollBarVisibility="Hidden"
-            VerticalScrollBarVisibility="Disabled">
-            <StackPanel
-              x:Name="Crumbs"
-              Margin="4,0"
+          <DockPanel>
+            <!--  у компьютера — системное окно «Открыть папку»  -->
+            <Button
+              x:Name="WindowsExplorerButton"
               VerticalAlignment="Center"
-              Orientation="Horizontal" />
-          </ScrollViewer>
+              Click="OnOpenInWindows"
+              DockPanel.Dock="Left"
+              Style="{StaticResource PathIconButtonStyle}"
+              ToolTip="Выбрать папку в окне Windows — она откроется здесь"
+              Visibility="Collapsed">
+              <ui:SymbolIcon FontSize="16" Symbol="FolderOpen24" />
+            </Button>
+            <StackPanel
+              VerticalAlignment="Center"
+              DockPanel.Dock="Right"
+              Orientation="Horizontal">
+              <Button
+                Click="OnCopyPath"
+                Style="{StaticResource PathIconButtonStyle}"
+                ToolTip="Копировать путь">
+                <ui:SymbolIcon FontSize="16" Symbol="Copy24" />
+              </Button>
+              <Button
+                Click="OnEditPath"
+                Style="{StaticResource PathIconButtonStyle}"
+                ToolTip="Вписать путь (Ctrl+L)">
+                <ui:SymbolIcon FontSize="16" Symbol="Edit24" />
+              </Button>
+            </StackPanel>
+
+            <!--  части пути и на их месте — ввод пути; поле скрыто, но не убрано: ничего не прыгает  -->
+            <Grid>
+              <ScrollViewer
+                x:Name="CrumbScroll"
+                HorizontalScrollBarVisibility="Hidden"
+                VerticalScrollBarVisibility="Disabled">
+                <StackPanel
+                  x:Name="Crumbs"
+                  Margin="2,0"
+                  VerticalAlignment="Center"
+                  Orientation="Horizontal" />
+              </ScrollViewer>
+              <ui:TextBox
+                x:Name="PathBox"
+                MinHeight="0"
+                Margin="0,2"
+                Padding="8,0,34,0"
+                VerticalContentAlignment="Center"
+                ClearButtonEnabled="False"
+                KeyDown="OnPathKeyDown"
+                LostKeyboardFocus="OnPathLostFocus"
+                PreviewKeyDown="OnPathPreviewKeyDown"
+                TextChanged="OnPathTextChanged"
+                ToolTip="Адрес папки. Впишите путь и нажмите Enter"
+                Visibility="Hidden" />
+              <Button
+                x:Name="PathGoButton"
+                Margin="0,0,4,0"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Center"
+                Click="OnPathGo"
+                Style="{StaticResource PathIconButtonStyle}"
+                ToolTip="Перейти (Enter)"
+                Visibility="Hidden">
+                <ui:SymbolIcon FontSize="16" Symbol="ArrowRight24" />
+              </Button>
+            </Grid>
+          </DockPanel>
         </Border>
 
         <!--  подсказки подпапок, пока вписывают путь  -->
@@ -391,52 +366,188 @@
         </Popup>
       </Grid>
 
-      <!--  маски: файлы — фильтр открытой папки, папки — поиск вглубь  -->
+      <!--  навигация и действия: слева ходьба по папкам и правка/удаление, справа обновить, дерево, закладки  -->
+      <Grid
+        Grid.Row="1"
+        Height="{StaticResource IconButtonSize}"
+        Margin="8,4,8,0">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <Border
+          Grid.Column="0"
+          Margin="0,0,4,0"
+          Style="{StaticResource PathGroupStyle}">
+          <StackPanel VerticalAlignment="Center" Orientation="Horizontal">
+            <Button
+              x:Name="BackButton"
+              Click="OnBack"
+              Style="{StaticResource GroupIconButtonStyle}"
+              ToolTip="Назад (Alt+←)">
+              <ui:SymbolIcon FontSize="20" Symbol="ArrowLeft24" />
+            </Button>
+            <Button
+              x:Name="ForwardButton"
+              Click="OnForward"
+              Style="{StaticResource GroupIconButtonStyle}"
+              ToolTip="Вперёд (Alt+→)">
+              <ui:SymbolIcon FontSize="20" Symbol="ArrowRight24" />
+            </Button>
+            <Button
+              Click="OnUp"
+              Style="{StaticResource GroupIconButtonStyle}"
+              ToolTip="На уровень вверх (Backspace)">
+              <ui:SymbolIcon FontSize="20" Symbol="ArrowUp24" />
+            </Button>
+            <Button
+              Click="OnRoot"
+              Style="{StaticResource GroupIconButtonStyle}"
+              ToolTip="В корень: на сервере — /, на компьютере — корень диска, из него — «Этот компьютер»">
+              <ui:SymbolIcon FontSize="20" Symbol="ArrowUpload24" />
+            </Button>
+          </StackPanel>
+        </Border>
+
+        <Border Grid.Column="1" Style="{StaticResource PathGroupStyle}">
+          <StackPanel VerticalAlignment="Center" Orientation="Horizontal">
+            <Button
+              Click="OnEdit"
+              Style="{StaticResource GroupIconButtonStyle}"
+              ToolTip="Править файл под курсором во встроенном редакторе: номера строк, подсветка, поиск. Права и кодировка не меняются">
+              <ui:SymbolIcon FontSize="20" Symbol="DocumentEdit24" />
+            </Button>
+            <Button
+              Click="OnDelete"
+              Style="{StaticResource GroupIconButtonStyle}"
+              ToolTip="Удалить выделенное (Del): с компьютера — в корзину, на сервере — безвозвратно, после подтверждения">
+              <ui:SymbolIcon FontSize="20" Symbol="Delete24" />
+            </Button>
+          </StackPanel>
+        </Border>
+
+        <Border Grid.Column="3" Style="{StaticResource PathGroupStyle}">
+          <StackPanel VerticalAlignment="Center" Orientation="Horizontal">
+            <Button
+              Click="OnRefresh"
+              Style="{StaticResource GroupIconButtonStyle}"
+              ToolTip="Обновить (Ctrl+R)">
+              <ui:SymbolIcon FontSize="20" Symbol="ArrowClockwise24" />
+            </Button>
+            <Button
+              x:Name="TreeButton"
+              Click="OnToggleTree"
+              Style="{StaticResource GroupIconButtonStyle}"
+              ToolTip="Дерево папок слева">
+              <ui:SymbolIcon FontSize="20" Symbol="TextBulletListTree24" />
+            </Button>
+            <Button
+              x:Name="BookmarkButton"
+              Click="OnBookmarks"
+              Style="{StaticResource GroupIconButtonStyle}"
+              ToolTip="Закладки и последние папки">
+              <ui:SymbolIcon FontSize="20" Symbol="Star24" />
+            </Button>
+          </StackPanel>
+        </Border>
+      </Grid>
+
+      <!--  копирование в соседнюю панель (только в «Проводнике») и справа маска с поиском папок  -->
       <Grid
         Grid.Row="2"
         Margin="8,4,8,0">
         <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="*" />
-          <ColumnDefinition Width="4" />
-          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
 
-        <Grid Grid.Column="0">
-          <ui:TextBox
-            x:Name="FileMaskBox"
-            Height="32"
-            Padding="10,0,30,0"
-            VerticalContentAlignment="Center"
-            ClearButtonEnabled="False"
-            Icon="{ui:SymbolIcon Filter24}"
-            PlaceholderText="маска файлов: *.conf"
-            TextChanged="OnFileMaskChanged"
-            ToolTip="Показывать только подходящие файлы: *.conf, *.log, nginx. Папки видны всегда (Ctrl+F)" />
-          <Button
-            x:Name="FileMaskClear"
-            Click="OnClearFileMask"
-            Style="{StaticResource MaskClearButtonStyle}"
-            ToolTip="Сбросить маску" />
-        </Grid>
+        <!--  одним полем, как маска и поиск: слева «Копировать», внутри справа его параметры  -->
+        <Border
+          x:Name="TransferGroup"
+          Grid.Column="0"
+          Height="{StaticResource IconButtonSize}"
+          Background="{DynamicResource ControlFillColorDefaultBrush}"
+          BorderBrush="{DynamicResource TextControlElevationBorderBrush}"
+          BorderThickness="1"
+          CornerRadius="4"
+          Visibility="Collapsed">
+          <StackPanel VerticalAlignment="Center" Orientation="Horizontal">
+            <!--  не ui:Button: та после включения не перекрашивала текст, пока не наведёшь мышь  -->
+            <Button
+              x:Name="TransferButton"
+              Width="Auto"
+              Height="32"
+              Margin="1,0,0,0"
+              Click="OnTransfer"
+              FontSize="12"
+              IsEnabled="False"
+              Style="{StaticResource PathIconButtonStyle}">
+              <StackPanel Margin="10,0" Orientation="Horizontal">
+                <ui:SymbolIcon
+                  x:Name="TransferIcon"
+                  Margin="0,0,8,0"
+                  VerticalAlignment="Center"
+                  FontSize="16"
+                  Symbol="ArrowRight24" />
+                <TextBlock VerticalAlignment="Center" Text="Копировать" />
+              </StackPanel>
+            </Button>
+            <Button
+              x:Name="OptionsButton"
+              Margin="0,0,1,0"
+              Click="OnTransferOptions"
+              Style="{StaticResource GroupIconButtonStyle}"
+              ToolTip="Параметры копирования и исключения">
+              <ui:SymbolIcon FontSize="18" Symbol="Settings24" />
+            </Button>
+          </StackPanel>
+        </Border>
 
-        <Grid Grid.Column="2">
-          <ui:TextBox
-            x:Name="FolderMaskBox"
-            Height="32"
-            Padding="10,0,30,0"
-            VerticalContentAlignment="Center"
-            ClearButtonEnabled="False"
-            Icon="{ui:SymbolIcon FolderSearch24}"
-            KeyDown="OnFolderMaskKeyDown"
-            PlaceholderText="найти папку: nginx"
-            TextChanged="OnFolderMaskChanged"
-            ToolTip="Ищет папки по маске вглубь от открытой. Enter по найденной — перейти в неё" />
-          <Button
-            x:Name="FolderMaskClear"
-            Click="OnClearFolderMask"
-            Style="{StaticResource MaskClearButtonStyle}"
-            ToolTip="Сбросить поиск" />
-        </Grid>
+        <StackPanel
+          Grid.Column="2"
+          VerticalAlignment="Center"
+          Orientation="Horizontal">
+          <Grid Width="150">
+            <ui:TextBox
+              x:Name="FileMaskBox"
+              Height="{StaticResource IconButtonSize}"
+              Padding="10,0,30,0"
+              VerticalContentAlignment="Center"
+              ClearButtonEnabled="False"
+              Icon="{ui:SymbolIcon Filter24}"
+              PlaceholderText="маска"
+              TextChanged="OnFileMaskChanged"
+              ToolTip="Маска: показывать в открытой папке только подходящие файлы и папки — *.conf, *.log, nginx (Ctrl+F)" />
+            <Button
+              x:Name="FileMaskClear"
+              Click="OnClearFileMask"
+              Style="{StaticResource MaskClearButtonStyle}"
+              ToolTip="Сбросить маску" />
+          </Grid>
+
+          <Grid Width="150" Margin="4,0,0,0">
+            <ui:TextBox
+              x:Name="FolderMaskBox"
+              Height="{StaticResource IconButtonSize}"
+              Padding="10,0,30,0"
+              VerticalContentAlignment="Center"
+              ClearButtonEnabled="False"
+              Icon="{ui:SymbolIcon Search24}"
+              KeyDown="OnFolderMaskKeyDown"
+              PlaceholderText="найти папку"
+              TextChanged="OnFolderMaskChanged"
+              ToolTip="Ищет папки по маске вглубь от открытой. Enter по найденной — перейти в неё" />
+            <Button
+              x:Name="FolderMaskClear"
+              Click="OnClearFolderMask"
+              Style="{StaticResource MaskClearButtonStyle}"
+              ToolTip="Сбросить поиск" />
+          </Grid>
+        </StackPanel>
       </Grid>
 
       <!--  дерево и список  -->
@@ -553,7 +664,10 @@
           Background="Transparent"
           Visibility="Collapsed" />
 
-        <!--  список: «..» сверху, папки перед файлами, сортировка щелчком по шапке со стрелкой  -->
+        <!--
+          список: «..» сверху, папки перед файлами, сортировка щелчком по шапке со стрелкой.
+          IsSynchronizedWithCurrentItem выключен: иначе новый список (находки поиска) сам отмечает свою «текущую» строку
+        -->
         <DataGrid
           x:Name="List"
           Grid.Column="2"
@@ -564,6 +678,7 @@
           DragOver="OnListDragOver"
           Drop="OnListDrop"
           GotKeyboardFocus="OnListFocused"
+          IsSynchronizedWithCurrentItem="False"
           PreviewKeyDown="OnListKeyDown"
           LostMouseCapture="OnListLostCapture"
           PreviewMouseLeftButtonDown="OnListMouseDown"
@@ -575,6 +690,7 @@
           SelectionChanged="OnListSelected"
           Sorting="OnListSorting"
           Style="{StaticResource AppDataGridStyle}"
+          VerticalScrollBarVisibility="Auto"
           VirtualizingPanel.IsVirtualizing="True"
           VirtualizingPanel.VirtualizationMode="Recycling">
           <DataGrid.Columns>
@@ -752,11 +868,11 @@
           </Border>
         </Canvas>
 
-        <!--  пусто, нет связи, не выбран сервер — словами посреди списка  -->
+        <!--  пусто, нет связи, не выбран сервер — словами посреди списка, ниже шапки и строки «..»  -->
         <TextBlock
           x:Name="EmptyText"
           Grid.Column="2"
-          Margin="16,48,16,0"
+          Margin="16,96,16,0"
           HorizontalAlignment="Center"
           VerticalAlignment="Top"
           FontSize="13"

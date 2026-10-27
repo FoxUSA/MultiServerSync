@@ -225,6 +225,8 @@ public partial class FilePane : UserControl
     private int _navVersion;
     private bool _busy;
     private bool _searching;
+    private string _title = string.Empty;
+    private string? _titleTip;
     private CancellationTokenSource? _searchCts;
     private FileSystemWatcher? _watcher;
     private DateTime _freeAt;
@@ -311,12 +313,20 @@ public partial class FilePane : UserControl
     /// <summary>Щелчок по названию панели — когда оно выбирает, чьи это файлы (<see cref="EnableTitlePicker"/>).</summary>
     public event Action<FilePane, FrameworkElement>? TitleClicked;
 
-    /// <summary>Название панели становится кнопкой со стрелкой: из него выбирают сервер.</summary>
+    /// <summary>Значок сервера становится кнопкой: из него выбирают сервер.</summary>
     public void EnableTitlePicker(string tip)
     {
-        TitleButton.IsHitTestVisible = true;
-        TitleButton.ToolTip = tip;
-        TitleChevron.Visibility = Visibility.Visible;
+        _titleTip = tip;
+        TitleButton.Cursor = Cursors.Hand;
+        ShowTitle(_title, TitleIcon.Source);
+    }
+
+    /// <summary>Чья панель: на значке только картинка, название — в подсказке.</summary>
+    private void ShowTitle(string title, ImageSource? icon)
+    {
+        _title = title;
+        TitleIcon.Source = icon;
+        TitleButton.ToolTip = _titleTip is null ? title : title + Environment.NewLine + _titleTip;
     }
 
     /// <summary>
@@ -325,12 +335,11 @@ public partial class FilePane : UserControl
     /// </summary>
     public void ShowTransfer(bool toRight, string tip)
     {
-        TransferButton.Icon = new Wpf.Ui.Controls.SymbolIcon(toRight
+        TransferIcon.Symbol = toRight
             ? Wpf.Ui.Controls.SymbolRegular.ArrowRight24
-            : Wpf.Ui.Controls.SymbolRegular.ArrowLeft24);
+            : Wpf.Ui.Controls.SymbolRegular.ArrowLeft24;
         TransferButton.ToolTip = tip;
-        TransferButton.Visibility = Visibility.Visible;
-        OptionsButton.Visibility = Visibility.Visible;
+        TransferGroup.Visibility = Visibility.Visible;
     }
 
     /// <summary>Есть что копировать и куда.</summary>
@@ -434,9 +443,8 @@ public partial class FilePane : UserControl
         StopWatching();
         _source = null;
         _navVersion++;
-        TitleText.Text = title;
-        TitleIcon.Source = icon;
-        TitleText.Visibility = TitleIcon.Visibility = TitleButton.Visibility = Visibility.Visible;
+        ShowTitle(title, icon);
+        ServerGroup.Visibility = Visibility.Visible;
         WindowsExplorerButton.Visibility = Visibility.Collapsed;
         _rows.Clear();
         Crumbs.Children.Clear();
@@ -475,8 +483,7 @@ public partial class FilePane : UserControl
         _rows.Clear();
         _free = null;
 
-        TitleText.Text = title;
-        TitleIcon.Source = icon;
+        ShowTitle(title, icon);
         FileMaskBox.Text = state.FileMask;
         FolderMaskBox.Text = string.Empty;
         ApplyColumns();
@@ -646,6 +653,14 @@ public partial class FilePane : UserControl
         }
 
         var cameFrom = _current;
+
+        // ушли в другую папку — маска сбрасывается: в новой она молча прятала бы нужное.
+        // Открытие вкладки (_restoringSelection) не в счёт — там маска своя, запомненная
+        if (_restoringSelection is null && !string.Equals(cameFrom, target, StringComparison.Ordinal) && !NameMask.IsEmpty(FileMaskBox.Text))
+        {
+            FileMaskBox.Text = string.Empty;
+        }
+
         var keep = _restoringSelection ?? _selectionByPath.GetValueOrDefault(target) ?? [];
         _restoringSelection = null;
         _selectionHold++;
@@ -1042,7 +1057,7 @@ public partial class FilePane : UserControl
     // ── маски ─────────────────────────────────────────────────────────────────
 
     private bool FileFilter(object row) =>
-        row is not PaneRow item || item.IsParent || item.IsDirectory || NameMask.Matches(item.Name, FileMaskBox.Text);
+        row is not PaneRow item || item.IsParent || NameMask.Matches(item.Name, FileMaskBox.Text);
 
     private void OnFileMaskChanged(object sender, TextChangedEventArgs e)
     {
@@ -1298,11 +1313,9 @@ public partial class FilePane : UserControl
     /// <summary>Права, владелец и ссылки — только у сервера; скрытые человеком — скрыты.</summary>
     private void ApplyColumns()
     {
-        // у компьютера название не нужно — и так понятно, чьи это файлы
+        // у компьютера на этом месте «Открыть», у сервера — его значок
         WindowsExplorerButton.Visibility = IsRemote ? Visibility.Collapsed : Visibility.Visible;
-        TitleIcon.Visibility = IsRemote ? Visibility.Visible : Visibility.Collapsed;
-        TitleText.Visibility = TitleIcon.Visibility;
-        TitleButton.Visibility = TitleIcon.Visibility;
+        ServerGroup.Visibility = IsRemote ? Visibility.Visible : Visibility.Collapsed;
 
         foreach (var column in List.Columns)
         {
@@ -1345,6 +1358,7 @@ public partial class FilePane : UserControl
     private void MeasureColumns()
     {
         var dip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        var mode = TextOptions.GetTextFormattingMode(List);
         var rows = List.Items.OfType<PaneRow>().ToList();
 
         foreach (var column in List.Columns)
@@ -1368,21 +1382,24 @@ public partial class FilePane : UserControl
                 .Distinct()
                 .OrderByDescending(t => t.Length)
                 .Take(5)
-                .Select(t => TextWidth(t, font, 12, FontWeights.Normal, dip))
+                .Select(t => TextWidth(t, font, 12, FontWeights.Normal, dip, mode))
                 .DefaultIfEmpty(0)
                 .Max();
 
             // у шапки — место под стрелку сортировки, у имени — под значок
-            var head = TextWidth(column.Header as string ?? string.Empty, List.FontFamily, 11, FontWeights.SemiBold, dip) + 14;
+            var head = TextWidth(column.Header as string ?? string.Empty, List.FontFamily, 11, FontWeights.SemiBold, dip, mode) + 14;
             var icon = column == NameColumn ? 24 : 0;
 
-            _natural[column] = Math.Ceiling(Math.Max(cells + icon, head) + 18);
+            // 16 — поля ячейки, остальное — запас на округление до пикселей: без него дата
+            // и тип обрезались на последней букве
+            _natural[column] = Math.Ceiling(Math.Max(cells + icon, head) + 22);
         }
     }
 
-    private static double TextWidth(string text, FontFamily font, double size, FontWeight weight, double dip) =>
+    /// <summary>Ширина текста тем же способом, каким его рисует таблица: окно — в режиме Display, а он шире Ideal.</summary>
+    private static double TextWidth(string text, FontFamily font, double size, FontWeight weight, double dip, TextFormattingMode mode) =>
         new FormattedText(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
-            new Typeface(font, FontStyles.Normal, weight, FontStretches.Normal), size, Brushes.Black, dip).WidthIncludingTrailingWhitespace;
+            new Typeface(font, FontStyles.Normal, weight, FontStretches.Normal), size, Brushes.Black, null, mode, dip).WidthIncludingTrailingWhitespace;
 
     private static string HeaderOf(DataGridColumn column) => column.Header as string ?? string.Empty;
 
@@ -1521,7 +1538,10 @@ public partial class FilePane : UserControl
 
         var crumbs = source.Crumbs(path);
 
-        for (var i = 0; i < crumbs.Count; i++)
+        // у компьютера путь начинается с диска: «Этот компьютер» виден, только когда открыт он сам
+        var first = !source.IsRemote && crumbs.Count > 1 ? 1 : 0;
+
+        for (var i = first; i < crumbs.Count; i++)
         {
             if (Crumbs.Children.Count > 0 && !(source.IsRemote && i == 1))
             {
@@ -1539,6 +1559,7 @@ public partial class FilePane : UserControl
             }
 
             var (title, target) = crumbs[i];
+
             var button = new Button
             {
                 Content = new TextBlock { Text = title },
@@ -1565,7 +1586,12 @@ public partial class FilePane : UserControl
     private void OnCrumbBarClick(object sender, MouseButtonEventArgs e)
     {
         e.Handled = true;
-        BeginPathEdit();
+
+        // путь уже вписывают — щелчок ставит курсор в поле, а не выделяет всё заново
+        if (PathBox.Visibility != Visibility.Visible)
+        {
+            BeginPathEdit();
+        }
     }
 
     public void BeginPathEdit()
@@ -1576,8 +1602,9 @@ public partial class FilePane : UserControl
         }
 
         PathBox.Text = _source.Display(_current);
-        CrumbBar.Visibility = Visibility.Collapsed;
+        CrumbScroll.Visibility = Visibility.Hidden;
         PathBox.Visibility = Visibility.Visible;
+        PathGoButton.Visibility = Visibility.Visible;
 
         // фокус — после того как поле показалось, иначе он не встаёт
         Dispatcher.BeginInvoke(() =>
@@ -1592,7 +1619,38 @@ public partial class FilePane : UserControl
     {
         SuggestPopup.IsOpen = false;
         PathBox.Visibility = Visibility.Hidden;
-        CrumbBar.Visibility = Visibility.Visible;
+        PathGoButton.Visibility = Visibility.Hidden;
+        CrumbScroll.Visibility = Visibility.Visible;
+    }
+
+    private void OnEditPath(object sender, RoutedEventArgs e) => BeginPathEdit();
+
+    private void OnCopyPath(object sender, RoutedEventArgs e)
+    {
+        // у компьютера корень — список дисков, пути у него нет
+        if (_source is not { } source || _current.Length == 0 && !source.IsRemote)
+        {
+            return;
+        }
+
+        var path = source.Display(_current);
+
+        if (ClipboardText.Copy(path))
+        {
+            AppLog.Hint("Путь скопирован: " + path);
+        }
+    }
+
+    private async void OnPathGo(object sender, RoutedEventArgs e) => await GoToTypedPathAsync();
+
+    /// <summary>Перейти по вписанному пути (или по выбранной подсказке) — Enter или стрелка в поле.</summary>
+    private async Task GoToTypedPathAsync()
+    {
+        var text = SuggestPopup.IsOpen && SuggestList.SelectedItem is string pick ? pick : PathBox.Text;
+        EndPathEdit();
+        FolderMaskBox.Text = string.Empty;
+        await NavigateAsync(text);
+        FocusList();
     }
 
     private void OnPathLostFocus(object sender, KeyboardFocusChangedEventArgs e)
@@ -1635,11 +1693,7 @@ public partial class FilePane : UserControl
         if (e.Key == Key.Enter)
         {
             e.Handled = true;
-            var text = SuggestPopup.IsOpen && SuggestList.SelectedItem is string pick ? pick : PathBox.Text;
-            EndPathEdit();
-            FolderMaskBox.Text = string.Empty;
-            await NavigateAsync(text);
-            FocusList();
+            await GoToTypedPathAsync();
         }
         else if (e.Key == Key.Escape)
         {
@@ -1715,6 +1769,7 @@ public partial class FilePane : UserControl
 
     private async void OnUp(object sender, RoutedEventArgs e) => await GoUpAsync();
 
+    /// <summary>Домашняя папка — кнопка есть только у сервера, рядом с его значком.</summary>
     private async void OnHome(object sender, RoutedEventArgs e)
     {
         if (_source is { } source)
@@ -1914,7 +1969,7 @@ public partial class FilePane : UserControl
                 await OpenRowAsync(row);
             }
         }
-        else if (key == Key.F5 && TransferButton.Visibility == Visibility.Visible)
+        else if (key == Key.F5 && TransferGroup.Visibility == Visibility.Visible)
         {
             // как в Total Commander и WinSCP: F5 — копировать в соседнюю панель
             e.Handled = true;
@@ -2030,10 +2085,6 @@ public partial class FilePane : UserControl
     }
 
     // ── создание, переименование, удаление ───────────────────────────────────
-
-    private async void OnNewFolder(object sender, RoutedEventArgs e) => await CreateAsync(folder: true);
-
-    private async void OnNewFile(object sender, RoutedEventArgs e) => await CreateAsync(folder: false);
 
     /// <summary>Новая папка или файл со свободным именем — и сразу правка имени, как в проводнике.</summary>
     public async Task CreateAsync(bool folder)
@@ -2387,7 +2438,7 @@ public partial class FilePane : UserControl
         {
             Add(remote ? Wpf.Ui.Controls.SymbolRegular.ArrowDownload24 : Wpf.Ui.Controls.SymbolRegular.ArrowUpload24,
                 remote ? "Скачать на компьютер" : "Отправить на сервер",
-                TransferButton.Visibility == Visibility.Visible ? "F5" : string.Empty,
+                TransferGroup.Visibility == Visibility.Visible ? "F5" : string.Empty,
                 () => Ask(PaneCommand.TransferToOther));
             Add(Wpf.Ui.Controls.SymbolRegular.Copy24, "Копировать", "Ctrl+C", () => Ask(PaneCommand.Copy));
             Add(Wpf.Ui.Controls.SymbolRegular.Cut24, "Вырезать", "Ctrl+X", () => Ask(PaneCommand.Cut));
@@ -2822,7 +2873,7 @@ public partial class FilePane : UserControl
         TreeSplitter.Visibility = TreeHost.Visibility;
         TreeColumn.Width = show ? new GridLength(200) : new GridLength(0);
         TreeSplitColumn.Width = show ? new GridLength(4) : new GridLength(0);
-        TreeButton.Appearance = show ? Wpf.Ui.Controls.ControlAppearance.Secondary : Wpf.Ui.Controls.ControlAppearance.Transparent;
+        TreeButton.Background = show ? (Brush)FindResource("SubtleFillColorSecondaryBrush") : Brushes.Transparent;
 
         if (save && _state.ShowTree != show)
         {

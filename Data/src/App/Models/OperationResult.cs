@@ -146,6 +146,11 @@ public sealed class OperationResult : ObservableObject
     {
         get
         {
+            if (StepNumber > 0)
+            {
+                return StepStatus;
+            }
+
             var text = Status switch
             {
                 OperationStatus.Success => string.IsNullOrWhiteSpace(Message) ? "успешно" : Message,
@@ -156,6 +161,89 @@ public sealed class OperationResult : ObservableObject
             };
 
             return text.Length > 60 ? text[..57] + "…" : text;
+        }
+    }
+
+    // ── команда цепочки — своей строкой ───────────────────────────────────────
+
+    private readonly List<OperationResult> _steps = [];
+
+    /// <summary>Номер команды в цепочке, если это строка одной команды; 0 — обычная строка сервера.</summary>
+    public int StepNumber { get; private init; }
+
+    /// <summary>Первая строка команды — для статуса «#1 успешно · команда».</summary>
+    public string StepCommand { get; private init; } = string.Empty;
+
+    /// <summary>
+    /// Команды цепочки на этом сервере, каждая своей строкой со своим выводом и статусом.
+    /// Терминал копирования показывает их под строкой копирования вместо одной общей.
+    /// </summary>
+    public IReadOnlyList<OperationResult> Steps
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _steps.ToList();
+            }
+        }
+    }
+
+    /// <summary>Появилась строка команды или прогон начался заново.</summary>
+    public event Action<OperationResult>? StepsChanged;
+
+    /// <summary>Команда цепочки пошла: её строка. Повтор той же команды заменяет прежнюю строку.</summary>
+    public OperationResult BeginStep(int number, string command)
+    {
+        var step = new OperationResult(Server, Scope)
+        {
+            StepNumber = number,
+            StepCommand = command.Replace("\r\n", "\n").Split('\n')[0].Trim(),
+            Message = string.Empty,
+        };
+
+        lock (_sync)
+        {
+            _steps.RemoveAll(s => s.StepNumber == number);
+            _steps.Add(step);
+        }
+
+        step.Status = OperationStatus.Running;
+        StepsChanged?.Invoke(this);
+        return step;
+    }
+
+    private void ClearSteps()
+    {
+        lock (_sync)
+        {
+            if (_steps.Count == 0)
+            {
+                return;
+            }
+
+            _steps.Clear();
+        }
+
+        StepsChanged?.Invoke(this);
+    }
+
+    /// <summary>«#1 выполняется…», «#1 успешно · команда», «#2 ошибка · код 1» — какая команда и чем кончилась.</summary>
+    private string StepStatus
+    {
+        get
+        {
+            var label = $"#{StepNumber}";
+            var text = Status switch
+            {
+                OperationStatus.Success => $"{label} успешно · {StepCommand}",
+                OperationStatus.Failed => string.IsNullOrWhiteSpace(Message) ? $"{label} ошибка" : $"{label} ошибка · {Message}",
+                OperationStatus.Running => $"{label} " + (string.IsNullOrWhiteSpace(Message) ? "выполняется…" : Message),
+                OperationStatus.Cancelled => $"{label} прервано",
+                _ => $"{label} в очереди",
+            };
+
+            return text.Length > 90 ? text[..87] + "…" : text;
         }
     }
 
@@ -436,6 +524,7 @@ public sealed class OperationResult : ObservableObject
         Duration = TimeSpan.Zero;
         Message = string.Empty;
         Status = OperationStatus.Pending;
+        ClearSteps();
         Raise(nameof(Output));
     }
 
@@ -450,6 +539,7 @@ public sealed class OperationResult : ObservableObject
         Duration = TimeSpan.Zero;
         Message = string.Empty;
         Status = OperationStatus.Pending;
+        ClearSteps();
         Raise(nameof(Output));
     }
 

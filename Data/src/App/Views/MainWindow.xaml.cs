@@ -250,6 +250,60 @@ public partial class MainWindow : FluentWindow
             },
         };
         ApplicationThemeManager.Apply(target, WindowBackdropType.None);
+
+        if (!_tuneHooked)
+        {
+            // тема сменилась сама (как в системе) — поправки следом
+            _tuneHooked = true;
+            ApplicationThemeManager.Changed += (_, _) => TuneTheme();
+        }
+
+        TuneTheme();
+    }
+
+    private static bool _tuneHooked;
+
+    /// <summary>Кисти, которые программа подменяет в светлой теме; в тёмной их нет — всё из темы.</summary>
+    private static readonly string[] LightTuned =
+        ["TextFillColorSecondaryBrush", "TextFillColorTertiaryBrush", "TextFillColorDisabledBrush"];
+
+    /// <summary>
+    /// Светлая тема WPF UI рисует вторичный и третичный текст полупрозрачным чёрным — на белом
+    /// он выходит бледнее, чем такой же белый на тёмном: подписи сливаются с фоном. В светлой
+    /// теме эти кисти темнее, а полоса строк таблиц — лёгкое затемнение вместо белого на сером.
+    /// Тёмная тема не меняется: подмены убираются, и кисти снова берутся из темы.
+    /// </summary>
+    private static void TuneTheme()
+    {
+        var resources = Application.Current.Resources;
+        var light = ApplicationThemeManager.GetAppTheme() == ApplicationTheme.Light;
+
+        foreach (var key in LightTuned)
+        {
+            resources.Remove(key);
+        }
+
+        resources.Remove("AppRowAltBrush");
+
+        if (light)
+        {
+            resources["TextFillColorSecondaryBrush"] = Frozen(0xC4, 0x00);
+            resources["TextFillColorTertiaryBrush"] = Frozen(0x9E, 0x00);
+            resources["TextFillColorDisabledBrush"] = Frozen(0x80, 0x00);
+            resources["AppRowAltBrush"] = Frozen(0x09, 0x00);
+        }
+        else
+        {
+            // тёмная — как была: полоса строк та же кисть темы, что и раньше
+            resources["AppRowAltBrush"] = Application.Current.TryFindResource("ControlFillColorDefaultBrush");
+        }
+
+        static SolidColorBrush Frozen(byte alpha, byte gray)
+        {
+            var brush = new SolidColorBrush(Color.FromArgb(alpha, gray, gray, gray));
+            brush.Freeze();
+            return brush;
+        }
     }
 
     /// <summary>Повторный запуск программы: вместо второго окна — ещё одна вкладка в этом.</summary>
@@ -340,7 +394,7 @@ public partial class MainWindow : FluentWindow
     }
 
     /// <summary>
-    /// Галочки «после команды» / «после копирования» в терминале: вывод сам уходит в буфер.
+    /// Галочки «авто» в терминале: вывод сам уходит в буфер.
     /// Срабатывает выбор того вида операции, что закончилась, а не того раздела, что открыт.
     /// </summary>
     private void OnOperationFinished(OperationBatch batch)
@@ -551,10 +605,16 @@ public partial class MainWindow : FluentWindow
             {
                 ShowTabs();
             }
+
+            if (e.PropertyName is nameof(AppState.Section) or nameof(AppState.ActiveWorkspace))
+            {
+                ShowExplorerServer();
+            }
         };
 
         ApplyServerPane();
         ShowTabs();
+        ShowExplorerServer();
     }
 
     /// <summary>У «Проводника» карточки «Целевые сервера» нет: сервер выбирается в самой правой панели.</summary>
@@ -563,6 +623,59 @@ public partial class MainWindow : FluentWindow
         var explorer = State.Section == AppSection.Explorer;
         PaneCard.Visibility = explorer ? Visibility.Collapsed : Visibility.Visible;
         PaneColumn.Width = new GridLength(explorer ? 0 : 220);
+    }
+
+    /// <summary>Вкладка «Проводника», за сменой сервера которой следит подпись в ряду разделов.</summary>
+    private Workspace? _explorerTagTab;
+
+    /// <summary>Сервер правой панели «Проводника» — подписью у правого края ряда разделов.</summary>
+    private void ShowExplorerServer()
+    {
+        var tab = State.Section == AppSection.Explorer ? State.ActiveWorkspace : null;
+
+        if (!ReferenceEquals(tab, _explorerTagTab))
+        {
+            if (_explorerTagTab is not null)
+            {
+                _explorerTagTab.PropertyChanged -= OnExplorerTagTabChanged;
+            }
+
+            _explorerTagTab = tab;
+
+            if (tab is not null)
+            {
+                tab.PropertyChanged += OnExplorerTagTabChanged;
+            }
+        }
+
+        if (tab is null)
+        {
+            ExplorerServerTag.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var server = tab.ExplorerServer;
+        ExplorerServerIcon.Source ??= ShellIcons.Server;
+        ExplorerServerName.Text = server?.PaneLabel ?? "Сервер не выбран";
+        ExplorerServerUser.Text = server is null || string.IsNullOrWhiteSpace(server.User) ? string.Empty : $"({server.User})";
+        ExplorerServerAddress.Text = server is null ? string.Empty : $"{server.Host}:{server.Port}";
+        ExplorerServerTag.Visibility = Visibility.Visible;
+    }
+
+    private void OnExplorerTagTabChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(Workspace.ExplorerServer))
+        {
+            ShowExplorerServer();
+        }
+    }
+
+    private void OnExplorerServerTag(object sender, RoutedEventArgs e)
+    {
+        if (_explorerTagTab is { } tab)
+        {
+            Controls.ServerMenu.Show(ExplorerServerTag, tab.ExplorerServer, tab.PickExplorerServer);
+        }
     }
 
     /// <summary>

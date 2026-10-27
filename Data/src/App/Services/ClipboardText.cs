@@ -38,7 +38,7 @@ public static class ClipboardText
     /// Вывод терминала в буфер. Текст запоминается: вставить его в поле команды — почти
     /// всегда промах (думали, что в буфере команда, а там вывод, скопированный сам).
     /// </summary>
-    /// <param name="auto">Скопировано галочкой «после …», а не кнопкой.</param>
+    /// <param name="auto">Скопировано галочкой «авто», а не кнопкой.</param>
     public static bool CopyTerminalOutput(string text, bool auto = false)
     {
         if (!Copy(text))

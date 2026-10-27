@@ -100,7 +100,8 @@
     </Setter>
     <Setter Property="AlternationCount" Value="2" />
     <Setter Property="RowBackground" Value="Transparent" />
-    <Setter Property="AlternatingRowBackground" Value="{DynamicResource ControlFillColorDefaultBrush}" />
+    <!--  полоса строк: кисть ставит программа (MainWindow.TuneTheme) — в тёмной это ControlFillColorDefault темы  -->
+    <Setter Property="AlternatingRowBackground" Value="{DynamicResource AppRowAltBrush}" />
 
     <Setter Property="RowHeaderWidth" Value="0" />
     <Setter Property="HeadersVisibility" Value="Column" />

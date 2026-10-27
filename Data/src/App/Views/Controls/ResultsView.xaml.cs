@@ -139,12 +139,15 @@ public partial class ResultsView : UserControl
 
         if (Batch is not { } shown)
         {
+            WatchSteps([]);
             ResultsGrid.ItemsSource = null;
             return;
         }
 
         if (_chain is null)
         {
+            WatchSteps([]);
+
             if (!ReferenceEquals(ResultsGrid.ItemsSource, shown.Results))
             {
                 ResultsGrid.ItemsSource = shown.Results;
@@ -160,15 +163,34 @@ public partial class ResultsView : UserControl
 
         _rows.Clear();
 
+        var watched = new HashSet<OperationResult>();
+
         foreach (var row in shown.Results)
         {
             _rows.Add(row);
 
             if (AppState.AfterRowOf(shown, row, following) is { } after)
             {
-                _rows.Add(after);
+                watched.Add(after);
+
+                // команды — каждая своей строкой: копирование, #1, #2…; пока ни одна не пошла — общая строка
+                var steps = after.Steps;
+
+                if (steps.Count == 0)
+                {
+                    _rows.Add(after);
+                }
+                else
+                {
+                    foreach (var step in steps)
+                    {
+                        _rows.Add(step);
+                    }
+                }
             }
         }
+
+        WatchSteps(watched);
 
         if (!ReferenceEquals(ResultsGrid.ItemsSource, _rows))
         {
@@ -182,6 +204,26 @@ public partial class ResultsView : UserControl
 
         FitServerColumn();
     }
+
+    /// <summary>Строки команд, у которых таблица ждёт появления следующей команды.</summary>
+    private readonly HashSet<OperationResult> _stepsWatched = [];
+
+    private void WatchSteps(HashSet<OperationResult> rows)
+    {
+        foreach (var gone in _stepsWatched.Where(r => !rows.Contains(r)).ToList())
+        {
+            gone.StepsChanged -= OnStepsChanged;
+            _stepsWatched.Remove(gone);
+        }
+
+        foreach (var row in rows.Where(_stepsWatched.Add))
+        {
+            row.StepsChanged += OnStepsChanged;
+        }
+    }
+
+    // команда пошла на сервере — в фоне; таблицу перестраивает окно
+    private void OnStepsChanged(OperationResult row) => Dispatcher.BeginInvoke(new Action(ShowRows));
 
     private void OnChainChanged(object? sender, NotifyCollectionChangedEventArgs e) => Dispatcher.BeginInvoke(new Action(ShowRows));
 
@@ -320,8 +362,8 @@ public partial class ResultsView : UserControl
     private void OnCopyAll(object sender, RoutedEventArgs e) => CopyAll(Batch);
 
     /// <summary>
-    /// «Копировать. Все сервера»: вывод всех серверов одним текстом. Тем же зовёт
-    /// галочка «после команды» / «после копирования», когда операция закончилась.
+    /// «Все логи»: вывод всех серверов одним текстом. Тем же зовёт
+    /// галочка «авто», когда операция закончилась.
     /// </summary>
     /// <param name="finished">Автокопия: что закончилось — идёт в начало сообщения.</param>
     public void CopyAll(OperationBatch? source, string? finished = null)
@@ -374,7 +416,7 @@ public partial class ResultsView : UserControl
     private void OnCopyOne(object sender, RoutedEventArgs e) => CopyCurrent();
 
     /// <summary>
-    /// «Копировать. Текущее окно»: вывод сервера, выбранного в таблице слева.
+    /// «Текущий лог»: вывод сервера, выбранного в таблице слева.
     /// Тем же зовёт значок над полем команды — чтобы не тянуться мышью к терминалу.
     /// </summary>
     public void CopyCurrent(string? finished = null)

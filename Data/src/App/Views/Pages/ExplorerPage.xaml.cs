@@ -161,7 +161,7 @@ public partial class ExplorerPage : Page
         {
             ReleaseRemote();
             RemotePane.ShowEmpty("Сервер", ShellIcons.Server,
-                "Выберите сервер кнопкой «Сервер» слева от пути — здесь откроются его папки.");
+                "Выберите сервер значком сервера слева от пути — здесь откроются его папки.");
             UpdateTransferButtons();
             return;
         }

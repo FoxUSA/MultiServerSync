@@ -376,17 +376,8 @@ public sealed class AppState : ObservableObject
     /// </summary>
     private bool AutoCopyForCopying => _section is AppSection.Files or AppSection.Download or AppSection.Explorer;
 
-    /// <summary>Подпись галочек: после чего сработает автокопия.</summary>
-    public string AutoCopyWhen => _section switch
-    {
-        AppSection.Files => "после копирования",
-        AppSection.Download => "после скачивания",
-        AppSection.Explorer => "после переноса",
-        _ => "после команды",
-    };
-
     /// <summary>
-    /// Галочка «после …» у «Копировать. Все сервера». Буфер обмена один, поэтому
+    /// Галочка «авто» у «Все логи». Буфер обмена один, поэтому
     /// из двух автокопий работает одна: отметка этой снимает соседнюю.
     /// </summary>
     public bool AutoCopyAll
@@ -395,7 +386,7 @@ public sealed class AppState : ObservableObject
         set => SetAutoCopy(AutoCopyForCopying, all: value, current: value ? false : AutoCopyCurrent);
     }
 
-    /// <summary>Галочка «после …» у «Копировать. Текущее окно».</summary>
+    /// <summary>Галочка «авто» у «Текущий лог».</summary>
     public bool AutoCopyCurrent
     {
         get => AutoCopyForCopying ? Settings.AutoCopyCurrentAfterCopy : Settings.AutoCopyCurrent;
@@ -644,7 +635,7 @@ public sealed class AppState : ObservableObject
 
             // лента показывает вкладки открытого раздела — сначала список, потом выбор в нём
             RaiseMany(nameof(Section), nameof(Tabs), nameof(ShowsWorkspaceTabs), nameof(ShowsServerSetTabs), nameof(ShowsTabStrip),
-                nameof(AutoCopyAll), nameof(AutoCopyCurrent), nameof(AutoCopyWhen), nameof(ChainCopyVisibility),
+                nameof(AutoCopyAll), nameof(AutoCopyCurrent), nameof(ChainCopyVisibility),
                 nameof(PaneShowIp), nameof(PaneShowUser));
             RaisePane();
             EnforceSingleSelect();

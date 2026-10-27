@@ -118,9 +118,8 @@
           Margin="0,0,4,0"
           Padding="9,2"
           Click="OnCopyAll"
-          Content="Копировать. Все сервера"
+          Content="Все логи"
           FontSize="11"
-          IsEnabled="{Binding HasResults}"
           ToolTip="Вывод со всех серверов одним текстом — в буфер обмена">
           <ui:Button.Icon>
             <ui:SymbolIcon FontSize="17" Symbol="Copy24" />
@@ -131,7 +130,7 @@
           MinHeight="0"
           Margin="0,0,4,0"
           VerticalAlignment="Center"
-          Content="{Binding Source={x:Static services:AppState.Current}, Path=AutoCopyWhen}"
+          Content="авто"
           FontSize="11"
           IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=AutoCopyAll, Mode=TwoWay}"
           ToolTip="Операция закончилась на всех серверах — вывод всех серверов сам копируется в буфер обмена. У команд и у копирования галочки свои. Буфер один, поэтому соседняя галочка при этом снимается" />
@@ -139,7 +138,7 @@
           Margin="0,0,4,0"
           Padding="9,2"
           Click="OnCopyOne"
-          Content="Копировать. Текущее окно"
+          Content="Текущий лог"
           FontSize="11"
           ToolTip="Вывод только того сервера, что выбран в таблице слева">
           <ui:Button.Icon>
@@ -151,7 +150,7 @@
           MinHeight="0"
           Margin="0,0,4,0"
           VerticalAlignment="Center"
-          Content="{Binding Source={x:Static services:AppState.Current}, Path=AutoCopyWhen}"
+          Content="авто"
           FontSize="11"
           IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=AutoCopyCurrent, Mode=TwoWay}"
           ToolTip="Операция закончилась — вывод сервера, выбранного в таблице слева, сам копируется в буфер обмена. У команд и у копирования галочки свои. Буфер один, поэтому соседняя галочка при этом снимается" />

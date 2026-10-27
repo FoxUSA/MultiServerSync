@@ -350,7 +350,7 @@
                   Click="OnCopyOutput"
                   IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}"
                   Style="{StaticResource EditorIconStyle}"
-                  ToolTip="Копировать вывод (Ctrl+Shift+C) — то же, что «Копировать. Текущее окно» в терминале: весь вывод сервера, выбранного в таблице слева, со всеми окнами">
+                  ToolTip="Копировать вывод (Ctrl+Shift+C) — то же, что «Текущий лог» в терминале: весь вывод сервера, выбранного в таблице слева, со всеми окнами">
                   <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Copy24" />
                 </Button>
 
