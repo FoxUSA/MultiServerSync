@@ -102,6 +102,14 @@ public static class CopyPass
     // подписку UI Automation не делают из потока окна: события приходят в своём потоке
     private static void Subscribe() => Task.Run(() =>
     {
+        // курсор уже стоит в поле другой программы (ждали там, пока команда кончится) —
+        // фокус никуда не перейдёт, поэтому вставка сразу. Это раньше подписки: регистрация
+        // в UI Automation при первом обращении идёт секунду-две, а ждать её тут незачем
+        if (Focused() is { } current)
+        {
+            Consider(current);
+        }
+
         AutomationFocusChangedEventHandler? added = null;
 
         lock (Sync)
@@ -111,36 +119,37 @@ public static class CopyPass
                 return;
             }
 
-            // уже следим — прошлая копия ещё ждала; новой нужна только проверка курсора ниже
+            // уже следим — прошлая копия ещё ждала; новой хватило проверки курсора выше
             if (_handler is null)
             {
                 _handler = added = OnFocus;
             }
         }
 
-        if (added is not null)
+        if (added is null)
         {
-            try
-            {
-                Automation.AddAutomationFocusChangedEventHandler(added);
-            }
-            catch (Exception ex)
-            {
-                lock (Sync)
-                {
-                    _handler = null;
-                }
-
-                AppLog.Hint("CopyPass не смог следить за полями ввода: " + ex.Message, LogLevel.Warning);
-                return;
-            }
+            return;
         }
 
-        // курсор уже стоит в поле другой программы (ждали там, пока команда кончится) —
-        // фокус никуда не перейдёт, поэтому вставка сразу
-        if (Focused() is { } current)
+        try
         {
-            Consider(current);
+            Automation.AddAutomationFocusChangedEventHandler(added);
+        }
+        catch (Exception ex)
+        {
+            lock (Sync)
+            {
+                _handler = null;
+            }
+
+            AppLog.Hint("CopyPass не смог следить за полями ввода: " + ex.Message, LogLevel.Warning);
+            return;
+        }
+
+        // пока подписывались, фокус мог успеть перейти в поле — событие об этом уже упущено
+        if (Focused() is { } late)
+        {
+            Consider(late);
         }
     });
 

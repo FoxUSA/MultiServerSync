@@ -73,7 +73,17 @@ public static class OutputColoring
             shown = string.Empty;
         }
 
-        AddLines(paragraph!, text[shown.Length..]);
+        // тысяча строк разом — одной правкой документа, а не тысячей
+        box.BeginChange();
+        try
+        {
+            AddLines(paragraph!, text[shown.Length..]);
+        }
+        finally
+        {
+            box.EndChange();
+        }
+
         box.SetValue(ShownProperty, text);
 
         // за новыми строками прокручиваемся, пока пользователь ничего не выделил

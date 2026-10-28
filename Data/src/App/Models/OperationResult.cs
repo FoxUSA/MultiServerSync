@@ -1,5 +1,7 @@
 using System.Text;
+using System.Windows;
 using System.Windows.Media;
+using System.Windows.Threading;
 using MultiServerSync.Core;
 using MultiServerSync.Services;
 using Wpf.Ui.Controls;
@@ -35,6 +37,9 @@ public sealed class OperationResult : ObservableObject
     /// <summary>Незаконченная строка вывода — обычно вопрос, ждущий ответа.</summary>
     private string _tail = string.Empty;
 
+    /// <summary>Извещение о новом выводе уже ждёт в очереди окна — следующие строки едут с ним.</summary>
+    private int _outputQueued;
+
     /// <summary>Когда команда пошла — от этого считается живое время.</summary>
     private DateTime _startedUtc;
 
@@ -57,7 +62,7 @@ public sealed class OperationResult : ObservableObject
     /// Когда строка появилась. Прогоны копятся, у сервера строк может быть несколько — по этому
     /// времени строка команд после копирования находит своё копирование.
     /// </summary>
-    public DateTime Created { get; } = DateTime.Now;
+    public DateTime Created { get; private init; } = DateTime.Now;
 
     /// <summary>Вкладка, из которой запущена операция. Пусто, когда вкладка одна.</summary>
     public string Scope
@@ -115,6 +120,7 @@ public sealed class OperationResult : ObservableObject
         {
             if (Set(ref _status, value))
             {
+                TerminalStore.MarkDirty();
                 TrackTime(value == OperationStatus.Running);
 
                 // полоса прошлой передачи новому запуску не нужна: свою он выставит сам
@@ -635,7 +641,7 @@ public sealed class OperationResult : ObservableObject
             _tail = tail;
         }
 
-        Raise(nameof(Output));
+        RaiseOutput();
     }
 
     public SymbolRegular StatusSymbol => Status switch
@@ -704,7 +710,35 @@ public sealed class OperationResult : ObservableObject
             _output.AppendLine(line.TrimEnd('\r', '\n'));
         }
 
-        Raise(nameof(Output));
+        RaiseOutput();
+    }
+
+    /// <summary>
+    /// Вывод сменился — окну одно извещение на пачку строк, а не на каждую. Список под итогом
+    /// копирования — тысячи строк подряд; извещение на каждую заставляло поле вывода столько же
+    /// раз перечитывать весь текст, и окно вставало на минуты.
+    /// </summary>
+    private void RaiseOutput()
+    {
+        TerminalStore.MarkDirty();
+
+        if (Interlocked.Exchange(ref _outputQueued, 1) == 1)
+        {
+            return;
+        }
+
+        if (Application.Current?.Dispatcher is not { } dispatcher)
+        {
+            Volatile.Write(ref _outputQueued, 0);
+            Raise(nameof(Output));
+            return;
+        }
+
+        dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            Volatile.Write(ref _outputQueued, 0);
+            Raise(nameof(Output));
+        });
     }
 
     /// <summary>
@@ -727,7 +761,7 @@ public sealed class OperationResult : ObservableObject
             _tail = string.Empty;
         }
 
-        Raise(nameof(Output));
+        RaiseOutput();
     }
 
     /// <summary>
@@ -751,7 +785,7 @@ public sealed class OperationResult : ObservableObject
         Skipped = false;
         Status = OperationStatus.Pending;
         ClearSteps();
-        Raise(nameof(Output));
+        RaiseOutput();
     }
 
     public void Reset()
@@ -767,7 +801,72 @@ public sealed class OperationResult : ObservableObject
         Skipped = false;
         Status = OperationStatus.Pending;
         ClearSteps();
-        Raise(nameof(Output));
+        RaiseOutput();
+    }
+
+    // ── терминал переживает перезапуск ────────────────────────────────────────
+
+    /// <summary>Строка с выводом и командами цепочки — для UserData\terminal.json.</summary>
+    internal TerminalRowState ToState()
+    {
+        lock (_sync)
+        {
+            return new TerminalRowState
+            {
+                ServerId = Server.Id,
+                Scope = _scope,
+                Created = Created,
+                Status = _status,
+                Message = _message,
+                DurationMs = _duration.TotalMilliseconds,
+                FinishedUtc = _finishedUtc,
+                Skipped = _skipped,
+                Output = _output.ToString(),
+                StepNumber = StepNumber,
+                StepCommand = StepCommand,
+                Steps = _steps.Count == 0 ? null : _steps.Select(s => s.ToState()).ToList(),
+            };
+        }
+    }
+
+    /// <summary>
+    /// Строка из файла после перезапуска. Шедшая в момент закрытия программы — «прервано»,
+    /// ждавшая очереди — «не запускалось»: ни то, ни другое уже не продолжится.
+    /// </summary>
+    internal static OperationResult FromState(TerminalRowState state, ServerEntry server, OperationResult? parent = null)
+    {
+        var row = new OperationResult(server, state.Scope)
+        {
+            Created = state.Created,
+            StepNumber = state.StepNumber,
+            StepCommand = state.StepCommand,
+            Parent = parent,
+        };
+
+        row._status = state.Status switch
+        {
+            OperationStatus.Running or OperationStatus.Pending => OperationStatus.Cancelled,
+            var status => status,
+        };
+
+        row._message = state.Status switch
+        {
+            OperationStatus.Running => "прервано: программа закрылась",
+            OperationStatus.Pending => "не запускалось",
+            _ => state.Message,
+        };
+
+        row._skipped = state.Skipped || state.Status == OperationStatus.Pending;
+        row._duration = TimeSpan.FromMilliseconds(state.DurationMs);
+        row._finishedUtc = state.FinishedUtc;
+        row._output.Append(state.Output);
+
+        foreach (var step in state.Steps ?? [])
+        {
+            row._steps.Add(FromState(step, server, row));
+        }
+
+        return row;
     }
 
     private static SolidColorBrush Freeze(Color color)

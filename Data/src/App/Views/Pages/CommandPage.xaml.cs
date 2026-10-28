@@ -1,8 +1,11 @@
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows;
+using System.Runtime.InteropServices;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using MultiServerSync.Models;
 using MultiServerSync.Services;
@@ -15,8 +18,28 @@ namespace MultiServerSync.Views.Pages;
 /// и избранные команды общие для всех вкладок. Окон может быть несколько — они идут
 /// цепочкой, у каждого свой запуск, номер, секундомер и статус.
 /// </summary>
-public partial class CommandPage : Page
+public partial class CommandPage : Page, Controls.IToastHost
 {
+    /// <summary>Кнопке сейчас нечего делать: она тусклая, но жмётся — нажатие мигает рамкой окна.</summary>
+    public static readonly DependencyProperty IdleProperty = DependencyProperty.RegisterAttached(
+        "Idle", typeof(bool), typeof(CommandPage), new PropertyMetadata(false));
+
+    public static bool GetIdle(DependencyObject element) => (bool)element.GetValue(IdleProperty);
+
+    public static void SetIdle(DependencyObject element, bool value) => element.SetValue(IdleProperty, value);
+
+    public static readonly DependencyProperty HasClipboardTextProperty = DependencyProperty.Register(
+        nameof(HasClipboardText), typeof(bool), typeof(CommandPage), new PropertyMetadata(true));
+
+    /// <summary>В буфере обмена есть текст — значку «Вставить» есть что делать.</summary>
+    public bool HasClipboardText
+    {
+        get => (bool)GetValue(HasClipboardTextProperty);
+        private set => SetValue(HasClipboardTextProperty, value);
+    }
+
+    Controls.ActionToast Controls.IToastHost.PageToast => BarToast;
+
     public static readonly DependencyProperty IsNotEditingSnippetProperty = DependencyProperty.Register(
         nameof(IsNotEditingSnippet), typeof(bool), typeof(CommandPage), new PropertyMetadata(true));
 
@@ -46,6 +69,8 @@ public partial class CommandPage : Page
         Attach(Workspace);
 
         PasteToast.Large = true;
+        BarToast.Follow(EverywhereButton);
+        Loaded += (_, _) => ListenClipboard();
 
         StepsScroll.SizeChanged += (_, _) => FitSteps();
         ((INotifyCollectionChanged)StepsList.Items).CollectionChanged += (_, _) => FitSteps();
@@ -219,6 +244,7 @@ public partial class CommandPage : Page
 
         if (string.IsNullOrWhiteSpace(step.Text))
         {
+            FlashSteps([step]);
             AppLog.Hint("Окно и так пустое.");
             return;
         }
@@ -331,12 +357,14 @@ public partial class CommandPage : Page
         }
         catch (Exception ex)
         {
+            FlashSteps([step]);
             AppLog.Hint("Не удалось прочитать буфер обмена: " + ex.Message, LogLevel.Warning);
             return;
         }
 
         if (string.IsNullOrWhiteSpace(text))
         {
+            FlashSteps([step]);
             AppLog.Hint("В буфере обмена нет текста.", LogLevel.Warning);
             return;
         }
@@ -415,6 +443,7 @@ public partial class CommandPage : Page
     {
         if (StepOf(sender) is not { } step || string.IsNullOrWhiteSpace(step.Text))
         {
+            FlashSteps(StepOf(sender) is { } empty ? [empty] : []);
             AppLog.Hint("Сначала наберите команду в окне — её и запишем в избранное.", LogLevel.Warning);
             return;
         }
@@ -432,6 +461,7 @@ public partial class CommandPage : Page
 
         if (steps.Count == 0)
         {
+            FlashSteps(Workspace?.Steps ?? []);
             AppLog.Hint("Все окна пустые — записывать в избранное нечего.", LogLevel.Warning);
             return;
         }
@@ -757,6 +787,21 @@ public partial class CommandPage : Page
             return;
         }
 
+        // делать нечего — мигнуть тем, что надо заполнить: пустыми окнами или серверами слева.
+        // Запуск всё равно идёт дальше: он сам откажет и объяснит причину
+        var steps = from is null ? workspace.Steps.ToList()
+            : onlyThis ? [from]
+            : workspace.Steps.Skip(Math.Max(0, workspace.Steps.IndexOf(from))).ToList();
+
+        if (steps.All(s => s.IsEmpty))
+        {
+            FlashSteps(steps);
+        }
+        else if (workspace.CommandTargets.Count == 0 && Window.GetWindow(this) is MainWindow main)
+        {
+            main.FlashTargets();
+        }
+
         var signature = $"{from?.Number ?? 0}|{onlyThis}|{workspace.StepsSignature}";
 
         if (AppState.Current.Settings.RepeatGuard
@@ -833,9 +878,85 @@ public partial class CommandPage : Page
     /// <summary>Значок над первым окном: то же, что «Текущий лог» в терминале внизу.</summary>
     private void OnCopyOutput(object sender, RoutedEventArgs e)
     {
+        if (Workspace?.CommandBatch.HasResults != true)
+        {
+            FlashSteps(StepOf(sender) is { } step ? [step] : []);
+            AppLog.Hint("Копировать нечего — команда ещё не выполнялась.", LogLevel.Warning);
+            return;
+        }
+
         if (Window.GetWindow(this) is MainWindow main)
         {
             main.Terminal.CopyCurrent();
         }
     }
+
+    // ── кнопки без дела ─────────────────────────────────────────────────────
+
+    /// <summary>Два коротких вспыха — тусклым оранжевым, как плашка предупреждения.</summary>
+    internal static DoubleAnimation Blink() =>
+        new(0, 1, TimeSpan.FromMilliseconds(180))
+        {
+            AutoReverse = true,
+            RepeatBehavior = new RepeatBehavior(2),
+            FillBehavior = FillBehavior.Stop,
+        };
+
+    /// <summary>Нажали кнопку, которой нечего делать: рамки этих окон мигают.</summary>
+    private void FlashSteps(IEnumerable<CommandStep> steps)
+    {
+        foreach (var step in steps)
+        {
+            if (StepsList.ItemContainerGenerator.ContainerFromItem(step) is ContentPresenter presenter
+                && presenter.ContentTemplate?.FindName("Flash", presenter) is UIElement flash)
+            {
+                flash.BeginAnimation(OpacityProperty, Blink());
+            }
+        }
+    }
+
+    private bool _listening;
+
+    /// <summary>Значок «Вставить» тусклый, пока в буфере нет текста: Windows сама сообщает о каждой смене буфера.</summary>
+    private void ListenClipboard()
+    {
+        RefreshClipboard();
+
+        if (_listening || PresentationSource.FromVisual(this) is not HwndSource source)
+        {
+            return;
+        }
+
+        _listening = true;
+        AddClipboardFormatListener(source.Handle);
+        source.AddHook(OnWindowMessage);
+    }
+
+    private const int WmClipboardUpdate = 0x031D;
+
+    private IntPtr OnWindowMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == WmClipboardUpdate)
+        {
+            RefreshClipboard();
+        }
+
+        return IntPtr.Zero;
+    }
+
+    private void RefreshClipboard()
+    {
+        try
+        {
+            HasClipboardText = Clipboard.ContainsText();
+        }
+        catch (Exception)
+        {
+            // буфер занят другой программой — не гасить значок зря
+            HasClipboardText = true;
+        }
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool AddClipboardFormatListener(IntPtr hwnd);
 }

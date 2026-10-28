@@ -4,6 +4,7 @@
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
   xmlns:controls="clr-namespace:MultiServerSync.Views.Controls"
+  xmlns:pages="clr-namespace:MultiServerSync.Views.Pages"
   Title="Команда"
   ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
   ui:Design.Foreground="{DynamicResource TextFillColorPrimaryBrush}"
@@ -58,6 +59,10 @@
               </Trigger>
               <!--  пока команда идёт, запуск погашен — видно, что второй раз не нажать  -->
               <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.35" />
+              </Trigger>
+              <!--  делать нечего: значок тусклый, но жмётся — нажатие мигает рамкой окна  -->
+              <Trigger Property="pages:CommandPage.Idle" Value="True">
                 <Setter Property="Opacity" Value="0.35" />
               </Trigger>
             </ControlTemplate.Triggers>
@@ -305,6 +310,26 @@
                   VerticalContentAlignment="Top"
                   VerticalScrollBarVisibility="Auto" />
 
+                <!--  личные команды вкладки копирования — окно в тусклой оранжевой рамке, как и её ярлык:
+                      видно, что правишь команды после копирования, а не обычную команду  -->
+                <Border
+                  x:Name="PersonalRing"
+                  BorderBrush="#80E07A1F"
+                  BorderThickness="2"
+                  CornerRadius="4"
+                  IsHitTestVisible="False"
+                  Visibility="Collapsed" />
+
+                <!--  мигает тусклым оранжевым, когда жмут кнопку, которой нечего делать  -->
+                <Border
+                  x:Name="Flash"
+                  Background="#14E07A1F"
+                  BorderBrush="#A0E07A1F"
+                  BorderThickness="2"
+                  CornerRadius="4"
+                  IsHitTestVisible="False"
+                  Opacity="0" />
+
                 <!--  значки поверх окна, в его правом верхнем углу, в два ряда: запуск сверху, избранное и окна под ним  -->
                 <StackPanel
                   Margin="0,4,8,0"
@@ -313,6 +338,7 @@
                   SizeChanged="OnStepIconsResized">
                   <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
                     <Button
+                      x:Name="Paste"
                       Click="OnPasteStep"
                       Style="{StaticResource EditorIconStyle}"
                       ToolTip="Вставить из буфера — заменяет всё окно, чтобы вставка не приклеилась к прошлой команде">
@@ -370,6 +396,7 @@
                       Background="{DynamicResource ControlStrokeColorDefaultBrush}" />
 
                     <Button
+                      x:Name="Clear"
                       Click="OnClearStep"
                       Style="{StaticResource EditorIconStyle}"
                       ToolTip="Очистить окно">
@@ -379,6 +406,7 @@
 
                   <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
                     <Button
+                      x:Name="SaveOne"
                       Click="OnAddSnippet"
                       IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}"
                       Style="{StaticResource EditorIconStyle}"
@@ -482,6 +510,25 @@
               </Grid>
 
               <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding DataContext.IsPersonal, RelativeSource={RelativeSource AncestorType=Page}}" Value="True">
+                  <Setter TargetName="PersonalRing" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+                <!--  кнопкам нечего делать — тусклые  -->
+                <DataTrigger Binding="{Binding IsEmpty}" Value="True">
+                  <Setter TargetName="RunOne" Property="pages:CommandPage.Idle" Value="True" />
+                  <Setter TargetName="Clear" Property="pages:CommandPage.Idle" Value="True" />
+                  <Setter TargetName="SaveOne" Property="pages:CommandPage.Idle" Value="True" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsTailEmpty}" Value="True">
+                  <Setter TargetName="RunBelow" Property="pages:CommandPage.Idle" Value="True" />
+                  <Setter TargetName="SaveSet" Property="pages:CommandPage.Idle" Value="True" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding DataContext.CommandBatch.HasResults, RelativeSource={RelativeSource AncestorType=Page}}" Value="False">
+                  <Setter TargetName="CopyOut" Property="pages:CommandPage.Idle" Value="True" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding HasClipboardText, RelativeSource={RelativeSource AncestorType=Page}}" Value="False">
+                  <Setter TargetName="Paste" Property="pages:CommandPage.Idle" Value="True" />
+                </DataTrigger>
                 <!--  у последнего окна «это и все ниже» — то же самое, что «только это»  -->
                 <DataTrigger Binding="{Binding HasBelow}" Value="False">
                   <Setter TargetName="RunBelow" Property="Visibility" Value="Collapsed" />
@@ -530,9 +577,21 @@
           Content="Выполнить тут"
           Icon="{ui:SymbolIcon Play24}"
           IsEnabled="{Binding CommandBatch.IsIdle}"
-          ToolTip="Все окна этой вкладки по очереди на её отмеченных серверах (Ctrl+Enter в первом окне)" />
+          ToolTip="Все окна этой вкладки по очереди на её отмеченных серверах (Ctrl+Enter в первом окне)">
+          <!--  во всех окнах пусто — кнопка тусклая, но жмётся: нажатие мигает рамками окон  -->
+          <ui:Button.Style>
+            <Style BasedOn="{StaticResource {x:Type ui:Button}}" TargetType="ui:Button">
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding AllStepsEmpty}" Value="True">
+                  <Setter Property="Opacity" Value="0.5" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </ui:Button.Style>
+        </ui:Button>
 
         <ui:Button
+          x:Name="EverywhereButton"
           Appearance="Danger"
           Click="OnRunEverywhere"
           Content="Выполнить везде"
@@ -549,5 +608,11 @@
         Foreground="{DynamicResource TextFillColorTertiaryBrush}"
         Text="{Binding CommandSizeInfo}" />
     </Grid>
+
+    <!--  плашка о нажатии — не в углу окна, а сразу справа от главной кнопки; место ставит Follow  -->
+    <controls:ActionToast
+      x:Name="BarToast"
+      Grid.RowSpan="9"
+      Grid.ColumnSpan="2" />
   </Grid>
 </Page>

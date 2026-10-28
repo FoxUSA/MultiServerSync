@@ -154,6 +154,21 @@ public static class AppLog
     public static void Clear()
     {
         Entries.Clear();
+        TerminalStore.MarkDirty();
+    }
+
+    /// <summary>Журнал прошлых запусков программы — под записями этого, свежие сверху.</summary>
+    public static void Restore(IEnumerable<LogEntry> saved)
+    {
+        foreach (var entry in saved)
+        {
+            if (Entries.Count >= MaxEntriesInUi)
+            {
+                break;
+            }
+
+            Entries.Add(entry);
+        }
     }
 
     public static string ExportText()
@@ -182,6 +197,8 @@ public static class AppLog
             {
                 Entries.RemoveAt(Entries.Count - 1);
             }
+
+            TerminalStore.MarkDirty();
         }
 
         Written?.Invoke(entry);

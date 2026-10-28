@@ -84,6 +84,7 @@ public partial class RemoteBrowserWindow : FluentWindow
         state.Selected.Clear();
 
         var title = string.IsNullOrWhiteSpace(Server.User) ? Server.PaneLabel : $"{Server.PaneLabel} ({Server.User})";
+        Pane.ShowServerCaption(Server.PaneLabel, Server.Host);
         await Pane.AttachAsync(_remote, state, title, ShellIcons.Server);
 
         _landed = Pane.CurrentPath;

@@ -55,7 +55,7 @@ public sealed class CommandStep : ObservableObject
     public string Text
     {
         get => _text;
-        set { if (Set(ref _text, value ?? string.Empty)) { Changed?.Invoke(); } }
+        set { if (Set(ref _text, value ?? string.Empty)) { Raise(nameof(IsEmpty)); Changed?.Invoke(); } }
     }
 
     public bool UseSudo
@@ -80,6 +80,18 @@ public sealed class CommandStep : ObservableObject
     public bool CanSaveSet => IsFirst && IsMulti;
 
     public string NumberText => $"#{_number}";
+
+    /// <summary>В окне пусто: запуск, очистка и избранное у него без дела.</summary>
+    public bool IsEmpty => string.IsNullOrWhiteSpace(_text);
+
+    private bool _tailEmpty = true;
+
+    /// <summary>Пусто и в этом окне, и во всех ниже: «это и все ниже» без дела. Ставит вкладка.</summary>
+    public bool IsTailEmpty
+    {
+        get => _tailEmpty;
+        set => Set(ref _tailEmpty, value);
+    }
 
     public void Place(int number, int count)
     {

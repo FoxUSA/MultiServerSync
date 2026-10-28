@@ -14,11 +14,12 @@ namespace MultiServerSync.Views.Pages;
 /// Страница скачивания — зеркало копирования: таблица файлов и папок, каждая строка со своего
 /// сервера, папка здесь, те же правила «что качать» и исключения. У каждой вкладки свои строки и папка.
 /// </summary>
-public partial class DownloadPage : Page
+public partial class DownloadPage : Page, Controls.IToastHost
 {
     public DownloadPage()
     {
         InitializeComponent();
+        BarToast.Follow(EverywhereButton);
 
         DataContext = AppState.Current.ActiveWorkspace;
         AppState.Current.ActiveWorkspaceChanged += workspace =>
@@ -282,4 +283,6 @@ public partial class DownloadPage : Page
 
         AppState.Current.NotifyFinished(workspace.SummaryBatch);
     }
+
+    Controls.ActionToast Controls.IToastHost.PageToast => BarToast;
 }

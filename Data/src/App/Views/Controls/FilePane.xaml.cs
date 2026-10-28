@@ -333,6 +333,14 @@ public partial class FilePane : UserControl
         ShowTitle(_title, TitleIcon.Source);
     }
 
+    /// <summary>Подпись сервера над деревом — в окнах выбора пути, где не видно, чья это панель.</summary>
+    public void ShowServerCaption(string name, string host)
+    {
+        ServerCaptionName.Text = name;
+        ServerCaptionHost.Text = name == host ? string.Empty : "  " + host;
+        ServerCaption.Visibility = Visibility.Visible;
+    }
+
     /// <summary>Чья панель: на значке только картинка, название — в подсказке.</summary>
     private void ShowTitle(string title, ImageSource? icon)
     {

@@ -420,6 +420,48 @@ public sealed class Workspace : ObservableObject
 
     private IEnumerable<OperationBatch> OwnBatches => [CopyBatch, CommandBatch, CheckBatch, SummaryBatch, CompareBatch];
 
+    /// <summary>Прогоны вкладки, что пишутся на диск, по ключам файла. Сводка — из чужих строк, её нет.</summary>
+    private IEnumerable<(string Key, OperationBatch Batch)> StoredBatches =>
+        [("copy", CopyBatch), ("command", CommandBatch), ("check", CheckBatch), ("compare", CompareBatch)];
+
+    /// <summary>Терминал вкладки для UserData\terminal.json; пустой — null.</summary>
+    internal TerminalTabState? TerminalState()
+    {
+        var state = new TerminalTabState();
+
+        foreach (var (key, batch) in StoredBatches)
+        {
+            if (batch.ToState() is { } saved)
+            {
+                state.Batches[key] = saved;
+            }
+
+            if (ReferenceEquals(_resultsBatch, batch))
+            {
+                state.Shown = key;
+            }
+        }
+
+        return state.Batches.Count == 0 ? null : state;
+    }
+
+    /// <summary>Терминал вкладки после перезапуска — те же строки, тот же показанный прогон.</summary>
+    internal void RestoreTerminal(TerminalTabState state, Func<string, ServerEntry?> server, DateTime savedAt)
+    {
+        foreach (var (key, batch) in StoredBatches)
+        {
+            if (state.Batches.TryGetValue(key, out var saved))
+            {
+                batch.Restore(saved, server, savedAt);
+            }
+
+            if (key == state.Shown && batch.HasResults)
+            {
+                ShowResults(batch);
+            }
+        }
+    }
+
     /// <summary>Отсчёт срока жизни вывода у всех прогонов вкладки.</summary>
     internal void TickOutputLife()
     {
@@ -1013,9 +1055,6 @@ public sealed class Workspace : ObservableObject
         }
     }
 
-    /// <summary>Окна личной вкладки — отрезки полоски на ярлыке копирования, пока свитч включён.</summary>
-    public ObservableCollection<CommandStep>? ChainSteps => _afterCopyEnabled ? Personal?.Steps : null;
-
     /// <summary>Это вкладка раздела «Копирование» — у неё на ярлыке свитч личных команд.</summary>
     public bool IsCopyTab => AppState.Current.Workspaces.Contains(this);
 
@@ -1045,7 +1084,7 @@ public sealed class Workspace : ObservableObject
     }
 
     public void RaiseChain() => RaiseMany(
-        nameof(AfterCopyEnabled), nameof(Personal), nameof(HasPersonal), nameof(ChainSteps), nameof(IsCopyTab),
+        nameof(AfterCopyEnabled), nameof(Personal), nameof(HasPersonal), nameof(IsCopyTab),
         nameof(Notices), nameof(HasNotices));
 
     /// <summary>
@@ -1169,6 +1208,9 @@ public sealed class Workspace : ObservableObject
     /// <summary>Все окна одним текстом — чтобы узнать «ту же команду ещё раз».</summary>
     public string StepsSignature => string.Join("\n\u241E\n", Steps.Select(s => s.Text.Trim()));
 
+    /// <summary>Во всех окнах пусто — «Выполнить тут» и ♡♡ без дела.</summary>
+    public bool AllStepsEmpty => Steps.All(s => s.IsEmpty);
+
     private void OnStepsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         foreach (var step in e.OldItems?.OfType<CommandStep>() ?? [])
@@ -1204,7 +1246,16 @@ public sealed class Workspace : ObservableObject
 
     private void OnStepChanged()
     {
-        RaiseMany(nameof(CommandText), nameof(UseSudo), nameof(CommandSizeInfo), nameof(TabCounts), nameof(TabTooltip));
+        // «пусто отсюда и ниже» — снизу вверх
+        var tail = true;
+
+        for (var i = Steps.Count - 1; i >= 0; i--)
+        {
+            tail &= Steps[i].IsEmpty;
+            Steps[i].IsTailEmpty = tail;
+        }
+
+        RaiseMany(nameof(CommandText), nameof(UseSudo), nameof(CommandSizeInfo), nameof(TabCounts), nameof(TabTooltip), nameof(AllStepsEmpty));
         RaiseNotices();
 
         if (!_restoring)

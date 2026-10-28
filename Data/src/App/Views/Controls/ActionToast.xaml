@@ -23,7 +23,7 @@
 
     <Border
       x:Name="Body"
-      Padding="12,8"
+      Padding="12,7"
       Background="{DynamicResource SolidBackgroundFillColorTertiaryBrush}"
       BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
       BorderThickness="1"

@@ -232,6 +232,7 @@
         ToolTip="Пути этой вкладки с её отмеченных серверов" />
 
       <ui:Button
+        x:Name="EverywhereButton"
         Appearance="Danger"
         Click="OnDownloadEverywhere"
         Content="Выполнить везде"
@@ -239,5 +240,11 @@
         IsEnabled="{Binding CopyBatch.IsIdle}"
         ToolTip="Запускает скачивание сразу во всех вкладках — каждая со своими путями, папкой и серверами. Итог по каждой видно на её ярлыке." />
     </StackPanel>
+
+    <!--  плашка о нажатии — не в углу окна, а сразу справа от главной кнопки; место ставит Follow  -->
+    <controls:ActionToast
+      x:Name="BarToast"
+      Grid.RowSpan="9"
+      Grid.ColumnSpan="2" />
   </Grid>
 </Page>

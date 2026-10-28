@@ -85,6 +85,9 @@ public partial class App : Application
 
         PasswordVault.OpenAll();
 
+        // терминалы вкладок и журнал — какими их оставили
+        TerminalStore.Load();
+
         AppLog.Debug($"Запуск. Версия {AppVersion.Details}.");
         AppLog.Debug($"Программа: {AppPaths.DataDir}");
         AppLog.Debug($"Настройки пользователя: {AppPaths.UserDataDir}");
@@ -112,6 +115,7 @@ public partial class App : Application
             if (AppState.Current.Workspaces.Count > 0)
             {
                 AppState.Current.SaveAll();
+                TerminalStore.Save();
                 AppLog.Debug("Выход.");
             }
         }

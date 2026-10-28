@@ -11,13 +11,14 @@ namespace MultiServerSync.Views.Pages;
 /// Страница копирования. Список файлов, путь и параметры принадлежат текущей вкладке,
 /// история путей на сервере общая для всех вкладок.
 /// </summary>
-public partial class FilesPage : Page
+public partial class FilesPage : Page, Controls.IToastHost
 {
     private bool _activationHooked;
 
     public FilesPage()
     {
         InitializeComponent();
+        BarToast.Follow(EverywhereButton);
 
         // история путей сквозная — одна на все вкладки
         RemotePathBox.ItemsSource = AppState.Current.Settings.RemotePathHistory;
@@ -284,4 +285,6 @@ public partial class FilesPage : Page
         // автокопия — по сводке, когда закончили все вкладки, а не по первой закончившей
         AppState.Current.NotifyFinished(workspace.SummaryBatch);
     }
+
+    Controls.ActionToast Controls.IToastHost.PageToast => BarToast;
 }

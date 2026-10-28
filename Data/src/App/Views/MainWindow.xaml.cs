@@ -61,6 +61,9 @@ public partial class MainWindow : FluentWindow
         BottomRow.Height = new GridLength(Math.Max(0, settings.LogPanelHeight));
         SetBottomVisible(settings.LogPanelVisible);
 
+        // натянутое разделителем запоминается сразу: от него считается доля при смене рядов ленты
+        BottomSplitter.DragCompleted += (_, _) => RememberBottom();
+
         if (settings.BottomOnJournal)
         {
             JournalTab.IsChecked = true;
@@ -159,7 +162,7 @@ public partial class MainWindow : FluentWindow
             Terminal.RestoreDetached(settings.OutputDetached, settings.RunsDetached);
 
             // записи загрузки плашкой не показываем — только то, что сделано после открытия окна
-            AppLog.Written += Toast.Show;
+            AppLog.Written += ShowToast;
         };
 
         Closing += OnClosing;
@@ -379,14 +382,14 @@ public partial class MainWindow : FluentWindow
         AddWorkspace();
     }
 
-    private void AddWorkspace()
+    private void AddWorkspace(bool archived = false)
     {
-        State.ActiveWorkspace = State.AddWorkspace();
+        State.ActiveWorkspace = State.AddWorkspace(archived: archived);
     }
 
     private void OnAddTab(object sender, RoutedEventArgs e) => AddTab();
 
-    /// <summary>Плюс и Ctrl+T добавляют вкладку того раздела, который открыт.</summary>
+    /// <summary>Плюс и Ctrl+T добавляют вкладку того раздела, который открыт, — в ту ленту, что на экране.</summary>
     private void AddTab()
     {
         if (State.ShowsServerSetTabs)
@@ -395,7 +398,7 @@ public partial class MainWindow : FluentWindow
         }
         else if (State.ShowsWorkspaceTabs)
         {
-            AddWorkspace();
+            AddWorkspace(_archiveMode);
         }
     }
 
@@ -756,30 +759,42 @@ public partial class MainWindow : FluentWindow
         }
     }
 
+    /// <summary>Высота ленты ярлыков сейчас и самая низкая за сеанс — в один ряд.</summary>
+    private double _stripHeight;
+    private double _stripMin = double.MaxValue;
+
+    /// <summary>Насколько лента сейчас выше одного ряда.</summary>
+    private double StripExtra => Math.Max(0, _stripHeight - _stripMin);
+
     /// <summary>
     /// Ярлыки встали вторым рядом (или ряд ушёл) — лента выросла вниз. Страница сама ужимается
     /// на всю разницу, а нижняя панель стоит своей высотой; чтобы обе ужались поровну, нижней
-    /// отдаём её долю разницы.
+    /// отдаём её долю разницы. Считается каждый раз от высоты, натянутой разделителем, а не от
+    /// прошлой: прибавками панель от запуска к запуску сама росла.
     /// </summary>
     private void OnTabStripAreaSized(object sender, SizeChangedEventArgs e)
     {
-        var delta = e.NewSize.Height - e.PreviousSize.Height;
-
-        if (!e.HeightChanged || e.PreviousSize.Height <= 0 || Math.Abs(delta) < 1
-            || BottomPanel.Visibility != Visibility.Visible || !BottomRow.Height.IsAbsolute)
+        if (!e.HeightChanged || e.NewSize.Height <= 0)
         {
             return;
         }
 
-        var page = PageRow.ActualHeight;
-        var bottom = BottomRow.ActualHeight;
+        _stripHeight = e.NewSize.Height;
+        _stripMin = Math.Min(_stripMin, _stripHeight);
 
-        if (page + bottom <= 0)
+        if (BottomPanel.Visibility == Visibility.Visible && BottomRow.Height.IsAbsolute)
         {
-            return;
+            BottomRow.Height = new GridLength(BottomFor(StoredBottom()));
         }
+    }
 
-        BottomRow.Height = new GridLength(Math.Max(0, bottom - delta * bottom / (page + bottom)));
+    /// <summary>Высота нижней панели при нынешней ленте: натянутая минус её доля лишних рядов ленты.</summary>
+    private double BottomFor(double stored)
+    {
+        var extra = StripExtra;
+        var total = PageRow.ActualHeight + BottomRow.ActualHeight;
+
+        return extra <= 0 || total <= 0 ? stored : Math.Max(0, stored - extra * stored / (total + extra));
     }
 
     /// <summary>
@@ -1001,6 +1016,44 @@ public partial class MainWindow : FluentWindow
         return () => FxLayer.Children.Remove(image);
     }
 
+    /// <summary>Плашка о нажатии: у главной кнопки открытой страницы, а где своей нет — в правом нижнем углу.</summary>
+    private void ShowToast(LogEntry entry)
+    {
+        if (PageFrame.Content is Controls.IToastHost host and FrameworkElement { IsVisible: true })
+        {
+            host.PageToast.Show(entry);
+        }
+        else
+        {
+            Toast.Show(entry);
+        }
+    }
+
+    /// <summary>Запуск без отмеченных серверов: строки целевых серверов мигают тусклым оранжевым.</summary>
+    public void FlashTargets()
+    {
+        foreach (var item in PaneServerList.Items)
+        {
+            if (PaneServerList.ItemContainerGenerator.ContainerFromItem(item) is not System.Windows.Controls.ContentPresenter presenter
+                || presenter.ContentTemplate?.FindName("Item", presenter) is not System.Windows.Controls.Border row)
+            {
+                continue;
+            }
+
+            var brush = new SolidColorBrush(Color.FromArgb(0, 0xE0, 0x7A, 0x1F));
+            var blink = new ColorAnimation(Color.FromArgb(0x50, 0xE0, 0x7A, 0x1F), TimeSpan.FromMilliseconds(180))
+            {
+                AutoReverse = true,
+                RepeatBehavior = new RepeatBehavior(2),
+            };
+
+            // после вспышки — снова фон шаблона, с его подсветкой под мышью
+            blink.Completed += (_, _) => row.ClearValue(System.Windows.Controls.Border.BackgroundProperty);
+            row.Background = brush;
+            brush.BeginAnimation(SolidColorBrush.ColorProperty, blink);
+        }
+    }
+
     /// <summary>Значок архива вздрагивает: вкладка долетела.</summary>
     private void PulseArchive()
     {
@@ -1099,6 +1152,22 @@ public partial class MainWindow : FluentWindow
         }
     }
 
+    /// <summary>Карандаш в правом нижнем углу ярлыка — то же, что двойной щелчок.</summary>
+    private void OnRenameTabClick(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+
+        switch (sender)
+        {
+            case FrameworkElement { DataContext: Workspace workspace }:
+                Rename(workspace);
+                break;
+            case FrameworkElement { DataContext: ServerSet set }:
+                Rename(set);
+                break;
+        }
+    }
+
     private void Rename(ServerSet set)
     {
         var dialog = new InputDialog("Название набора", "Как назвать этот набор серверов:", set.Title)
@@ -1163,7 +1232,7 @@ public partial class MainWindow : FluentWindow
         BottomPanel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         BottomSplitter.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
 
-        BottomRow.Height = new GridLength(visible ? StoredBottom() : 0);
+        BottomRow.Height = new GridLength(visible ? BottomFor(StoredBottom()) : 0);
     }
 
     /// <summary>
@@ -1172,10 +1241,17 @@ public partial class MainWindow : FluentWindow
     /// </summary>
     private void RememberBottom()
     {
-        if (BottomPanel.Visibility == Visibility.Visible && BottomRow.ActualHeight > 40)
+        if (BottomPanel.Visibility != Visibility.Visible || BottomRow.ActualHeight <= 40)
         {
-            AppState.Current.Settings.LogPanelHeight = BottomRow.ActualHeight;
+            return;
         }
+
+        // запоминается высота при ленте в один ряд — обратный пересчёт к BottomFor
+        var bottom = BottomRow.ActualHeight;
+        var extra = StripExtra;
+        var total = PageRow.ActualHeight + bottom;
+
+        AppState.Current.Settings.LogPanelHeight = extra > 0 && total > 0 ? bottom * (total + extra) / total : bottom;
     }
 
     private double StoredBottom()

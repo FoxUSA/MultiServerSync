@@ -7,6 +7,12 @@ using MultiServerSync.Services;
 
 namespace MultiServerSync.Views.Controls;
 
+/// <summary>Страница, у которой своя плашка о нажатии — у главной кнопки, а не в углу окна.</summary>
+public interface IToastHost
+{
+    ActionToast PageToast { get; }
+}
+
 /// <summary>
 /// Тихая плашка в правом нижнем углу: что сделано по последнему нажатию. Без неё кнопки
 /// вроде «Копировать» или «Удалить» выглядели так, будто ничего не произошло, — запись
@@ -34,7 +40,7 @@ public partial class ActionToast : UserControl
         {
             Message.FontSize = value ? 15 : 12;
             Card.MaxWidth = value ? 820 : 460;
-            Body.Padding = value ? new Thickness(18, 12, 18, 12) : new Thickness(12, 8, 12, 8);
+            Body.Padding = value ? new Thickness(18, 12, 18, 12) : new Thickness(12, 7, 12, 7);
             Dot.Width = Dot.Height = value ? 9 : 7;
             Dot.Margin = value ? new Thickness(0, 7, 11, 0) : new Thickness(0, 5, 9, 0);
         }
@@ -54,6 +60,52 @@ public partial class ActionToast : UserControl
     /// <summary>Плашка на месте: показывает запись, сделанную <see cref="AppLog.WarnInPlace"/>.</summary>
     public void ShowInPlace(LogEntry entry) => Display(entry);
 
+    private FrameworkElement? _anchor;
+
+    /// <summary>
+    /// Плашка встаёт сразу справа от кнопки, по её середине. Сама плашка лежит в сетке страницы
+    /// поверх всех рядов: место пересчитывается, а раскладку она не раздвигает.
+    /// </summary>
+    public void Follow(FrameworkElement anchor)
+    {
+        _anchor = anchor;
+        HorizontalAlignment = HorizontalAlignment.Left;
+        VerticalAlignment = VerticalAlignment.Top;
+
+        anchor.SizeChanged += (_, _) => Place();
+        SizeChanged += (_, _) => Place();
+
+        if (Parent is FrameworkElement parent)
+        {
+            parent.SizeChanged += (_, _) => Place();
+        }
+    }
+
+    private void Place()
+    {
+        if (_anchor is not { IsVisible: true } anchor || Parent is not FrameworkElement parent)
+        {
+            return;
+        }
+
+        Point spot;
+
+        try
+        {
+            spot = anchor.TranslatePoint(new Point(anchor.ActualWidth, anchor.ActualHeight / 2), parent);
+        }
+        catch (InvalidOperationException)
+        {
+            return;
+        }
+
+        var left = spot.X + 8;
+        Card.MaxWidth = Math.Max(200, Math.Min(460, parent.ActualWidth - left - 4));
+        // снизу запас с избытком: кнопка стоит у самого низа страницы, плашка чуть выше неё —
+        // без запаса сетка ужимала плашку под остаток места и у строки срезался низ (хвосты «у», «р», «д»)
+        Margin = new Thickness(left, Math.Max(0, spot.Y - ActualHeight / 2), 0, -1000);
+    }
+
     private void Display(LogEntry entry)
     {
         Message.Text = entry.Text;
@@ -70,6 +122,7 @@ public partial class ActionToast : UserControl
         }
 
         Visibility = Visibility.Visible;
+        Place();
         BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(150)));
 
         // длинную запись дольше читать

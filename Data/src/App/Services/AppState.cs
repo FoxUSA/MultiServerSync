@@ -925,8 +925,11 @@ public sealed class AppState : ObservableObject
 
     // ── вкладки ────────────────────────────────────────────────────────────────
 
-    /// <summary>Новая вкладка в открытом разделе — копирования или команды.</summary>
-    public Workspace AddWorkspace(string? title = null)
+    /// <summary>
+    /// Новая вкладка в открытом разделе — копирования или команды. <paramref name="archived"/> —
+    /// добавили, глядя в архив: ярлык сразу там, а не в основной ленте.
+    /// </summary>
+    public Workspace AddWorkspace(string? title = null, bool archived = false)
     {
         var tabs = Tabs;
         var source = tabs.Count > 0 ? ActiveWorkspace : null;
@@ -970,10 +973,14 @@ public sealed class AppState : ObservableObject
             workspace.InitPane(ActiveServerSet.Id, allSets: false, new Dictionary<string, bool>(), showIp: false, showUser: false);
         }
 
+        workspace.IsArchived = archived;
+
         tabs.Add(workspace);
         SaveWorkspaces();
 
-        AppLog.Hint($"Добавлена вкладка «{workspace.Title}». Всего вкладок: {tabs.Count}.");
+        AppLog.Hint(workspace.IsArchived
+            ? $"Добавлена вкладка «{workspace.Title}» — в архиве. Всего вкладок: {tabs.Count}."
+            : $"Добавлена вкладка «{workspace.Title}». Всего вкладок: {tabs.Count}.");
         return workspace;
     }
 

@@ -3,6 +3,7 @@
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+  xmlns:controls="clr-namespace:MultiServerSync.Views.Controls"
   Title="Серверы"
   ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
   ui:Design.Foreground="{DynamicResource TextFillColorPrimaryBrush}"
@@ -79,6 +80,7 @@
         Icon="{ui:SymbolIcon Folder24}"
         ToolTip="Открыть папки выделенного сервера рядом с папками этого компьютера" />
       <TextBlock
+        x:Name="SelectionInfo"
         Margin="0,0,0,4"
         VerticalAlignment="Center"
         Foreground="{DynamicResource TextFillColorSecondaryBrush}"
@@ -155,5 +157,10 @@
       </DataGrid.Columns>
     </DataGrid>
 
+    <!--  плашка о нажатии — не в углу окна, а сразу справа от главной кнопки; место ставит Follow  -->
+    <controls:ActionToast
+      x:Name="BarToast"
+      Grid.RowSpan="9"
+      Grid.ColumnSpan="2" />
   </Grid>
 </Page>

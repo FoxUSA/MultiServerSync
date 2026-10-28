@@ -66,6 +66,12 @@ public static class AppPaths
     /// <summary>Где запускались команды и копирование — по ней умный режим замечает непривычный сервер.</summary>
     public static string RunHistoryFile => Path.Combine(UserDataDir, "runhistory.json");
 
+    /// <summary>Строки и вывод терминалов всех вкладок — переживают перезапуск.</summary>
+    public static string TerminalFile => Path.Combine(UserDataDir, "terminal.json");
+
+    /// <summary>Записи журнала — переживают перезапуск.</summary>
+    public static string JournalFile => Path.Combine(UserDataDir, "journal.json");
+
     /// <summary>Запомненные ключи серверов, как known_hosts у ssh.</summary>
     public static string KnownHostsFile => Path.Combine(UserDataDir, "known_hosts.json");
 

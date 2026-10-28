@@ -38,7 +38,60 @@ public sealed class OperationBatch : ObservableObject
 
     public OperationBatch()
     {
-        Results.CollectionChanged += (_, _) => Raise(nameof(HasResults));
+        Results.CollectionChanged += (_, _) =>
+        {
+            Raise(nameof(HasResults));
+            TerminalStore.MarkDirty();
+        };
+    }
+
+    // ── терминал переживает перезапуск ────────────────────────────────────────
+
+    /// <summary>Строки и срок жизни вывода — для UserData\terminal.json. Сводка не пишется: она из чужих строк.</summary>
+    internal TerminalBatchState? ToState() => IsSummary || Results.Count == 0
+        ? null
+        : new TerminalBatchState
+        {
+            Rows = Results.Select(r => r.ToState()).ToList(),
+            LifeFrom = _lifeFrom,
+            FinishedAt = _finishedAt,
+            StartedAt = StartedAt,
+            Total = Total,
+            Done = Done,
+            Success = SuccessCount,
+            Failed = FailedCount,
+        };
+
+    /// <summary>
+    /// Строки из файла после перезапуска. Срок «Хранить лог» идёт дальше от того же момента: вышел —
+    /// следующий запуск начнёт терминал заново, нет — допишет ниже. Строки удалённых серверов не встают.
+    /// </summary>
+    internal void Restore(TerminalBatchState state, Func<string, ServerEntry?> server, DateTime savedAt)
+    {
+        foreach (var rowState in state.Rows)
+        {
+            if (server(rowState.ServerId) is { } entry)
+            {
+                var row = OperationResult.FromState(rowState, entry);
+                row.Batch = this;
+                Results.Add(row);
+            }
+        }
+
+        if (Results.Count == 0)
+        {
+            return;
+        }
+
+        // программа закрылась посреди работы — срок считается от закрытия
+        _lifeFrom = state.LifeFrom ?? savedAt;
+        _finishedAt = state.FinishedAt;
+        StartedAt = state.StartedAt;
+        Total = state.Total;
+        Done = state.Done;
+        SuccessCount = state.Success;
+        FailedCount = state.Failed;
+        RaiseMany(nameof(LifeText), nameof(LifeExpired), nameof(SummaryText));
     }
 
     public ObservableCollection<OperationResult> Results { get; } = new();
@@ -79,6 +132,7 @@ public sealed class OperationBatch : ObservableObject
         if (!KeepLog && !IsRunning && _lifeFrom is not null)
         {
             _lifeFrom = DateTime.Now;
+            TerminalStore.MarkDirty();
         }
 
         RaiseMany(nameof(KeepLog), nameof(LifeText), nameof(LifeExpired));
@@ -98,6 +152,7 @@ public sealed class OperationBatch : ObservableObject
         if (!IsRunning && Results.Count > 0 && _lifeFrom is not null)
         {
             _lifeFrom = DateTime.Now;
+            TerminalStore.MarkDirty();
         }
 
         RaiseMany(nameof(LifeText), nameof(LifeExpired));
@@ -990,6 +1045,7 @@ public sealed class OperationBatch : ObservableObject
         {
             _finishedAt = DateTime.Now;
             _lifeFrom = _finishedAt;
+            TerminalStore.MarkDirty();
             IsRunning = false;
         }
 

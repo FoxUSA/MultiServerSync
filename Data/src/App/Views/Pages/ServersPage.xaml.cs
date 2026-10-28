@@ -12,11 +12,14 @@ namespace MultiServerSync.Views.Pages;
 /// Галочки в таблице нужны только для действий на этой странице: удалить, дублировать,
 /// проверить связь. Куда копировать и где выполнять команду, отмечается в панели слева.
 /// </summary>
-public partial class ServersPage : Page
+public partial class ServersPage : Page, Controls.IToastHost
 {
     public ServersPage()
     {
         InitializeComponent();
+
+        // плашка — за последним в ряду кнопок: за подписью «отмечено …» или, если её нет, за «Проводником»
+        BarToast.Follow(SelectionInfo);
 
         DataContext = this;
 
@@ -292,4 +295,6 @@ public partial class ServersPage : Page
         // а если проверять нечего, сама операция развернёт журнал с причиной
         await AppState.Current.ActiveWorkspace.RunCheckAsync(picked);
     }
+
+    Controls.ActionToast Controls.IToastHost.PageToast => BarToast;
 }
