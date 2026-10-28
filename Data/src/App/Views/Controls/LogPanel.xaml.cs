@@ -13,11 +13,25 @@ public partial class LogPanel : UserControl
 
     public LogPanel()
     {
+        // прочитать до разметки: её «Все разделы» при создании записывается в настройку
+        var settings = AppState.Current.Settings;
+        var savedFilter = settings.JournalFilter;
+
         InitializeComponent();
 
         LogList.ItemsSource = _view;
         AppLog.Written += OnWritten;
         Unloaded += (_, _) => AppLog.Written -= OnWritten;
+
+        // фильтр и автопрокрутка — как были при выходе
+        if (SectionFilter.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Content == savedFilter) is { } filter)
+        {
+            SectionFilter.SelectedItem = filter;
+        }
+
+        AutoScrollBox.IsChecked = settings.JournalAutoScroll;
+        AutoScrollBox.Checked += (_, _) => settings.JournalAutoScroll = true;
+        AutoScrollBox.Unchecked += (_, _) => settings.JournalAutoScroll = false;
     }
 
     /// <summary>То же, что у терминала: строка кнопок — в одной строке с ярлыками «Терминал / Журнал».</summary>
@@ -52,6 +66,8 @@ public partial class LogPanel : UserControl
         _view.Filter = section is null || box.SelectedIndex == 0
             ? null
             : item => item is LogEntry entry && entry.SectionText == section;
+
+        AppState.Current.Settings.JournalFilter = box.SelectedIndex <= 0 ? string.Empty : section ?? string.Empty;
     }
 
     private void OnClear(object sender, RoutedEventArgs e) => AppLog.Clear();

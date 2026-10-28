@@ -411,8 +411,45 @@ public sealed class AppState : ObservableObject
             Settings.AutoCopyCurrent = current;
         }
 
-        RaiseMany(nameof(AutoCopyAll), nameof(AutoCopyCurrent));
+        // сняли последнюю «авто» — CopyPass вставлять нечего, снимается и она
+        if (!all && !current && Settings.CopyPass)
+        {
+            Settings.CopyPass = false;
+            Services.CopyPass.Disarm();
+        }
+
+        RaiseMany(nameof(AutoCopyAll), nameof(AutoCopyCurrent), nameof(CopyPass), nameof(CopyPassAvailable));
         SaveSettings();
+    }
+
+    /// <summary>CopyPass работает вместе с «авто»: без неё галочка гаснет.</summary>
+    public bool CopyPassAvailable => AutoCopyAll || AutoCopyCurrent;
+
+    /// <summary>
+    /// Галочка CopyPass в строке терминала — одна на всю программу. В разделе, где «авто»
+    /// не стоит, показывается снятой и погашенной.
+    /// </summary>
+    public bool CopyPass
+    {
+        get => Settings.CopyPass && CopyPassAvailable;
+        set
+        {
+            if (Settings.CopyPass == value || (value && !CopyPassAvailable))
+            {
+                return;
+            }
+
+            Settings.CopyPass = value;
+
+            // сняли — ждущий лог не вставится
+            if (!value)
+            {
+                Services.CopyPass.Disarm();
+            }
+
+            Raise();
+            SaveSettings();
+        }
     }
 
     /// <summary>Галочка «+ команды» у копирования вывода: копировать и вывод личных команд вкладки.</summary>
@@ -635,7 +672,7 @@ public sealed class AppState : ObservableObject
 
             // лента показывает вкладки открытого раздела — сначала список, потом выбор в нём
             RaiseMany(nameof(Section), nameof(Tabs), nameof(ShowsWorkspaceTabs), nameof(ShowsServerSetTabs), nameof(ShowsTabStrip),
-                nameof(AutoCopyAll), nameof(AutoCopyCurrent), nameof(ChainCopyVisibility),
+                nameof(AutoCopyAll), nameof(AutoCopyCurrent), nameof(CopyPass), nameof(CopyPassAvailable), nameof(ChainCopyVisibility),
                 nameof(PaneShowIp), nameof(PaneShowUser));
             RaisePane();
             EnforceSingleSelect();
@@ -672,15 +709,7 @@ public sealed class AppState : ObservableObject
     /// <summary>Просьба показать терминал внизу окна — операция только что запущена.</summary>
     public event Action? TerminalRequested;
 
-    /// <summary>
-    /// Просьба показать журнал внизу окна. Нужна, когда операция не начата: причина написана
-    /// только в журнале, а нажатие кнопки без него выглядит как «ничего не произошло».
-    /// </summary>
-    public event Action? LogRequested;
-
     public void RequestTerminal() => TerminalRequested?.Invoke();
-
-    public void RequestLog() => LogRequested?.Invoke();
 
     private void RaiseDim()
     {

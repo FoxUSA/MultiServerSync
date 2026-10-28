@@ -113,6 +113,9 @@ public sealed class AppSettings
     /// <summary>Команда закончилась — вывод сервера, выбранного в терминале, сам уходит в буфер.</summary>
     public bool AutoCopyCurrent { get; set; }
 
+    /// <summary>CopyPass: скопированный программой лог сам вставляется в первое поле ввода другой программы и уходит Enter.</summary>
+    public bool CopyPass { get; set; }
+
     /// <summary>
     /// Защита от двойного запуска: ту же команду сразу после окончания прошлой — только
     /// повторным нажатием. Выключается в «Настройках».
@@ -164,6 +167,32 @@ public sealed class AppSettings
     public List<string> SectionOrder { get; set; } = new();
 
     /// <summary>Размер отдельного окна вывода — оно открывается таким же, каким его закрыли.</summary>
+    // ── где был человек при выходе: программа открывается там же, будто и не закрывалась ──
+
+    /// <summary>Открытый раздел (имя из <c>AppSection</c>). Пусто — «Серверы».</summary>
+    public string LastSection { get; set; } = string.Empty;
+
+    /// <summary>Положение окна; null — посреди экрана, как при первом запуске.</summary>
+    public double? WindowLeft { get; set; }
+
+    public double? WindowTop { get; set; }
+
+    public bool WindowMaximized { get; set; }
+
+    /// <summary>Внизу был открыт «Журнал», а не «Терминал».</summary>
+    public bool BottomOnJournal { get; set; }
+
+    /// <summary>Фильтр журнала по разделу — подпись пункта; пусто — «Все разделы».</summary>
+    public string JournalFilter { get; set; } = string.Empty;
+
+    public bool JournalAutoScroll { get; set; } = true;
+
+    /// <summary>Вывод был вынесен в отдельное окно.</summary>
+    public bool OutputDetached { get; set; }
+
+    /// <summary>Список запусков был вынесен в отдельное окно.</summary>
+    public bool RunsDetached { get; set; }
+
     public double OutputWidth { get; set; } = 900;
 
     public double OutputHeight { get; set; } = 620;

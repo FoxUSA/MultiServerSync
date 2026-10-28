@@ -25,6 +25,9 @@ public sealed class OperationBatch : ObservableObject
     /// <summary>Прогоны других вкладок, если этот прогон — сводный.</summary>
     private IReadOnlyList<OperationBatch> _sources = [];
 
+    /// <summary>Сводка «Выполнить везде»: строки разных вкладок в одной таблице.</summary>
+    public bool IsSummary => _sources.Count > 0;
+
     private DateTime? _finishedAt;
 
     private bool _isRunning;
@@ -253,11 +256,9 @@ public sealed class OperationBatch : ObservableObject
         foreach (var result in Results)
         {
             var output = result.Output.TrimEnd();
-            var caption = result.Scope.Length == 0
-                ? result.Server.Caption
-                : $"{result.Scope} · {result.Server.Caption}";
 
-            text.Append("Сервер: ").Append(caption).AppendLine(":");
+            // название вкладки — только в сводке, где рядом строки разных вкладок
+            text.AppendLine(result.CopyHeader(IsSummary));
 
             if (output.Length > 0)
             {
@@ -278,6 +279,44 @@ public sealed class OperationBatch : ObservableObject
         }
 
         return text.ToString().TrimEnd() + Environment.NewLine;
+    }
+
+    /// <summary>
+    /// Корзина в шапке таблицы запусков: убирает из неё законченные запуски. Идущие и ждущие очереди
+    /// остаются — их работа ещё пишет в свои строки. Сводка чистит вкладки, из которых собрана.
+    /// </summary>
+    /// <returns>Сколько строк убрано.</returns>
+    public int ClearFinished()
+    {
+        if (_sources.Count > 0)
+        {
+            return _sources.Sum(s => s.ClearFinished());
+        }
+
+        static bool Active(OperationResult row) => row.Status is OperationStatus.Running or OperationStatus.Pending;
+
+        // у копирования под строкой могут идти его команды — строка остаётся, пока они идут
+        var gone = Results.Where(r => !Active(r) && !r.Steps.Any(s => s.Status == OperationStatus.Running)).ToList();
+
+        foreach (var row in gone)
+        {
+            Results.Remove(row);
+        }
+
+        _lastRun = _lastRun.Where(Results.Contains).ToList();
+
+        if (Picked is { } picked && !Results.Contains(picked))
+        {
+            Picked = null;
+        }
+
+        if (Results.Count == 0)
+        {
+            _lifeFrom = null;
+        }
+
+        RaiseMany(nameof(CanRetry), nameof(LifeText), nameof(LifeExpired));
+        return gone.Count;
     }
 
     private bool _stopping;

@@ -33,20 +33,56 @@ public partial class MainWindow : FluentWindow
         Width = settings.WindowWidth;
         Height = settings.WindowHeight;
 
+        // там же, где было при выходе, — если это место ещё на экране (монитор могли отключить)
+        if (settings.WindowLeft is { } left && settings.WindowTop is { } top && OnScreen(left, top))
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Left = left;
+            Top = top;
+        }
+
+        if (settings.WindowMaximized)
+        {
+            WindowState = WindowState.Maximized;
+        }
+
+        _maximized = settings.WindowMaximized;
+        StateChanged += (_, _) =>
+        {
+            // свёрнутое окно помнит, каким было до этого
+            if (WindowState != WindowState.Minimized)
+            {
+                _maximized = WindowState == WindowState.Maximized;
+            }
+        };
+
         ApplyTheme(settings.Theme);
 
         BottomRow.Height = new GridLength(Math.Max(0, settings.LogPanelHeight));
         SetBottomVisible(settings.LogPanelVisible);
+
+        if (settings.BottomOnJournal)
+        {
+            JournalTab.IsChecked = true;
+        }
 
         // умный режим спрашивает посреди окна; фокус на «Отменить», так что случайный Enter не запустит
         SmartSwitch.IsChecked = settings.SmartMode;
         RunHistory.Choose = (headline, detail, confirm, extra) =>
             ConfirmDialog.Choose(this, headline, detail, confirm, extra, "Отменить");
 
-        // операция запущена — сразу показываем терминал, чтобы вывод был перед глазами,
-        // а если она не начата — журнал, где написано почему
+        // операция запущена — сразу показываем терминал, чтобы вывод был перед глазами;
+        // не начата — причина плашкой, журнал сам не открывается
         AppState.Current.TerminalRequested += ShowTerminal;
-        AppState.Current.LogRequested += ShowLog;
+
+        // окно вывода закрыли сами — при следующем запуске вывод в панели; закрылось при выходе — откроется снова
+        OutputWindow.OpenChanged += () =>
+        {
+            if (!App.Quitting)
+            {
+                settings.OutputDetached = OutputWindow.IsOpen;
+            }
+        };
 
         InputBindings.Add(new KeyBinding(
             new Core.RelayCommand(_ => ToggleBottom()), Key.F12, ModifierKeys.None));
@@ -115,7 +151,12 @@ public partial class MainWindow : FluentWindow
         {
             TabStrip.SelectedItem = State.ActiveWorkspace;
             SetStrip.SelectedItem = State.ActiveServerSet;
-            Navigate(typeof(ServersPage));
+
+            // раздел, где были при выходе; вкладки разделов и всё в них восстанавливает AppState
+            Navigate(PageOf(settings.LastSection));
+
+            // вынесенные окна вывода и запусков — снова отдельно, как были
+            Terminal.RestoreDetached(settings.OutputDetached, settings.RunsDetached);
 
             // записи загрузки плашкой не показываем — только то, что сделано после открытия окна
             AppLog.Written += Toast.Show;
@@ -167,6 +208,30 @@ public partial class MainWindow : FluentWindow
 
         PageFrame.Navigate(page);
     }
+
+    /// <summary>Страница раздела по имени, сохранённому при выходе; незнакомое — «Серверы».</summary>
+    private static Type PageOf(string section) =>
+        Enum.TryParse<AppSection>(section, out var parsed)
+            ? parsed switch
+            {
+                AppSection.Explorer => typeof(ExplorerPage),
+                AppSection.Command => typeof(CommandPage),
+                AppSection.Files => typeof(FilesPage),
+                AppSection.Download => typeof(DownloadPage),
+                AppSection.Settings => typeof(SettingsPage),
+                _ => typeof(ServersPage),
+            }
+            : typeof(ServersPage);
+
+    /// <summary>Окно, развёрнутое на весь экран, — с учётом того, что сейчас оно может быть свёрнуто.</summary>
+    private bool _maximized;
+
+    /// <summary>Заголовок окна в этом месте попадает на какой-нибудь из мониторов.</summary>
+    private static bool OnScreen(double left, double top) =>
+        left + 100 > SystemParameters.VirtualScreenLeft
+        && left + 100 < SystemParameters.VirtualScreenLeft + SystemParameters.VirtualScreenWidth
+        && top >= SystemParameters.VirtualScreenTop - 8
+        && top + 30 < SystemParameters.VirtualScreenTop + SystemParameters.VirtualScreenHeight;
 
     /// <summary>Кнопка раздела в ряду над рабочей областью.</summary>
     private void OnSectionClick(object sender, RoutedEventArgs e)
@@ -1119,17 +1184,6 @@ public partial class MainWindow : FluentWindow
         TerminalTab.IsChecked = true;
     }
 
-    /// <summary>Разворачивает нижнюю панель на вкладке «Журнал»: операция не пошла, причина там.</summary>
-    private void ShowLog()
-    {
-        if (BottomPanel.Visibility != Visibility.Visible)
-        {
-            SetBottomVisible(true);
-        }
-
-        JournalTab.IsChecked = true;
-    }
-
     private void OnBottomTabChanged(object sender, RoutedEventArgs e)
     {
         if (Terminal is null || Log is null)
@@ -1219,10 +1273,24 @@ public partial class MainWindow : FluentWindow
     {
         var settings = AppState.Current.Settings;
 
-        settings.WindowWidth = Width;
-        settings.WindowHeight = Height;
+        // развёрнутое или свёрнутое окно — запоминается его обычный размер, а не весь экран
+        var bounds = WindowState == WindowState.Normal || RestoreBounds.IsEmpty
+            ? new Rect(Left, Top, Width, Height)
+            : RestoreBounds;
+
+        settings.WindowWidth = bounds.Width;
+        settings.WindowHeight = bounds.Height;
+        settings.WindowLeft = bounds.Left;
+        settings.WindowTop = bounds.Top;
+        settings.WindowMaximized = _maximized;
+
         settings.LogPanelVisible = BottomPanel.Visibility == Visibility.Visible;
+        settings.BottomOnJournal = JournalTab.IsChecked == true;
         RememberBottom();
+
+        // вынесены ли вывод и запуски, пишется при их открытии и закрытии: при выходе
+        // программа закрывает окна в своём порядке, и здесь их могло уже не быть
+        settings.LastSection = State.Section.ToString();
 
         AppState.Current.SaveAll();
 

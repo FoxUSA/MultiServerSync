@@ -161,7 +161,8 @@
       </Setter>
     </Style>
 
-    <!--  набор серверов в боковой панели: строка того же кегля, что галочки; выбранный — с полоской и жирным  -->
+    <!--  набор серверов в боковой панели: строка того же кегля, что галочки. Выбранный — как открытый
+          раздел: подпись цветом акцента, жирным, и полоска того же цвета сбоку  -->
     <Style x:Key="PaneSetButtonStyle" TargetType="Button">
       <Setter Property="FontSize" Value="13" />
       <Setter Property="Cursor" Value="Hand" />
@@ -194,13 +195,15 @@
               </StackPanel>
             </Border>
             <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Row" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+              </Trigger>
+              <!--  после наведения: выбранный набор под мышью остаётся цветным  -->
               <Trigger Property="Tag" Value="Active">
                 <Setter TargetName="Bar" Property="Background" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
                 <Setter TargetName="Label" Property="FontWeight" Value="SemiBold" />
-                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
-              </Trigger>
-              <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Row" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -465,7 +468,8 @@
       </Setter>
     </Style>
 
-    <!--  разделы программы в ряд над рабочей областью — те же вкладки, что «Терминал» и «Журнал», крупнее  -->
+    <!--  разделы программы в ряд над рабочей областью — те же вкладки, что «Терминал» и «Журнал», крупнее.
+          Неоткрытые серые, открытый — значок и подпись цветом акцента: единственная цветная точка ряда  -->
     <Style
       x:Key="SectionTabStyle"
       BasedOn="{StaticResource PanelTabStyle}"
@@ -475,6 +479,32 @@
       <Setter Property="FontSize" Value="13" />
       <Setter Property="Focusable" Value="False" />
       <Setter Property="GroupName" Value="Sections" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="RadioButton">
+            <Border
+              x:Name="Bd"
+              Padding="{TemplateBinding Padding}"
+              Background="Transparent"
+              BorderBrush="Transparent"
+              BorderThickness="0,0,0,2">
+              <ContentPresenter VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+              </Trigger>
+              <!--  после наведения: открытый раздел под мышью остаётся цветным  -->
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
 
     <!--  сервер «Проводника» у правого края ряда разделов: плоская подпись, подсветка под мышью  -->
@@ -627,11 +657,12 @@
           <ui:SymbolIcon FontSize="10" Symbol="ArrowLeft24" />
         </Button>
 
+        <!--  огонёк: зелёный мигает, пока идёт работа; красный стоит, если кончилось с ошибкой  -->
         <Ellipse
           x:Name="BusyDot"
-          Width="6"
-          Height="6"
-          Margin="3,3,0,0"
+          Width="8"
+          Height="8"
+          Margin="6,5,0,0"
           HorizontalAlignment="Left"
           VerticalAlignment="Top"
           Fill="#3FB950"
@@ -706,6 +737,14 @@
           <DataTrigger.ExitActions>
             <StopStoryboard BeginStoryboardName="BusyPulse" />
           </DataTrigger.ExitActions>
+        </DataTrigger>
+        <DataTrigger Binding="{Binding Status}" Value="Failed">
+          <Setter TargetName="BusyDot" Property="Visibility" Value="Visible" />
+          <Setter TargetName="BusyDot" Property="Fill" Value="#E85C5C" />
+        </DataTrigger>
+        <DataTrigger Binding="{Binding Status}" Value="Partial">
+          <Setter TargetName="BusyDot" Property="Visibility" Value="Visible" />
+          <Setter TargetName="BusyDot" Property="Fill" Value="#E85C5C" />
         </DataTrigger>
         <DataTrigger Binding="{Binding CanClose}" Value="False">
           <Setter TargetName="Close" Property="Visibility" Value="Collapsed" />
@@ -870,7 +909,7 @@
     <Border
       x:Name="TabStripArea"
       Grid.Row="1"
-      Padding="4,2,4,1"
+      Padding="5.34,2,5.34,2"
       SizeChanged="OnTabStripAreaSized"
       TextOptions.TextFormattingMode="Display"
       UseLayoutRounding="True"
@@ -976,14 +1015,19 @@
 
     <!--  разделы — своим рядом между вкладками и рабочей областью: боковая панель остаётся
           серверам. Двойной щелчок по разделу возвращает на его первую вкладку  -->
+    <!--  подложка на ступень светлее карточек (в светлой теме — чуть темнее): ряд разделов
+          не сливается с рабочими карточками под ним  -->
     <Border
       Grid.Row="2"
-      Margin="4,0,4,4"
-      Padding="6,4"
+      Margin="5.34,0,5.34,4"
       Background="{DynamicResource SolidBackgroundFillColorQuarternaryBrush}"
       BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
       BorderThickness="1"
       CornerRadius="8">
+      <Border
+        Padding="6,4"
+        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+        CornerRadius="7">
       <DockPanel>
       <!--
         «Проводник»: сервер правой панели — у правого края ряда, как раз над ней. Название, логин,
@@ -1086,11 +1130,13 @@
         </RadioButton>
       </StackPanel>
       </DockPanel>
+      </Border>
     </Border>
 
     <!--  рабочая область: слева целевые серверы своей карточкой, справа страница раздела.
-          Зазоры по 4: от края окна, между карточкой и страницей, под рядом разделов  -->
-    <Grid Grid.Row="3" Margin="4,0,4,0">
+          Зазоры по 4: между карточкой и страницей, под рядом разделов. От края окна 5,34 (ровно 8 пикселей на 150%) — один
+          съедает рамка окна, на глаз выходит те же 4  -->
+    <Grid Grid.Row="3" Margin="5.34,0,5.34,0">
       <!--  в «Проводнике» карточки серверов нет: всё место — двум панелям файлов  -->
       <Grid.ColumnDefinitions>
         <ColumnDefinition x:Name="PaneColumn" Width="220" />
@@ -1346,7 +1392,7 @@
     <controls:ActionToast
       x:Name="Toast"
       Grid.Row="3"
-      Margin="0,0,24,14"
+      Margin="0,0,24,7"
       HorizontalAlignment="Right"
       VerticalAlignment="Bottom" />
 
@@ -1360,13 +1406,13 @@
       ResizeDirection="Rows" />
 
     <!--  нижняя панель: слева таблица серверов, справа вывод; вторая вкладка — журнал.
-          Карточка с зазором 4 от стен окна — тот же, что между страницей и панелью  -->
+          Карточка с зазором 5 от стен окна: один съедает рамка окна, на глаз те же 4, что между страницей и панелью  -->
     <!--  мелкий текст терминала и журнала — по пиксельной сетке, как на ярлыках вкладок: в режиме
           Ideal подписи 11 точек выходили размытыми, а соседние — разными по резкости  -->
     <Border
       x:Name="BottomPanel"
       Grid.Row="5"
-      Margin="4,0,4,4"
+      Margin="5.34,0,5.34,5.34"
       TextOptions.TextFormattingMode="Display"
       UseLayoutRounding="True"
       Background="{DynamicResource SolidBackgroundFillColorQuarternaryBrush}"

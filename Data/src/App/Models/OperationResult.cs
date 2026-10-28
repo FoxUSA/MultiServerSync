@@ -67,7 +67,7 @@ public sealed class OperationResult : ObservableObject
         {
             if (Set(ref _scope, value ?? string.Empty))
             {
-                RaiseMany(nameof(ShortTitle), nameof(FullTitle));
+                RaiseMany(nameof(ScopedShortTitle), nameof(ScopedFullTitle));
             }
         }
     }
@@ -75,11 +75,25 @@ public sealed class OperationResult : ObservableObject
     public string Title => Server.Display;
 
     /// <summary>Короткое имя для узкой колонки таблицы — полное показывает подсказка.</summary>
-    public string ShortTitle =>
-        Scope.Length == 0 ? Server.PaneLabel : $"{Scope} · {Server.PaneLabel}";
+    public string ShortTitle => Server.PaneLabel;
 
-    /// <summary>Полное имя с вкладкой — для заголовка вывода и текста в буфер обмена.</summary>
-    public string FullTitle => Scope.Length == 0 ? Title : $"{Scope} · {Title}";
+    /// <summary>Полное имя — для заголовка вывода.</summary>
+    public string FullTitle => Title;
+
+    /// <summary>
+    /// То же с названием вкладки — только для сводки «Выполнить везде», где в одной таблице
+    /// строки разных вкладок. В терминале своей вкладки название лишнее: она и так видна.
+    /// </summary>
+    public string ScopedShortTitle => Scope.Length == 0 ? ShortTitle : $"{Scope} · {ShortTitle}";
+
+    public string ScopedFullTitle => Scope.Length == 0 ? FullTitle : $"{Scope} · {FullTitle}";
+
+    /// <summary>Подпись для текста в буфер обмена: имя и адрес сервера, в сводке — ещё и вкладка.</summary>
+    public string CaptionFor(bool summary) =>
+        summary && Scope.Length > 0 ? $"{Scope} · {Server.Caption}" : Server.Caption;
+
+    /// <summary>Шапка вывода в буфере обмена — чтобы скопированный лог было с чем связать.</summary>
+    public string CopyHeader(bool summary) => $"Сервер: {CaptionFor(summary)}:";
 
     public string User => Server.User;
 

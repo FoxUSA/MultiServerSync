@@ -1,0 +1,45 @@
+<ui:FluentWindow
+  x:Class="MultiServerSync.Views.Dialogs.RunsWindow"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:core="clr-namespace:MultiServerSync.Core"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+  Title="Запуски"
+  Icon="pack://application:,,,/Assets/app.ico"
+  Width="720"
+  Height="480"
+  MinWidth="320"
+  MinHeight="200"
+  ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
+  ui:Design.Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  ExtendsContentIntoTitleBar="True"
+  Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  TextOptions.TextFormattingMode="Display"
+  UseLayoutRounding="True"
+  ShowInTaskbar="True"
+  WindowBackdropType="None"
+  WindowCornerPreference="Round"
+  WindowStartupLocation="CenterOwner">
+
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <ui:TitleBar
+      Grid.Row="0"
+      Title="Запуски"
+      Icon="{core:AppIcon}" />
+
+    <!--  та же таблица, что в главном окне: её переносят сюда целиком, с выбором и кнопками стопа  -->
+    <Border
+      x:Name="Host"
+      Grid.Row="1"
+      Margin="12,0,12,12"
+      Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+      BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+      BorderThickness="1"
+      CornerRadius="4" />
+  </Grid>
+</ui:FluentWindow>

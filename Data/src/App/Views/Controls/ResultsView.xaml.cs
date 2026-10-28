@@ -3,6 +3,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using MultiServerSync.Models;
 using MultiServerSync.Services;
 using MultiServerSync.Views.Dialogs;
@@ -95,6 +96,7 @@ public partial class ResultsView : UserControl
         }
 
         ShowRows();
+        ApplyTitles(e.NewValue as OperationBatch);
 
         // окно вывода пишет состояние того прогона, что показывает панель
         OutputWindow.TrackBatch(e.NewValue as OperationBatch);
@@ -118,6 +120,44 @@ public partial class ResultsView : UserControl
                 }));
             }
         }
+    }
+
+    private const string NoPickTitle = "Вывод — выберите сервер слева";
+
+    /// <summary>
+    /// Название вкладки у сервера — только в сводке «Выполнить везде», где в одной таблице строки
+    /// разных вкладок. В терминале своей вкладки оно лишнее: какая вкладка, и так видно.
+    /// </summary>
+    private void ApplyTitles(OperationBatch? batch)
+    {
+        var summary = batch?.IsSummary == true;
+
+        ServerColumn.Binding = new Binding(summary ? nameof(OperationResult.ScopedShortTitle) : nameof(OperationResult.ShortTitle));
+
+        OutputTitle.SetBinding(System.Windows.Controls.TextBlock.TextProperty, new Binding("SelectedItem." + (summary ? nameof(OperationResult.ScopedFullTitle) : nameof(OperationResult.FullTitle)))
+        {
+            ElementName = nameof(ResultsGrid),
+            FallbackValue = NoPickTitle,
+            TargetNullValue = NoPickTitle,
+        });
+    }
+
+    /// <summary>Корзина в шапке таблицы: убирает законченные запуски из списка.</summary>
+    private void OnClearRuns(object sender, RoutedEventArgs e)
+    {
+        if (Batch is not { HasResults: true } batch)
+        {
+            AppLog.Hint("Список запусков и так пуст.");
+            return;
+        }
+
+        var gone = batch.ClearFinished();
+
+        AppLog.Hint(gone == 0
+            ? "Убирать нечего — все запуски в списке ещё идут."
+            : batch.HasResults
+                ? $"Список очищен: убрано {gone}, идущие остались."
+                : $"Список запусков очищен: убрано {gone}.");
     }
 
     /// <summary>
@@ -364,6 +404,76 @@ public partial class ResultsView : UserControl
         OutputWindow.Open(Window.GetWindow(this)!, Batch, ResultsGrid.SelectedItem as OperationResult);
     }
 
+    /// <summary>Окно, в которое вынесена таблица запусков; null — таблица на месте.</summary>
+    private RunsWindow? _runsWindow;
+
+    /// <summary>
+    /// Кнопка в шапке таблицы: переносит таблицу в отдельное окно, а при открытом окне —
+    /// закрывает его, и таблица возвращается на место.
+    /// </summary>
+    private void OnDetachTable(object sender, RoutedEventArgs e)
+    {
+        if (_runsWindow is not null)
+        {
+            _runsWindow.Close();
+            return;
+        }
+
+        DetachTable();
+        AppLog.Hint("Список запусков открыт в отдельном окне.");
+    }
+
+    private void DetachTable()
+    {
+        TableHost.Children.Remove(ResultsGrid);
+
+        var window = new RunsWindow(ResultsGrid) { Owner = Window.GetWindow(this) };
+        _runsWindow = window;
+
+        window.Closed += (_, _) =>
+        {
+            _runsWindow = null;
+            TableHost.Children.Insert(0, ResultsGrid);
+            ApplyTableDetach();
+
+            // закрылось при выходе из программы — при следующем запуске откроется снова
+            if (!App.Quitting)
+            {
+                AppState.Current.Settings.RunsDetached = false;
+                AppLog.Hint("Окно запусков закрыто — список вернулся в главное окно.");
+            }
+        };
+
+        window.Show();
+        ApplyTableDetach();
+        AppState.Current.Settings.RunsDetached = true;
+    }
+
+    /// <summary>При запуске программы: окна вывода и запусков, вынесенные в прошлый раз, — снова отдельно.</summary>
+    public void RestoreDetached(bool output, bool runs)
+    {
+        if (runs && _runsWindow is null)
+        {
+            DetachTable();
+        }
+
+        if (output && !OutputWindow.IsOpen)
+        {
+            OutputWindow.Open(Window.GetWindow(this)!, Batch, ResultsGrid.SelectedItem as OperationResult);
+        }
+    }
+
+    private void ApplyTableDetach()
+    {
+        var detached = _runsWindow is not null;
+
+        TableDetachedHint.Visibility = detached ? Visibility.Visible : Visibility.Collapsed;
+        TableDetachIcon.Symbol = detached ? SymbolRegular.ArrowImport24 : SymbolRegular.WindowNew24;
+        TableDetachButton.ToolTip = detached
+            ? "Вернуть список запусков в главное окно — отдельное окно закроется"
+            : "Открыть список запусков в отдельном окне";
+    }
+
     /// <summary>Пока вывод в отдельном окне, на его месте в панели — подсказка про это окно.</summary>
     private void ApplyDetachState()
     {
@@ -465,6 +575,9 @@ public partial class ResultsView : UserControl
         {
             text += Environment.NewLine + time;
         }
+
+        // имя и адрес сервера сверху — иначе в буфере не понять, к чему лог
+        text = result.CopyHeader(batch?.IsSummary == true) + Environment.NewLine + text;
 
         // «+ команды»: следом вывод личных команд этого же сервера
         if (batch is not null

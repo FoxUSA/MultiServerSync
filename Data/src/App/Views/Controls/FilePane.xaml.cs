@@ -281,6 +281,18 @@ public partial class FilePane : UserControl
 
         ((System.Collections.Specialized.INotifyCollectionChanged)List.Items).CollectionChanged += (_, _) => ScheduleFit();
         List.SizeChanged += (_, _) => FitColumns();
+        // значки строки адреса ужимаются вместе с шрифтом адреса — одним масштабом
+        ServerIcons.LayoutTransform = _addressIconScale;
+        WindowsExplorerButton.LayoutTransform = _addressIconScale;
+        PathTools.LayoutTransform = _addressIconScale;
+
+        AddressRow.SizeChanged += (_, e) =>
+        {
+            if (e.WidthChanged)
+            {
+                FitCrumbs();
+            }
+        };
         List.Loaded += (_, _) =>
         {
             // полоса прокрутки появилась или пропала — места под столбцы стало другое
@@ -1579,7 +1591,61 @@ public partial class FilePane : UserControl
             Crumbs.Children.Add(button);
         }
 
-        // длинный путь не влезает — видна его конечная часть, как в проводнике
+        FitCrumbs();
+
+        // при смене источника значки сервера появляются только после раскладки — домерить по ней
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(FitCrumbs));
+    }
+
+    /// <summary>Обычный размер шрифта адреса — больше него адрес не растёт и на широком окне.</summary>
+    private const double CrumbFontSize = 13;
+
+    /// <summary>Масштаб значков строки адреса: 1 при обычном шрифте, меньше — вместе с ним.</summary>
+    private readonly ScaleTransform _addressIconScale = new(1, 1);
+
+    /// <summary>
+    /// Адрес виден целиком при любой ширине: не влезает — шрифт и значки строки мельче,
+    /// место появилось — крупнее, до обычного. Считается по всей строке сразу: ужатые значки
+    /// отдают место адресу, и мерить только адрес — значит раскачивать размер туда-обратно.
+    /// Поля и рамки постоянные, поэтому размер подбирается за несколько замеров.
+    /// </summary>
+    private void FitCrumbs()
+    {
+        var total = AddressRow.ActualWidth;
+
+        if (total <= 0 || CrumbScroll.ActualWidth <= 0)
+        {
+            return;
+        }
+
+        // ширина значков без масштаба и всего, что не масштабируется (рамки, поля, зазоры)
+        var icons = new FrameworkElement[] { ServerIcons, WindowsExplorerButton, PathTools }
+            .Where(e => e.IsVisible)
+            .Sum(e => e.ActualWidth);
+        var fixedPart = total - CrumbScroll.ActualWidth - icons * _addressIconScale.ScaleX;
+
+        var scale = 1.0;
+        var infinite = new Size(double.PositiveInfinity, double.PositiveInfinity);
+
+        for (var i = 0; i < 6; i++)
+        {
+            System.Windows.Documents.TextElement.SetFontSize(Crumbs, CrumbFontSize * scale);
+            Crumbs.Measure(infinite);
+
+            var need = fixedPart + icons * scale + Crumbs.DesiredSize.Width;
+
+            if (need <= total)
+            {
+                break;
+            }
+
+            scale = Math.Max(0.05, scale * total / need - 0.01);
+        }
+
+        _addressIconScale.ScaleX = scale;
+        _addressIconScale.ScaleY = scale;
+
+        // на всякий случай: долю точки не добрали — видна конечная часть, как в проводнике
         CrumbScroll.ScrollToRightEnd();
     }
 

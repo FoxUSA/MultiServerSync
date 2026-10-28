@@ -27,7 +27,7 @@
     <!--  часть адреса: плоский текст, подсветка под мышью  -->
     <Style x:Key="CrumbButtonStyle" TargetType="Button">
       <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
-      <Setter Property="FontSize" Value="13" />
+      <!--  размер шрифта — от ряда частей пути: он ужимается, чтобы адрес влез целиком  -->
       <Setter Property="Cursor" Value="Arrow" />
       <Setter Property="Focusable" Value="False" />
       <Setter Property="Template">
@@ -232,6 +232,7 @@
         Части пути — кнопки, щелчок по пустому месту (Ctrl+L, F4) открывает ввод пути на месте частей.
       -->
       <Grid
+        x:Name="AddressRow"
         Grid.Row="0"
         Height="{StaticResource IconButtonSize}"
         Margin="8,4,8,0">
@@ -246,7 +247,10 @@
           Margin="0,0,4,0"
           Style="{StaticResource PathGroupStyle}"
           Visibility="Collapsed">
-          <StackPanel VerticalAlignment="Center" Orientation="Horizontal">
+          <StackPanel
+            x:Name="ServerIcons"
+            VerticalAlignment="Center"
+            Orientation="Horizontal">
             <Button
               x:Name="TitleButton"
               Click="OnTitleClick"
@@ -287,6 +291,7 @@
               <ui:SymbolIcon FontSize="16" Symbol="FolderOpen24" />
             </Button>
             <StackPanel
+              x:Name="PathTools"
               VerticalAlignment="Center"
               DockPanel.Dock="Right"
               Orientation="Horizontal">
@@ -313,6 +318,7 @@
                 <StackPanel
                   x:Name="Crumbs"
                   Margin="2,0"
+                  TextElement.FontSize="13"
                   VerticalAlignment="Center"
                   Orientation="Horizontal" />
               </ScrollViewer>

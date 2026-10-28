@@ -59,6 +59,16 @@ public partial class ActionToast : UserControl
         Message.Text = entry.Text;
         Dot.Fill = DotBrush(entry.Level);
 
+        // предупреждение — тусклой оранжевой рамкой, как истёкший «Хранить лог»; остальное — рамкой темы
+        if (entry.Level == LogLevel.Warning)
+        {
+            Body.BorderBrush = WarningStroke;
+        }
+        else
+        {
+            Body.SetResourceReference(Border.BorderBrushProperty, "SurfaceStrokeColorDefaultBrush");
+        }
+
         Visibility = Visibility.Visible;
         BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(150)));
 
@@ -83,6 +93,14 @@ public partial class ActionToast : UserControl
         };
 
         BeginAnimation(OpacityProperty, fade);
+    }
+
+    private static readonly Brush WarningStroke = Freeze(new SolidColorBrush(Color.FromArgb(0x80, 0xE0, 0x7A, 0x1F)));
+
+    private static Brush Freeze(Brush brush)
+    {
+        brush.Freeze();
+        return brush;
     }
 
     private Brush DotBrush(LogLevel level)

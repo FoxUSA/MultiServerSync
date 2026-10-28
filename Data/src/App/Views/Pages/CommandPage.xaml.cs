@@ -1,3 +1,4 @@
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
@@ -46,6 +47,9 @@ public partial class CommandPage : Page
 
         PasteToast.Large = true;
 
+        StepsScroll.SizeChanged += (_, _) => FitSteps();
+        ((INotifyCollectionChanged)StepsList.Items).CollectionChanged += (_, _) => FitSteps();
+
         Wpf.Ui.Appearance.ApplicationThemeManager.Changed += (_, _) => PaintBoxes();
 
         _clock.Tick += (_, _) =>
@@ -88,11 +92,30 @@ public partial class CommandPage : Page
 
     // ── окна ────────────────────────────────────────────────────────────────
 
+    /// <summary>Ниже этого окно не ужимается: два ряда значков сверху и sudo снизу налезали друг на друга.</summary>
+    private const double MinStepHeight = 130;
+
+    /// <summary>Окна делят видимую высоту поровну, а когда им тесно — уходят под прокрутку.</summary>
+    private void FitSteps() =>
+        StepsList.Height = Math.Max(StepsScroll.ActualHeight, StepsList.Items.Count * MinStepHeight);
+
     private void OnStepBoxLoaded(object sender, RoutedEventArgs e)
     {
         if (sender is Control box)
         {
             PaintBox(box);
+        }
+    }
+
+    /// <summary>Текст не заходит под значки: правый отступ поля — по ширине их столбика, она меняется с кнопками.</summary>
+    private void OnStepIconsResized(object sender, SizeChangedEventArgs e)
+    {
+        if (sender is FrameworkElement icons
+            && icons.Parent is Grid grid
+            && grid.Children.OfType<TextBox>().FirstOrDefault() is { } box)
+        {
+            var pad = box.Padding;
+            box.Padding = new Thickness(pad.Left, pad.Top, icons.ActualWidth + icons.Margin.Right + 12, pad.Bottom);
         }
     }
 

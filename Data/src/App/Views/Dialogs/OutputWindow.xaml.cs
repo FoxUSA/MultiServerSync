@@ -125,6 +125,9 @@ public partial class OutputWindow : FluentWindow
             text += Environment.NewLine + time;
         }
 
+        // имя и адрес сервера сверху — иначе в буфере не понять, к чему лог
+        text = result.CopyHeader((StatusHost.DataContext as OperationBatch)?.IsSummary == true) + Environment.NewLine + text;
+
         if (ClipboardText.CopyTerminalOutput(text + Environment.NewLine))
         {
             AppLog.Hint($"Вывод скопирован: {result.Title}.");

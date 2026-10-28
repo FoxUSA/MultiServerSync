@@ -48,8 +48,15 @@ public static class ClipboardText
 
         _terminalOutput = Normalize(text);
         _terminalOutputAuto = auto;
+
+        // CopyPass: этот лог ждёт первого поля ввода в другой программе
+        CopyPass.Arm(auto);
         return true;
     }
+
+    /// <summary>В буфере — тот самый вывод терминала, что туда положили мы последним.</summary>
+    public static bool IsTerminalOutput(string? text) =>
+        text is not null && _terminalOutput is not null && Normalize(text) == _terminalOutput;
 
     /// <summary>
     /// В буфере — вывод терминала, который туда положили мы. Возвращает предупреждение

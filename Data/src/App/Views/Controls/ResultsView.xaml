@@ -110,7 +110,7 @@
           <CheckBox
             MinWidth="0"
             MinHeight="0"
-            Margin="10,0,6,0"
+            Margin="0,0,4,0"
             VerticalAlignment="Center"
             Content="Сохранять лог"
             FontSize="11"
@@ -200,12 +200,24 @@
           ToolTip="Копировать вместе с выводом личных команд вкладки: в буфере один отчёт — сначала копирование, потом команды. Автокопия тогда ждёт, пока команды закончатся"
           Visibility="{Binding Source={x:Static services:AppState.Current}, Path=ChainCopyVisibility}" />
         <ui:Button
+          Margin="0,0,4,0"
           Padding="9,2"
           Click="OnRetry"
           Content="Повторить упавшие"
           FontSize="11"
           Icon="{ui:SymbolIcon ArrowClockwise24}"
           Visibility="{Binding CanRetry, Converter={StaticResource BoolToVis}}" />
+        <!--  последней: не сдвигается, когда «Повторить упавшие» появляется и пропадает  -->
+        <CheckBox
+          MinWidth="0"
+          MinHeight="0"
+          VerticalAlignment="Center"
+          Content="CopyPass"
+          FontSize="11"
+          IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=CopyPass, Mode=TwoWay}"
+          IsEnabled="{Binding Source={x:Static services:AppState.Current}, Path=CopyPassAvailable}"
+          ToolTip="Лог, скопированный программой, сам вставится в первое поле ввода, куда вы перейдёте в другой программе, и уйдёт нажатием Enter. Один раз на копию; если в буфере уже другое — ничего не делает. Терминалы и поля паролей пропускает. Работает вместе с «авто»"
+          ToolTipService.ShowOnDisabled="True" />
       </StackPanel>
     </Grid>
 
@@ -225,6 +237,7 @@
         BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
         BorderThickness="1"
         CornerRadius="4">
+        <Grid x:Name="TableHost">
         <!--  строки таблицы тем же шрифтом, что вывод справа; заголовки — как заголовок над выводом.
               Фон и рамка — у Border вокруг, чтобы совпадать с полем вывода справа  -->
         <DataGrid
@@ -329,6 +342,42 @@
             </DataGridTemplateColumn>
           </DataGrid.Columns>
         </DataGrid>
+
+        <!--  таблица может жить в отдельном окне: на её месте подсказка, кнопки шапки остаются  -->
+        <TextBlock
+          x:Name="TableDetachedHint"
+          Margin="10,46,10,10"
+          VerticalAlignment="Top"
+          FontSize="12"
+          Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+          Text="Список запусков открыт в отдельном окне. Закройте его — и список вернётся сюда."
+          TextWrapping="Wrap"
+          Visibility="Collapsed" />
+
+        <!--  кнопки в шапке таблицы, как над выводом справа: поверх правого края заголовков  -->
+        <StackPanel
+          Height="{StaticResource IconButtonSize}"
+          Margin="0,0,8,0"
+          HorizontalAlignment="Right"
+          VerticalAlignment="Top"
+          Orientation="Horizontal">
+          <Button
+            VerticalAlignment="Center"
+            Click="OnClearRuns"
+            Style="{StaticResource OutputIconStyle}"
+            ToolTip="Очистить список запусков. Идущие и ждущие очереди останутся">
+            <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Delete24" />
+          </Button>
+          <Button
+            x:Name="TableDetachButton"
+            VerticalAlignment="Center"
+            Click="OnDetachTable"
+            Style="{StaticResource OutputIconStyle}"
+            ToolTip="Открыть список запусков в отдельном окне">
+            <ui:SymbolIcon x:Name="TableDetachIcon" FontSize="{StaticResource IconGlyphSize}" Symbol="WindowNew24" />
+          </Button>
+        </StackPanel>
+        </Grid>
       </Border>
 
       <GridSplitter
@@ -384,6 +433,7 @@
                   </Grid.ColumnDefinitions>
 
                   <TextBlock
+                    x:Name="OutputTitle"
                     Grid.Column="0"
                     VerticalAlignment="Center"
                     FontSize="11"
