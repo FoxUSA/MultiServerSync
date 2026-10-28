@@ -513,7 +513,7 @@ public partial class ResultsView : UserControl
                 + OutputFeed.ChainHeader + Environment.NewLine + chain.BuildTranscript();
         }
 
-        if (ClipboardText.CopyTerminalOutput(text, auto: finished is not null))
+        if (ClipboardText.CopyTerminalOutput(text, auto: finished is not null, AppState.Current.SectionOfBatch(batch)))
         {
             AppLog.Hint((finished is not null ? $"{finished} — вывод всех серверов скопирован в буфер обмена: " : "Вывод скопирован в буфер обмена: ")
                 + $"серверов {batch.Results.Count}, строк {text.Split('\n').Length}.");
@@ -590,7 +590,8 @@ public partial class ResultsView : UserControl
                 + (after.TimeLine is { } afterTime ? Environment.NewLine + afterTime : string.Empty);
         }
 
-        if (ClipboardText.CopyTerminalOutput(text + Environment.NewLine, auto: finished is not null))
+        if (ClipboardText.CopyTerminalOutput(text + Environment.NewLine, auto: finished is not null,
+            batch is null ? null : AppState.Current.SectionOfBatch(batch)))
         {
             AppLog.Hint(finished is not null
                 ? $"{finished} — вывод скопирован в буфер обмена: {result.Title}."

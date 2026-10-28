@@ -23,4 +23,21 @@ public sealed class ServerCheck : ObservableObject
         get => _isSelected;
         set => Set(ref _isSelected, value);
     }
+
+    private bool _isLocked;
+    private bool _isMuted;
+
+    /// <summary>Вкладка закреплена за этим сервером: закрытый замок в его строке виден всегда.</summary>
+    public bool IsLocked
+    {
+        get => _isLocked;
+        set => Set(ref _isLocked, value);
+    }
+
+    /// <summary>Вкладка закреплена за другим сервером: строка приглушена и не нажимается.</summary>
+    public bool IsMuted
+    {
+        get => _isMuted;
+        set => Set(ref _isMuted, value);
+    }
 }

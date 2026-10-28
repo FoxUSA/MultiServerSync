@@ -216,13 +216,29 @@ public sealed class Workspace : ObservableObject
         }
     }
 
-    public void PickPaneSet(ServerSet set) => SwitchScope(() =>
+    public void PickPaneSet(ServerSet set)
     {
-        _paneSetId = set.Id;
-        _paneAllSets = false;
-    });
+        if (BlockedByLock())
+        {
+            return;
+        }
 
-    public void PickAllSets() => SwitchScope(() => _paneAllSets = true);
+        SwitchScope(() =>
+        {
+            _paneSetId = set.Id;
+            _paneAllSets = false;
+        });
+    }
+
+    public void PickAllSets()
+    {
+        if (BlockedByLock())
+        {
+            return;
+        }
+
+        SwitchScope(() => _paneAllSets = true);
+    }
 
     /// <summary>
     /// «Проводник»: сервер выбирают из названия правой панели. Отметка остаётся одна — у него;
@@ -280,7 +296,7 @@ public sealed class Workspace : ObservableObject
     {
         var scope = Scope;
 
-        if (scope.SingleSelect == value)
+        if (scope.SingleSelect == value || BlockedByLock())
         {
             return;
         }
@@ -1453,6 +1469,7 @@ public sealed class Workspace : ObservableObject
     {
         Sync(CopyServers, all);
         Sync(CommandServers, all);
+        SyncLock();
 
         // панель получает отфильтрованный список, а не саму коллекцию — перечитывает его по сигналу
         Raise(nameof(Servers));
@@ -1529,6 +1546,11 @@ public sealed class Workspace : ObservableObject
     /// <summary>Отметить или снять все — в том наборе, который открыт сейчас.</summary>
     public void ToggleAllServers()
     {
+        if (BlockedByLock())
+        {
+            return;
+        }
+
         var set = Servers;
         var selectAll = set.Any(s => !s.IsSelected);
 
@@ -2620,6 +2642,7 @@ public sealed class Workspace : ObservableObject
         PaneScopes = _scopes.Values.Select(v => v.Clone()).ToList(),
         PaneShowIp = _paneShowIp,
         PaneShowUser = _paneShowUser,
+        LockedServerIds = _lockedIds?.ToList(),
     };
 
     /// <summary>Восстанавливает вкладку из файла. Пропавшие локальные пути отбрасываются.</summary>
@@ -2666,6 +2689,8 @@ public sealed class Workspace : ObservableObject
         _paneAllSets = state.PaneAllSets;
         _paneShowIp = state.PaneShowIp ?? false;
         _paneShowUser = state.PaneShowUser ?? false;
+        _lockedIds = state.LockedServerIds?.ToHashSet(StringComparer.Ordinal);
+        ApplyLock();
         _scopes.Clear();
 
         foreach (var scope in state.PaneScopes ?? [])
@@ -2916,6 +2941,30 @@ public sealed class Workspace : ObservableObject
     {
         if (e.PropertyName == nameof(ServerCheck.IsSelected))
         {
+            if (_reverting)
+            {
+                return;
+            }
+
+            // под замком отметки не меняются ничем: ни щелчком, ни переходом, ни «Отметить все»
+            if (_lockedIds is not null && sender is ServerCheck check && LockList.Contains(check)
+                && check.IsSelected != _lockedIds.Contains(check.Server.Id))
+            {
+                _reverting = true;
+
+                try
+                {
+                    check.IsSelected = !check.IsSelected;
+                }
+                finally
+                {
+                    _reverting = false;
+                }
+
+                BlockedByLock();
+                return;
+            }
+
             // одиночный выбор: отметили сервер в панели — остальные в наборе снимаются
             if (sender is ServerCheck { IsSelected: true } picked
                 && !_keepingOne
@@ -2931,6 +2980,118 @@ public sealed class Workspace : ObservableObject
     }
 
     private bool _keepingOne;
+
+    // ── замок: вкладка закреплена за своими серверами ─────────────────────────────
+
+    /// <summary>
+    /// Серверы, за которыми закреплена вкладка; null — замка нет. Память своей вкладки:
+    /// новая вкладка замок не наследует.
+    /// </summary>
+    private HashSet<string>? _lockedIds;
+
+    /// <summary>Страж возвращает отметку: её же сигнал второй раз не разбирается.</summary>
+    private bool _reverting;
+
+    private DateTime _lockHintAt;
+
+    /// <summary>Вкладка под замком: остальные серверы и наборы приглушены, сменить сервер нельзя.</summary>
+    public bool IsPaneLocked => _lockedIds is not null;
+
+    /// <summary>Отметки, которые держит замок: у командной вкладки — команды, у остальных — копирования.</summary>
+    private ObservableCollection<ServerCheck> LockList =>
+        AppState.Current.CommandTabs.Contains(this) ? CommandServers : CopyServers;
+
+    /// <summary>
+    /// Замок в строке сервера. Закрыть: сервер отмечается (если ещё не отмечен), и вкладка
+    /// закрепляется за отмеченными. Открыть — тем же замком.
+    /// </summary>
+    public void TogglePaneLock(ServerCheck clicked)
+    {
+        if (_lockedIds is not null)
+        {
+            _lockedIds = null;
+            ApplyLock();
+            AppLog.Hint($"Вкладка «{Title}»: замок снят, сервер снова можно менять.");
+            Save();
+            return;
+        }
+
+        if (!clicked.IsSelected)
+        {
+            clicked.IsSelected = true;
+        }
+
+        var picked = LockList.Where(c => c.IsSelected).ToList();
+        _lockedIds = picked.Select(c => c.Server.Id).ToHashSet(StringComparer.Ordinal);
+        ApplyLock();
+        AppLog.Hint($"Вкладка «{Title}» закреплена: {string.Join(", ", picked.Select(c => c.Server.PaneLabel))}. Сменить — сняв замок.");
+        Save();
+    }
+
+    /// <summary>Под замком действие, меняющее серверы вкладки, не выполняется — и об этом плашка.</summary>
+    private bool BlockedByLock()
+    {
+        if (_lockedIds is null)
+        {
+            return false;
+        }
+
+        // одно действие трогает много отметок — плашка одна
+        if (DateTime.UtcNow - _lockHintAt > TimeSpan.FromSeconds(2))
+        {
+            _lockHintAt = DateTime.UtcNow;
+            AppLog.Hint($"Вкладка «{Title}» закреплена за своим сервером — сменить можно, сняв замок в его строке.");
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Строки панели узнают, кто закреплён, а кто приглушён. В обоих списках отметок: при загрузке
+    /// вкладка может ещё не знать, командная она или нет.
+    /// </summary>
+    private void ApplyLock()
+    {
+        foreach (var check in CopyServers.Concat(CommandServers))
+        {
+            var pinned = _lockedIds?.Contains(check.Server.Id) == true;
+            check.IsLocked = pinned;
+            check.IsMuted = _lockedIds is not null && !pinned;
+        }
+
+        Raise(nameof(IsPaneLocked));
+    }
+
+    /// <summary>
+    /// Список серверов поменялся: новые приходят приглушёнными, удалённые уходят из замка.
+    /// Не осталось ни одного закреплённого — замок снимается, иначе его нечем было бы открыть.
+    /// </summary>
+    private void SyncLock()
+    {
+        if (_lockedIds is null)
+        {
+            return;
+        }
+
+        // серверы ещё не загружены — снимать нечего
+        if (CopyServers.Count == 0)
+        {
+            ApplyLock();
+            return;
+        }
+
+        var present = CopyServers.Select(c => c.Server.Id).ToHashSet(StringComparer.Ordinal);
+        _lockedIds.IntersectWith(present);
+
+        if (_lockedIds.Count == 0)
+        {
+            _lockedIds = null;
+            AppLog.Hint($"Вкладка «{Title}»: закреплённого сервера больше нет — замок снят.");
+            Save();
+        }
+
+        ApplyLock();
+    }
 
     /// <summary>Одиночный выбор действует на «Команде» и «Копировании»; на «Серверах» галочки обычные.</summary>
     public bool IsPaneSingleSelect =>

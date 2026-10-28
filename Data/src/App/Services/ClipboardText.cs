@@ -39,7 +39,8 @@ public static class ClipboardText
     /// всегда промах (думали, что в буфере команда, а там вывод, скопированный сам).
     /// </summary>
     /// <param name="auto">Скопировано галочкой «авто», а не кнопкой.</param>
-    public static bool CopyTerminalOutput(string text, bool auto = false)
+    /// <param name="section">Раздел операции — для CopyPass при автокопии.</param>
+    public static bool CopyTerminalOutput(string text, bool auto = false, AppSection? section = null)
     {
         if (!Copy(text))
         {
@@ -50,7 +51,7 @@ public static class ClipboardText
         _terminalOutputAuto = auto;
 
         // CopyPass: этот лог ждёт первого поля ввода в другой программе
-        CopyPass.Arm(auto);
+        CopyPass.Arm(auto ? section ?? AppState.Current.Section : null);
         return true;
     }
 

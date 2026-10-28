@@ -471,15 +471,17 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        var settings = State.Settings;
         var copying = State.IsCopyBatch(batch);
         var finished = copying ? "Копирование закончилось" : "Команда закончилась";
 
-        if (copying ? settings.AutoCopyAllAfterCopy : settings.AutoCopyAll)
+        // «авто» у каждого раздела свои — смотрим раздел операции, а не тот, что открыт
+        var section = State.SectionOfBatch(batch);
+
+        if (State.StoredAutoCopyAll(section))
         {
             Terminal.CopyAll(batch, finished);
         }
-        else if (copying ? settings.AutoCopyCurrentAfterCopy : settings.AutoCopyCurrent)
+        else if (State.StoredAutoCopyCurrent(section))
         {
             Terminal.CopyCurrentAfter(batch, finished);
         }
@@ -515,6 +517,17 @@ public partial class MainWindow : FluentWindow
         {
             State.PaneAllSets = true;
             AppLog.Hint($"Целевые сервера — из всех наборов: {State.PaneServers.Count}.");
+        }
+    }
+
+    /// <summary>Замок в строке целевого сервера: закрепить вкладку за ним или снять замок.</summary>
+    private void OnPaneLockClick(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+
+        if (sender is FrameworkElement { DataContext: Models.ServerCheck check })
+        {
+            State.ActiveWorkspace.TogglePaneLock(check);
         }
     }
 

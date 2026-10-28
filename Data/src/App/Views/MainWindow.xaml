@@ -211,6 +211,49 @@
       </Setter>
     </Style>
 
+    <!--  замок в конце строки целевого сервера: под мышью — залитый фон и белый значок  -->
+    <Style x:Key="PaneLockButtonStyle" TargetType="Button">
+      <Setter Property="Width" Value="20" />
+      <Setter Property="Height" Value="20" />
+      <Setter Property="Margin" Value="4,0,0,0" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Bd"
+              Background="Transparent"
+              CornerRadius="4">
+              <ContentPresenter
+                x:Name="Glyph"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                TextElement.Foreground="{TemplateBinding Foreground}" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                <Setter TargetName="Glyph" Property="TextElement.Foreground" Value="White" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!--  под замком вкладки: приглушено и не нажимается — «Отметить все», одиночный выбор, наборы  -->
+    <Style x:Key="PaneLockedMuteStyle" TargetType="FrameworkElement">
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding State.ActiveWorkspace.IsPaneLocked}" Value="True">
+          <Setter Property="Opacity" Value="0.5" />
+          <Setter Property="IsHitTestVisible" Value="False" />
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+
     <!--  мелкие кнопки в углах ярлыка вкладки: появляются под мышью и у выбранной вкладки,
           в покое ярлык чистый. Скрывают их шаблоны (первая, личная) — это сильнее стиля  -->
     <Style x:Key="TabIconButtonStyle" TargetType="Button">
@@ -634,9 +677,11 @@
           </Grid>
         </StackPanel>
 
-        <!--  копирование: свитч личных команд слева; личная команда — стрелка назад  -->
+        <!--  копирование: свитч личных команд слева; личная команда — стрелка назад.
+              Свитч — посередине всего ярлыка, вместе с полоской внизу: выше он заходил на огонёк  -->
         <ToggleButton
           x:Name="Switch"
+          Grid.RowSpan="2"
           Margin="1,0,0,0"
           HorizontalAlignment="Left"
           VerticalAlignment="Center"
@@ -1200,14 +1245,18 @@
 
           <!--  на «Команде» и «Копировании»: один сервер за раз, чтобы случайно не запустить
                 на нескольких. Свой у каждого набора серверов и у каждого из двух разделов  -->
-          <ui:ToggleSwitch
+          <!--  под замком приглушён рамкой: свой стиль у самого свитча снял бы с него тему  -->
+          <Border
             Grid.Row="1"
             Margin="0,0,0,4"
-            Content="Одиночный выбор"
-            FontSize="12"
-            IsChecked="{Binding State.SingleSelectHere, Mode=TwoWay}"
-            ToolTip="Включено — отметить можно только один сервер: выбор другого снимает прежний. У команд и у копирования свой, запоминается для каждого набора серверов и отдельно для «Всех»"
-            Visibility="{Binding State.ShowsSingleSelectSwitch, Converter={StaticResource BoolToVis}}" />
+            Style="{StaticResource PaneLockedMuteStyle}"
+            Visibility="{Binding State.ShowsSingleSelectSwitch, Converter={StaticResource BoolToVis}}">
+            <ui:ToggleSwitch
+              Content="Одиночный выбор"
+              FontSize="12"
+              IsChecked="{Binding State.SingleSelectHere, Mode=TwoWay}"
+              ToolTip="Включено — отметить можно только один сервер: выбор другого снимает прежний. У команд и у копирования свой, запоминается для каждого набора серверов и отдельно для «Всех»" />
+          </Border>
 
           <ScrollViewer
             x:Name="PaneScroller"
@@ -1221,6 +1270,7 @@
                 Padding="0,0,0,2"
                 BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
                 BorderThickness="0,0,0,1"
+                Style="{StaticResource PaneLockedMuteStyle}"
                 Visibility="{Binding State.ShowsToggleAllServers, Converter={StaticResource BoolToVis}}">
                 <CheckBox
                   Content="Отметить все"
@@ -1238,9 +1288,25 @@
                         x:Name="Item"
                         Margin="0,2,0,0"
                         Padding="0,2,0,0"
+                        Background="Transparent"
                         BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
                         BorderThickness="0,1,0,0">
+                        <!--  замок — в конце строки: под мышью открытый, у закреплённого сервера закрытый всегда  -->
+                        <DockPanel>
+                        <Button
+                          x:Name="Lock"
+                          Click="OnPaneLockClick"
+                          DockPanel.Dock="Right"
+                          Style="{StaticResource PaneLockButtonStyle}"
+                          ToolTip="Закрепить вкладку за этим сервером: сменить его можно будет, только сняв замок"
+                          Visibility="Hidden">
+                          <ui:SymbolIcon
+                            x:Name="LockIcon"
+                            FontSize="13"
+                            Symbol="LockOpen24" />
+                        </Button>
                         <CheckBox
+                          x:Name="Check"
                           IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                           Style="{StaticResource PaneCheckStyle}"
                           ToolTip="{Binding Server.Display}">
@@ -1279,8 +1345,28 @@
                               Visibility="{Binding Server.PaneNotesVisible, Converter={StaticResource BoolToVis}}" />
                           </StackPanel>
                         </CheckBox>
+                        </DockPanel>
                       </Border>
                       <DataTemplate.Triggers>
+                        <MultiDataTrigger>
+                          <MultiDataTrigger.Conditions>
+                            <Condition Binding="{Binding IsMouseOver, ElementName=Item}" Value="True" />
+                            <Condition Binding="{Binding DataContext.State.ActiveWorkspace.IsPaneLocked, RelativeSource={RelativeSource AncestorType=Window}}" Value="False" />
+                          </MultiDataTrigger.Conditions>
+                          <Setter TargetName="Lock" Property="Visibility" Value="Visible" />
+                        </MultiDataTrigger>
+                        <DataTrigger Binding="{Binding DataContext.State.ActiveWorkspace.IsPaneLocked, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                          <Setter TargetName="Check" Property="IsHitTestVisible" Value="False" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsLocked}" Value="True">
+                          <Setter TargetName="Lock" Property="Visibility" Value="Visible" />
+                          <Setter TargetName="LockIcon" Property="Symbol" Value="LockClosed24" />
+                          <Setter TargetName="Lock" Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                          <Setter TargetName="Lock" Property="ToolTip" Value="Вкладка закреплена за этим сервером — щелчок снимает замок" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsMuted}" Value="True">
+                          <Setter TargetName="Item" Property="Opacity" Value="0.5" />
+                        </DataTrigger>
                         <DataTrigger Binding="{Binding RelativeSource={RelativeSource PreviousData}}" Value="{x:Null}">
                           <Setter TargetName="Item" Property="Margin" Value="0" />
                           <Setter TargetName="Item" Property="Padding" Value="0" />
@@ -1327,7 +1413,7 @@
                 BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
                 BorderThickness="0,1,0,0"
                 Visibility="{Binding State.ShowsSetSwitcher, Converter={StaticResource BoolToVis}}">
-              <StackPanel>
+              <StackPanel Style="{StaticResource PaneLockedMuteStyle}">
                 <TextBlock
                   Margin="0,0,0,2"
                   Style="{StaticResource PaneHeaderStyle}"

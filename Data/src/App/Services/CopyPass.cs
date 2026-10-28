@@ -19,6 +19,15 @@ public static class CopyPass
     /// <summary>Лог ждёт поля ввода.</summary>
     private static bool _armed;
 
+    /// <summary>
+    /// Сколько лог ждёт поля ввода, считая от попадания в буфер: хватает перейти в нужную программу.
+    /// Дольше — вы уже заняты другим, и вставка в случайное поле была бы сюрпризом.
+    /// </summary>
+    private static readonly TimeSpan WaitLimit = TimeSpan.FromSeconds(10);
+
+    /// <summary>Номер копии: срок снимает ожидание, только если новой копии за это время не было.</summary>
+    private static int _generation;
+
     private static AutomationFocusChangedEventHandler? _handler;
 
     /// <summary>Вставка идёт: фокус, прыгнувший от неё же, второй раз не срабатывает.</summary>
@@ -32,24 +41,51 @@ public static class CopyPass
     };
 
     /// <summary>Лог скопирован — ждать поля ввода, если галочка CopyPass стоит.</summary>
-    /// <param name="auto">
-    /// Скопировано галочкой «авто». Операция могла закончиться в другом разделе, где «авто» своя,
-    /// поэтому смотрится сама галочка, а не её вид в открытом разделе.
+    /// <param name="autoSection">
+    /// Скопировано галочкой «авто» — раздел операции. Она могла закончиться, пока открыт другой
+    /// раздел, поэтому смотрится CopyPass её раздела. Null — скопировано кнопкой в открытом разделе.
     /// </param>
-    public static void Arm(bool auto = false)
+    public static void Arm(AppSection? autoSection = null)
     {
-        if (!(auto ? AppState.Current.Settings.CopyPass : AppState.Current.CopyPass))
+        var on = autoSection is { } section
+            ? AppState.Current.StoredCopyPass(section)
+            : AppState.Current.CopyPass;
+
+        if (!on)
         {
             return;
         }
 
+        int generation;
+
         lock (Sync)
         {
             _armed = true;
+            generation = ++_generation;
         }
 
         // без своей плашки: следом плашка «Вывод скопирован», она и так перекроет
         Subscribe();
+        _ = ExpireAsync(generation);
+    }
+
+    /// <summary>Срок вышел, а лог так никуда и не вставлен — больше не ждать.</summary>
+    private static async Task ExpireAsync(int generation)
+    {
+        await Task.Delay(WaitLimit).ConfigureAwait(false);
+
+        lock (Sync)
+        {
+            if (!_armed || _generation != generation)
+            {
+                return;
+            }
+
+            _armed = false;
+        }
+
+        Unsubscribe();
+        AppLog.Hint($"CopyPass: за {WaitLimit.TotalSeconds:0} с поле ввода не нашлось — лог больше не ждёт.");
     }
 
     /// <summary>Больше не ждать: сработало, буфер сменился или галочку сняли.</summary>

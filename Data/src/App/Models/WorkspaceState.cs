@@ -115,6 +115,9 @@ public sealed class WorkspaceState
     /// <summary>Галочки «IP» и «User» под панелью серверов. null — файл прежней версии, где они были у раздела.</summary>
     public bool? PaneShowIp { get; set; }
 
+    /// <summary>Замок: серверы, за которыми закреплена вкладка. null — замка нет.</summary>
+    public List<string>? LockedServerIds { get; set; }
+
     public bool? PaneShowUser { get; set; }
 
     /// <summary>

@@ -113,8 +113,17 @@ public sealed class AppSettings
     /// <summary>Команда закончилась — вывод сервера, выбранного в терминале, сам уходит в буфер.</summary>
     public bool AutoCopyCurrent { get; set; }
 
-    /// <summary>CopyPass: скопированный программой лог сам вставляется в первое поле ввода другой программы и уходит Enter.</summary>
+    /// <summary>
+    /// CopyPass до 3.0.9 включительно — одна на всю программу. Теперь только запасное значение
+    /// для раздела, у которого своей записи ещё нет.
+    /// </summary>
     public bool CopyPass { get; set; }
+
+    /// <summary>
+    /// CopyPass у каждого раздела своя (ключ — имя раздела): скопированный программой лог
+    /// сам вставляется в первое поле ввода другой программы и уходит Enter.
+    /// </summary>
+    public Dictionary<string, bool> CopyPassBySection { get; set; } = new();
 
     /// <summary>
     /// Защита от двойного запуска: ту же команду сразу после окончания прошлой — только
@@ -140,7 +149,20 @@ public sealed class AppSettings
     /// <summary>Проверочная строка, зашифрованная ключом: по ней узнаём, что пароль верный.</summary>
     public string MasterCheck { get; set; } = string.Empty;
 
-    /// <summary>Копирование закончилось — вывод всех серверов сам уходит в буфер обмена.</summary>
+    /// <summary>
+    /// «Авто» у «Все логи» в каждом разделе своя (ключ — имя раздела): операция закончилась —
+    /// вывод всех серверов сам уходит в буфер обмена.
+    /// </summary>
+    public Dictionary<string, bool> AutoCopyAllBySection { get; set; } = new();
+
+    /// <summary>«Авто» у «Текущий лог» в каждом разделе своя: вывод выбранного сервера — в буфер.</summary>
+    public Dictionary<string, bool> AutoCopyCurrentBySection { get; set; } = new();
+
+    /// <summary>
+    /// До 3.0.9 включительно «авто» были парой на «Копирование», «Скачивание» и «Проводник» —
+    /// теперь только запасное значение для раздела без своей записи. Как и <see cref="AutoCopyAll"/>
+    /// с <see cref="AutoCopyCurrent"/> — для остальных разделов.
+    /// </summary>
     public bool AutoCopyAllAfterCopy { get; set; }
 
     /// <summary>Копирование закончилось — вывод сервера, выбранного в терминале, сам уходит в буфер.</summary>

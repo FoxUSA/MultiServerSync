@@ -370,51 +370,51 @@ public sealed class AppState : ObservableObject
         }
     }
 
-    /// <summary>
-    /// Галочки автокопии в терминале показывают выбор того раздела, что открыт: у команд
-    /// и у копирования он свой и запоминается отдельно. Везде, кроме «Копирования», — командный.
-    /// </summary>
-    private bool AutoCopyForCopying => _section is AppSection.Files or AppSection.Download or AppSection.Explorer;
+    /// <summary>У раздела до 3.0.9 были «авто» копирования, а не команд — запасное значение.</summary>
+    private static bool UsesCopyingAutos(AppSection section) =>
+        section is AppSection.Files or AppSection.Download or AppSection.Explorer;
+
+    /// <summary>«Авто» у «Все логи» раздела, как сохранена. Без своей записи — общая прежних версий.</summary>
+    public bool StoredAutoCopyAll(AppSection section) =>
+        Settings.AutoCopyAllBySection.TryGetValue(section.ToString(), out var on) ? on
+        : UsesCopyingAutos(section) ? Settings.AutoCopyAllAfterCopy : Settings.AutoCopyAll;
+
+    /// <summary>«Авто» у «Текущий лог» раздела, как сохранена.</summary>
+    public bool StoredAutoCopyCurrent(AppSection section) =>
+        Settings.AutoCopyCurrentBySection.TryGetValue(section.ToString(), out var on) ? on
+        : UsesCopyingAutos(section) ? Settings.AutoCopyCurrentAfterCopy : Settings.AutoCopyCurrent;
 
     /// <summary>
-    /// Галочка «авто» у «Все логи». Буфер обмена один, поэтому
+    /// Галочка «авто» у «Все логи» — у каждого раздела своя. Буфер обмена один, поэтому
     /// из двух автокопий работает одна: отметка этой снимает соседнюю.
     /// </summary>
     public bool AutoCopyAll
     {
-        get => AutoCopyForCopying ? Settings.AutoCopyAllAfterCopy : Settings.AutoCopyAll;
-        set => SetAutoCopy(AutoCopyForCopying, all: value, current: value ? false : AutoCopyCurrent);
+        get => StoredAutoCopyAll(_section);
+        set => SetAutoCopy(_section, all: value, current: value ? false : AutoCopyCurrent);
     }
 
-    /// <summary>Галочка «авто» у «Текущий лог».</summary>
+    /// <summary>Галочка «авто» у «Текущий лог» — у каждого раздела своя.</summary>
     public bool AutoCopyCurrent
     {
-        get => AutoCopyForCopying ? Settings.AutoCopyCurrentAfterCopy : Settings.AutoCopyCurrent;
-        set => SetAutoCopy(AutoCopyForCopying, all: value ? false : AutoCopyAll, current: value);
+        get => StoredAutoCopyCurrent(_section);
+        set => SetAutoCopy(_section, all: value ? false : AutoCopyAll, current: value);
     }
 
-    private void SetAutoCopy(bool forCopying, bool all, bool current)
+    private void SetAutoCopy(AppSection section, bool all, bool current)
     {
-        if (AutoCopyAll == all && AutoCopyCurrent == current)
+        if (StoredAutoCopyAll(section) == all && StoredAutoCopyCurrent(section) == current)
         {
             return;
         }
 
-        if (forCopying)
-        {
-            Settings.AutoCopyAllAfterCopy = all;
-            Settings.AutoCopyCurrentAfterCopy = current;
-        }
-        else
-        {
-            Settings.AutoCopyAll = all;
-            Settings.AutoCopyCurrent = current;
-        }
+        var key = section.ToString();
+        Settings.AutoCopyAllBySection[key] = all;
+        Settings.AutoCopyCurrentBySection[key] = current;
 
-        // сняли последнюю «авто» — CopyPass вставлять нечего, снимается и она
-        if (!all && !current && Settings.CopyPass)
+        // сняли последнюю «авто» раздела — его CopyPass вставлять нечего, снимается и она
+        if (!all && !current && SetStoredCopyPass(section, false))
         {
-            Settings.CopyPass = false;
             Services.CopyPass.Disarm();
         }
 
@@ -425,21 +425,39 @@ public sealed class AppState : ObservableObject
     /// <summary>CopyPass работает вместе с «авто»: без неё галочка гаснет.</summary>
     public bool CopyPassAvailable => AutoCopyAll || AutoCopyCurrent;
 
+    /// <summary>CopyPass раздела, как сохранена. Раздел без своей записи берёт общую галочку прежних версий.</summary>
+    public bool StoredCopyPass(AppSection section) =>
+        Settings.CopyPassBySection.TryGetValue(section.ToString(), out var on) ? on : Settings.CopyPass;
+
+    /// <returns>Галочка изменилась.</returns>
+    private bool SetStoredCopyPass(AppSection section, bool value)
+    {
+        if (StoredCopyPass(section) == value)
+        {
+            return false;
+        }
+
+        Settings.CopyPassBySection[section.ToString()] = value;
+        return true;
+    }
+
+    /// <summary>Раздел, из которого операция: им выбирается CopyPass для автокопии её вывода.</summary>
+    public AppSection SectionOfBatch(OperationBatch batch) =>
+        batch.Section ?? (OwnerOf(batch) is { } owner ? SectionOf(owner) : _section);
+
     /// <summary>
-    /// Галочка CopyPass в строке терминала — одна на всю программу. В разделе, где «авто»
+    /// Галочка CopyPass в строке терминала — у каждого раздела своя. В разделе, где «авто»
     /// не стоит, показывается снятой и погашенной.
     /// </summary>
     public bool CopyPass
     {
-        get => Settings.CopyPass && CopyPassAvailable;
+        get => StoredCopyPass(_section) && CopyPassAvailable;
         set
         {
-            if (Settings.CopyPass == value || (value && !CopyPassAvailable))
+            if ((value && !CopyPassAvailable) || !SetStoredCopyPass(_section, value))
             {
                 return;
             }
-
-            Settings.CopyPass = value;
 
             // сняли — ждущий лог не вставится
             if (!value)
@@ -1195,6 +1213,31 @@ public sealed class AppState : ObservableObject
         return true;
     }
 
+    /// <summary>
+    /// Вкладка, что открывается вместо закрытой: ближайшая слева в той же ленте (основной или
+    /// архива), нет её — справа. Закрыли последнюю в архиве — основная вкладка раздела.
+    /// </summary>
+    private static Workspace NeighborInStrip(IList<Workspace> tabs, int index, bool archived)
+    {
+        for (var i = Math.Min(index, tabs.Count) - 1; i >= 0; i--)
+        {
+            if (tabs[i].IsArchived == archived)
+            {
+                return tabs[i];
+            }
+        }
+
+        for (var i = index; i < tabs.Count; i++)
+        {
+            if (tabs[i].IsArchived == archived)
+            {
+                return tabs[i];
+            }
+        }
+
+        return tabs[0];
+    }
+
     public bool RemoveWorkspace(Workspace workspace)
     {
         if (workspace.IsMain)
@@ -1243,7 +1286,9 @@ public sealed class AppState : ObservableObject
         if (ReferenceEquals(_active, workspace) || ReferenceEquals(_activeCommand, workspace)
             || ReferenceEquals(_activeDownload, workspace) || ReferenceEquals(_activeExplorer, workspace))
         {
-            ActiveWorkspace = tabs[Math.Max(0, index - 1)];
+            // соседа — из той же ленты: архивные вкладки лежат в том же списке, и сосед по списку
+            // мог оказаться архивным — тогда лента шла за ним и сама открывала архив
+            ActiveWorkspace = NeighborInStrip(tabs, index, workspace.IsArchived);
         }
 
         SaveWorkspaces();
