@@ -190,12 +190,13 @@
           Content="после копирования сверять суммы"
           IsChecked="{Binding VerifyChecksums, Mode=TwoWay}"
           Style="{StaticResource OptionStyle}" />
-        <!--  только у «Проводника»: там копирование может перезаписать файлы одним нажатием  -->
+        <!--  только у «Проводника»: там копирование может перезаписать файлы одним нажатием.
+              Подпись короткая: «не спрашивать перед заменой» в окне параметров обрезалась  -->
         <CheckBox
           x:Name="ReplaceOption"
           Grid.Row="3"
           Grid.Column="2"
-          Content="не спрашивать перед заменой"
+          Content="заменять без вопроса"
           IsChecked="{Binding ReplaceWithoutAsking, Mode=TwoWay}"
           Style="{StaticResource OptionStyle}"
           ToolTip="Сняли — копирование, которое перезапишет файлы в папке назначения, сначала спросит. Одинаковые файлы при сверке по дате или сумме заменой не считаются."

@@ -257,7 +257,8 @@ public partial class ServersPage : Page, Controls.IToastHost
                 Window.GetWindow(this),
                 $"Удалить серверы ({picked.Count}) из набора «{Set.Title}»?",
                 names,
-                "Удалить"))
+                "Удалить",
+                enterConfirms: true))
         {
             return;
         }

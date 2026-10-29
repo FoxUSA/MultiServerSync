@@ -30,8 +30,11 @@ public sealed class AppSettings
     /// <summary>Переносить на сервер дату изменения локальных файлов и папок.</summary>
     public bool PreserveTimestamps { get; set; } = true;
 
-    /// <summary>Сверять SHA-256 после копирования (на сервере запускается sha256sum).</summary>
-    public bool VerifyChecksums { get; set; }
+    /// <summary>
+    /// Сверять SHA-256 после копирования (на сервере запускается sha256sum). С чистой установки
+    /// включено: вместе с выбором «по контрольной сумме» это умолчание всех трёх разделов.
+    /// </summary>
+    public bool VerifyChecksums { get; set; } = true;
 
     /// <summary>
     /// Устаревшее: список копирования переехал в UserData\workspaces.json, у каждой вкладки свой.

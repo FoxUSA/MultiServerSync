@@ -141,7 +141,7 @@ public sealed class OperationResult : ObservableObject
                 _finishedUtc = value is OperationStatus.Success or OperationStatus.Failed or OperationStatus.Cancelled
                     ? DateTime.UtcNow
                     : null;
-                Raise(nameof(AgoText));
+                RaiseMany(nameof(AgoText), nameof(TimeLine));
 
                 RaiseMany(
                     nameof(StatusSymbol),
@@ -165,7 +165,7 @@ public sealed class OperationResult : ObservableObject
     public TimeSpan Duration
     {
         get => _duration;
-        set { if (Set(ref _duration, value)) { RaiseMany(nameof(StatusText), nameof(DurationText), nameof(ElapsedText)); } }
+        set { if (Set(ref _duration, value)) { RaiseMany(nameof(StatusText), nameof(DurationText), nameof(ElapsedText), nameof(TimeLine)); } }
     }
 
     /// <summary>Короткий статус для компактной таблицы.</summary>
@@ -601,8 +601,15 @@ public sealed class OperationResult : ObservableObject
         }
     }
 
-    /// <summary>Строка под выводом при копировании в буфер: сколько шла работа на сервере.</summary>
-    public string? TimeLine => Duration > TimeSpan.Zero ? $"— выполнено за {DurationText} —" : null;
+    /// <summary>
+    /// Строка под выводом: когда закончилось по местному времени и сколько шла работа на сервере.
+    /// По дате и секундам видно, к какому запуску лог, — строки в терминале копятся.
+    /// </summary>
+    public string? TimeLine => Duration <= TimeSpan.Zero
+        ? null
+        : _finishedUtc is { } finished
+            ? $"— выполнено {finished.ToLocalTime():dd.MM.yyyy HH:mm:ss} за {DurationText} —"
+            : $"— выполнено за {DurationText} —";
 
     public string Output
     {
@@ -770,10 +777,18 @@ public sealed class OperationResult : ObservableObject
     /// </summary>
     public void StartNextRun(string header)
     {
+        // итог прошлого прогона остаётся в выводе: под новым будет уже его собственный
+        var time = TimeLine;
+
         lock (_sync)
         {
             if (_output.Length > 0)
             {
+                if (time is not null)
+                {
+                    _output.AppendLine(time);
+                }
+
                 _output.AppendLine();
                 _output.AppendLine(header);
                 _output.AppendLine();

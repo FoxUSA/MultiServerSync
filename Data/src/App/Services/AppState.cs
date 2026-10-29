@@ -952,7 +952,9 @@ public sealed class AppState : ObservableObject
             ReplaceWithoutAsking = source?.ReplaceWithoutAsking ?? false,
             ExcludeMasks = source?.ExcludeMasks ?? string.Empty,
             MatchByDate = source?.MatchByDate ?? false,
-            MatchByHash = source?.MatchByHash ?? false,
+
+            // первая вкладка раздела — «отличающиеся по контрольной сумме», как с чистой установки
+            MatchByHash = source?.MatchByHash ?? true,
         });
 
         // новая вкладка проводника открывается там же, где стоит текущая, — как новая вкладка в Windows
@@ -1628,6 +1630,9 @@ public sealed class AppState : ObservableObject
         OverwriteFiles = Settings.OverwriteFiles,
         PreserveTimestamps = Settings.PreserveTimestamps,
         VerifyChecksums = Settings.VerifyChecksums,
+
+        // с чистой установки копируются только отличающиеся по контрольной сумме
+        MatchByHash = true,
     };
 
     private static string NextTitle(IList<Workspace> tabs)

@@ -75,6 +75,25 @@ public sealed class PaneRow : ObservableObject
         set => Set(ref _isDropTarget, value);
     }
 
+    private string? _pending;
+
+    /// <summary>Сервер ещё выполняет действие с этой строкой: что именно. Null — строка готова.</summary>
+    public string? PendingLabel
+    {
+        get => _pending;
+        set
+        {
+            if (Set(ref _pending, value))
+            {
+                RaiseMany(nameof(IsPending), nameof(PendingText));
+            }
+        }
+    }
+
+    public bool IsPending => _pending is not null;
+
+    public string PendingText => _pending is null ? string.Empty : "сервер ещё выполняет: " + _pending;
+
     public string Name => _entry.Name;
 
     public string FullPath => _entry.FullPath;
@@ -255,6 +274,20 @@ public partial class FilePane : UserControl
 
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
         _refreshTimer.Tick += async (_, _) => await QuietRefreshAsync();
+
+        // сервер закончил чьё-то действие в открытой здесь папке — перечитать на месте
+        Loaded += (_, _) =>
+        {
+            PendingFs.Settled -= OnPendingSettled;
+            PendingFs.Settled += OnPendingSettled;
+            PendingFs.Marked -= OnPendingMarked;
+            PendingFs.Marked += OnPendingMarked;
+        };
+        Unloaded += (_, _) =>
+        {
+            PendingFs.Settled -= OnPendingSettled;
+            PendingFs.Marked -= OnPendingMarked;
+        };
 
         _watchDelay = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
         _watchDelay.Tick += async (_, _) =>
@@ -595,7 +628,12 @@ public partial class FilePane : UserControl
         Stale,
     }
 
-    public Task RefreshAsync() => NavigateAsync(_current, record: false, refresh: true);
+    /// <summary>
+    /// Перечитать после действия (копирование, перенос, права, правка): на месте — строки остаются
+    /// теми же, курсор и галочки не трогаются. Полное перечитывание с переходом сбрасывало курсор
+    /// наверх, а действия теперь идут в фоне, пока работаешь дальше.
+    /// </summary>
+    public Task RefreshAsync() => QuietRefreshAsync(force: true);
 
     private async Task<NavResult> NavigateAsync(string path, bool record = true, bool refresh = false, string? focus = null)
     {
@@ -609,6 +647,38 @@ public partial class FilePane : UserControl
 
         CancelSearch();
         RememberFocus();
+
+        // папку ещё создаёт, переименовывает или копирует сервер — ждём его, а не сообщаем «папки нет».
+        // Так «создать → войти» на быстрых руках идёт по порядку; внизу видно, чего ждём
+        if (PendingFs.Ahead(source, target) is { Count: > 0 } ahead)
+        {
+            StatusText.Text = $"ждём сервер: {ahead[0].Label} …";
+            _busy = true;
+
+            try
+            {
+                await Task.WhenAll(ahead.Select(a => a.Task));
+            }
+            catch (Exception)
+            {
+                if (version == _navVersion && ReferenceEquals(source, _source))
+                {
+                    var failed = ahead.FirstOrDefault(a => a.Task.IsFaulted).Label ?? ahead[0].Label;
+                    StatusText.Text = $"Папки {source.Display(target)} нет: не прошло {failed}.";
+                }
+
+                return NavResult.Missing;
+            }
+            finally
+            {
+                _busy = false;
+            }
+
+            if (version != _navVersion || !ReferenceEquals(source, _source))
+            {
+                return NavResult.Stale;
+            }
+        }
 
         // из кэша — сразу, без похода на сервер; давно прочитанное тихо перечитывается следом
         var cached = refresh ? null : source.Cached(target);
@@ -797,6 +867,9 @@ public partial class FilePane : UserControl
             return;
         }
 
+        // сделанное, но ещё не законченное сервером, — на своих местах, даже если ушли и вернулись
+        items = PendingFs.Apply(source, _current, items);
+
         HideMessage();
         WhereColumn.Visibility = Visibility.Collapsed;
 
@@ -853,6 +926,7 @@ public partial class FilePane : UserControl
 
         ShowSortArrow();
         UpdateLinkColumn();
+        MarkPending();
 
         if (_rows.Count == 0 || _rows.All(r => r.IsParent))
         {
@@ -872,6 +946,44 @@ public partial class FilePane : UserControl
     }
 
     private void HideMessage() => EmptyText.Visibility = Visibility.Collapsed;
+
+    /// <summary>
+    /// Строки, которые сервер сейчас кладёт в открытую папку, — видны сразу, как в проводнике Windows.
+    /// Имена, что уже есть, не дублируются; перечитывание после операции покажет, что вышло на самом деле.
+    /// </summary>
+    public void AddEntries(IEnumerable<FsEntry> entries)
+    {
+        if (_source is not { } source)
+        {
+            return;
+        }
+
+        var taken = _rows.Select(r => r.Name).ToHashSet(StringComparer.Ordinal);
+
+        foreach (var entry in entries)
+        {
+            if (taken.Add(entry.Name))
+            {
+                _rows.Add(new PaneRow(entry, source.IsRemote));
+            }
+        }
+
+        if (_rows.Any(r => !r.IsParent))
+        {
+            HideMessage();
+        }
+    }
+
+    /// <summary>Строки, которые сервер сейчас уносит (перенос), — уходят сразу.</summary>
+    public void HideEntries(IEnumerable<string> paths)
+    {
+        var gone = paths.ToHashSet(StringComparer.Ordinal);
+
+        foreach (var row in _rows.Where(r => !r.IsParent && gone.Contains(r.FullPath)).ToList())
+        {
+            _rows.Remove(row);
+        }
+    }
 
     /// <summary>Строка состояния: сколько в папке, сколько выбрано, свободно на диске.</summary>
     private async Task UpdateStatusAsync(string path, int version)
@@ -2174,25 +2286,101 @@ public partial class FilePane : UserControl
         var name = Unique(folder ? "Новая папка" : "Новый текстовый документ.txt", taken);
         var path = source.Combine(_current, name);
 
+        // строка — сразу, как на компьютере: сервер создаёт в фоне, а имя уже правится.
+        // Раньше строка ждала и создания, и перечитывания папки — секунду-две ничего не происходило
+        var entry = new FsEntry(name, path, folder, 0, DateTime.Now);
+        var row = new PaneRow(entry, source.IsRemote);
+        _rows.Add(row);
+        HideMessage();
+        MoveCursor(row);
+        BeginRename();
+
+        var pending = PendingFs.Add(source, _current, entry);
+        var label = $"создание «{name}»";
+
         try
         {
-            if (folder)
-            {
-                await source.CreateFolderAsync(path);
-            }
-            else
-            {
-                await source.CreateFileAsync(path);
-            }
-
+            // по очереди за действиями с этой папкой: внутри неё, над ней — и своими же, если жмут быстро
+            await PendingFs.RunAsync(source, [path], label, () => folder ? source.CreateFolderAsync(path) : source.CreateFileAsync(path));
             Log($"{(folder ? "Создана папка" : "Создан файл")} {source.Display(path)}");
-            await NavigateAsync(_current, record: false, refresh: true, focus: name);
-            BeginRename();
         }
         catch (Exception ex)
         {
-            Log($"Не удалось создать {source.Display(path)}: {ex.Message}", error: true);
+            // сервер отказал — строки не было (после ухода и возврата строка уже другой объект — ищем по пути)
+            row.IsRenaming = false;
+
+            foreach (var stale in _rows.Where(r => !r.IsParent && r.FullPath == path).ToList())
+            {
+                _rows.Remove(stale);
+            }
+
+            FocusList();
+            Fail(label, $"Не удалось создать {source.Display(path)}", ex);
         }
+        finally
+        {
+            pending.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Действие не прошло. Отменённое из-за прежнего, не прошедшего, — предупреждением одной строкой,
+    /// без своей ошибки: причина уже записана у того действия.
+    /// </summary>
+    private void Fail(string label, string text, Exception ex)
+    {
+        if (ex is PendingFs.CancelledException cancelled)
+        {
+            Warn($"Отменено {label}: не прошло {cancelled.Label}.");
+        }
+        else
+        {
+            Log($"{text}: {ex.Message}", error: true);
+        }
+    }
+
+    private void Warn(string text) =>
+        AppLog.Warn(text, _source is RemoteSource remote ? remote.Server.Display : LocalSource.ComputerTitle, AppSection.Explorer);
+
+    /// <summary>Сервер закончил действие: если эта папка открыта здесь — перечитать на месте.</summary>
+    private void OnPendingSettled(string side, string dir)
+    {
+        if (_source is { } source && PendingFs.SideOf(source) == side && source.Normalize(_current) == dir)
+        {
+            _ = QuietRefreshAsync(force: true);
+        }
+    }
+
+    /// <summary>Действие с этой папкой началось или кончилось: пометки строк — заново.</summary>
+    private void OnPendingMarked(string side, string dir)
+    {
+        if (_source is { } source && PendingFs.SideOf(source) == side && source.Normalize(_current) == dir)
+        {
+            MarkPending();
+        }
+    }
+
+    /// <summary>У каждой строки — чем сервер с ней занят, если занят: такие приглушены.</summary>
+    private void MarkPending()
+    {
+        if (_source is not { } source)
+        {
+            return;
+        }
+
+        foreach (var row in _rows)
+        {
+            row.PendingLabel = row.IsParent ? null : PendingFs.LabelOf(source, row.FullPath);
+        }
+    }
+
+    /// <summary>Строке — новое имя и место по сортировке: убрать и вернуть, список встанет сам.</summary>
+    private void ReplaceEntry(PaneRow row, FsEntry entry)
+    {
+        _rows.Remove(row);
+        row.Entry = entry;
+        _rows.Add(row);
+        MoveCursor(row);
     }
 
     private static string Unique(string name, ISet<string> taken)
@@ -2298,24 +2486,48 @@ public partial class FilePane : UserControl
 
         var parent = source.Parent(row.FullPath) ?? _current;
         var target = source.Combine(parent, name);
+        var before = row.Entry;
+        var renamed = before with { Name = name, FullPath = target };
 
         _committing = true;
 
+        // пока сервер не переименовал, папка и после ухода и возврата показывает новое имя
+        var hideOld = PendingFs.Remove(source, parent, before.FullPath);
+        var showNew = PendingFs.Add(source, parent, renamed);
+
+        var label = $"переименование «{before.Name}» → «{name}»";
+
         try
         {
-            await source.RenameAsync(row.FullPath, target);
+            // новое имя — сразу, поле закрывается по первому Enter; сервер переименовывает в фоне,
+            // по очереди за созданием этой строки, если она только что создана
             row.IsRenaming = false;
-            Log($"Переименовано: {row.Name} → {name}");
-            await NavigateAsync(_current, record: false, refresh: true, focus: name);
-            FocusList();
+            ReplaceEntry(row, renamed);
+
+            await PendingFs.RunAsync(source, [before.FullPath, target], label, () => source.RenameAsync(before.FullPath, target));
+            Log($"Переименовано: {before.Name} → {name}");
         }
         catch (Exception ex)
         {
-            // занятое имя — ошибка, а поле остаётся открытым: можно поправить и нажать Enter ещё раз
-            Log($"Не переименовано {row.Name}: {ex.Message}", error: true);
+            hideOld.Dispose();
+            showNew.Dispose();
+            ReplaceEntry(row, before);
+
+            // занятое имя — ошибка: прежнее имя назад, поле снова открыто с набранным — можно поправить
+            // и нажать Enter. Отменённое (строка так и не создалась) — строку уберёт перечитывание
+            if (ex is not PendingFs.CancelledException)
+            {
+                BeginRename();
+                row.EditName = name;
+            }
+
+            Fail(label, $"Не переименовано {before.Name}", ex);
         }
         finally
         {
+            // закончили — панели с этой папкой сами перечитают её на месте: свежие дата и права
+            hideOld.Dispose();
+            showNew.Dispose();
             _committing = false;
         }
     }
@@ -2344,7 +2556,8 @@ public partial class FilePane : UserControl
             source.IsRemote
                 ? $"На сервере корзины нет — восстановить будет нельзя. Папки удаляются со всем содержимым.\n\n{names}"
                 : names,
-            source.IsRemote ? "Удалить" : "В корзину");
+            source.IsRemote ? "Удалить" : "В корзину",
+            enterConfirms: true);
 
         if (!ok)
         {
@@ -2353,10 +2566,32 @@ public partial class FilePane : UserControl
 
         var index = List.SelectedIndex;
 
+        // строки уходят сразу, как на компьютере; что сервер не удалит — вернёт перечитывание по окончании
+        var paths = items.Select(i => i.FullPath).ToHashSet(StringComparer.Ordinal);
+        var pending = items.Select(i => PendingFs.Remove(source, source.Parent(i.FullPath) ?? _current, i.FullPath)).ToList();
+
+        foreach (var gone in _rows.Where(r => !r.IsParent && paths.Contains(r.FullPath)).ToList())
+        {
+            _rows.Remove(gone);
+        }
+
+        // курсор — на соседнюю строку, как после удаления в проводнике
+        if (_view is not null && _view.Count > 0)
+        {
+            List.SelectedIndex = Math.Clamp(index, 0, _view.Count - 1);
+        }
+
+        FocusList();
+
+        var label = $"удаление: {what}";
+
         try
         {
             StatusText.Text = "удаление…";
-            var problems = await source.DeleteAsync(items);
+            IReadOnlyList<string> problems = [];
+
+            // по очереди: удалить только что созданное — после того, как сервер его создал
+            await PendingFs.RunAsync(source, items.Select(i => i.FullPath), label, async () => problems = await source.DeleteAsync(items));
 
             foreach (var line in problems)
             {
@@ -2367,20 +2602,15 @@ public partial class FilePane : UserControl
             {
                 Log($"Удалено: {what} в {source.Display(_current)}");
             }
-
-            await NavigateAsync(_current, record: false, refresh: true);
-
-            // курсор — на соседнюю строку, как после удаления в проводнике
-            if (_view is not null && _view.Count > 0)
-            {
-                List.SelectedIndex = Math.Clamp(index, 0, _view.Count - 1);
-            }
-
-            FocusList();
         }
         catch (Exception ex)
         {
-            Log("Удаление не удалось: " + ex.Message, error: true);
+            Fail(label, "Удаление не удалось", ex);
+        }
+        finally
+        {
+            // закончили — панели с этой папкой перечитают её на месте; неудалённое вернётся
+            pending.ForEach(p => p.Dispose());
         }
     }
 

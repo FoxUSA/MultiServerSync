@@ -183,6 +183,12 @@ public sealed class OutputFeed
     {
         var text = row?.Output ?? string.Empty;
 
+        // итог запуска — под выводом, той же строкой, что в скопированном логе
+        if (row?.TimeLine is { } rowTime && text.TrimEnd().Length > 0)
+        {
+            text = text.TrimEnd() + Environment.NewLine + rowTime + Environment.NewLine;
+        }
+
         if (after?.Output.TrimEnd() is not { Length: > 0 } afterText)
         {
             return text;

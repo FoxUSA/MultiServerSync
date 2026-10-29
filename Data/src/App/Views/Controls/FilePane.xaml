@@ -199,6 +199,11 @@
         <DataTrigger Binding="{Binding IsHidden}" Value="True">
           <Setter Property="Opacity" Value="0.6" />
         </DataTrigger>
+        <!--  сервер ещё создаёт, переименовывает или копирует эту строку: приглушена, в подсказке — что именно  -->
+        <DataTrigger Binding="{Binding IsPending}" Value="True">
+          <Setter Property="Opacity" Value="0.45" />
+          <Setter Property="ToolTip" Value="{Binding PendingText}" />
+        </DataTrigger>
         <DataTrigger Binding="{Binding IsCursor}" Value="True">
           <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
         </DataTrigger>

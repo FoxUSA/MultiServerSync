@@ -40,18 +40,13 @@ public static class CopyPass
         "putty", "kitty", "mintty", "wezterm-gui", "alacritty", "MobaXterm", "Tabby", "Termius", "WinSCP",
     };
 
-    /// <summary>Лог скопирован — ждать поля ввода, если галочка CopyPass стоит.</summary>
-    /// <param name="autoSection">
-    /// Скопировано галочкой «авто» — раздел операции. Она могла закончиться, пока открыт другой
-    /// раздел, поэтому смотрится CopyPass её раздела. Null — скопировано кнопкой в открытом разделе.
+    /// <summary>Лог скопирован галочкой «авто» — ждать поля ввода, если CopyPass стоит.</summary>
+    /// <param name="section">
+    /// Раздел операции. Она могла закончиться, пока открыт другой раздел, поэтому смотрится CopyPass её раздела.
     /// </param>
-    public static void Arm(AppSection? autoSection = null)
+    public static void Arm(AppSection section)
     {
-        var on = autoSection is { } section
-            ? AppState.Current.StoredCopyPass(section)
-            : AppState.Current.CopyPass;
-
-        if (!on)
+        if (!AppState.Current.StoredCopyPass(section))
         {
             return;
         }

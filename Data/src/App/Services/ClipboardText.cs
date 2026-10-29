@@ -50,8 +50,18 @@ public static class ClipboardText
         _terminalOutput = Normalize(text);
         _terminalOutputAuto = auto;
 
-        // CopyPass: этот лог ждёт первого поля ввода в другой программе
-        CopyPass.Arm(auto ? section ?? AppState.Current.Section : null);
+        // CopyPass — только для вывода, скопированного галочкой «авто» по окончании операции.
+        // Кнопкой копируют сами и вставляют сами; к тому же вывод мог быть давним
+        if (auto)
+        {
+            CopyPass.Arm(section ?? AppState.Current.Section);
+        }
+        else
+        {
+            // в буфере уже не тот лог, что ждал поля ввода
+            CopyPass.Disarm();
+        }
+
         return true;
     }
 

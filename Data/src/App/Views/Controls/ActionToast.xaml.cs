@@ -47,14 +47,25 @@ public partial class ActionToast : UserControl
     }
 
     /// <summary>Угловая плашка: повтор записи журнала. Записи, показанные на месте, она пропускает.</summary>
-    public void Show(LogEntry entry)
+    /// <returns>Плашка показала запись.</returns>
+    public bool Show(LogEntry entry)
     {
         if (entry.ShownInPlace || entry.IsServerLine)
         {
-            return;
+            return false;
         }
 
         Display(entry);
+        return true;
+    }
+
+    /// <summary>Погасить сразу, без угасания: новая запись встала в другую плашку или сменился раздел.</summary>
+    public void HideNow()
+    {
+        _timer.Stop();
+        BeginAnimation(OpacityProperty, null);
+        Opacity = 0;
+        Visibility = Visibility.Collapsed;
     }
 
     /// <summary>Плашка на месте: показывает запись, сделанную <see cref="AppLog.WarnInPlace"/>.</summary>
@@ -112,13 +123,25 @@ public partial class ActionToast : UserControl
         Dot.Fill = DotBrush(entry.Level);
 
         // предупреждение — тусклой оранжевой рамкой, как истёкший «Хранить лог»; остальное — рамкой темы
-        if (entry.Level == LogLevel.Warning)
+        // рамка всегда тусклая оранжевая — рамкой темы плашку было плохо видно; предупреждение
+        // ещё и на тусклом оранжевом фоне, ошибка — на тусклом красном и в красной рамке.
+        // Фон полупрозрачный поверх плашки под ним, поэтому тема остаётся видна
+        switch (entry.Level)
         {
-            Body.BorderBrush = WarningStroke;
-        }
-        else
-        {
-            Body.SetResourceReference(Border.BorderBrushProperty, "SurfaceStrokeColorDefaultBrush");
+            case LogLevel.Error:
+                Body.BorderBrush = ErrorStroke;
+                Body.Background = ErrorFill;
+                break;
+
+            case LogLevel.Warning:
+                Body.BorderBrush = WarningStroke;
+                Body.Background = WarningFill;
+                break;
+
+            default:
+                Body.BorderBrush = WarningStroke;
+                Body.SetResourceReference(Border.BackgroundProperty, "SolidBackgroundFillColorTertiaryBrush");
+                break;
         }
 
         Visibility = Visibility.Visible;
@@ -149,6 +172,9 @@ public partial class ActionToast : UserControl
     }
 
     private static readonly Brush WarningStroke = Freeze(new SolidColorBrush(Color.FromArgb(0x80, 0xE0, 0x7A, 0x1F)));
+    private static readonly Brush WarningFill = Freeze(new SolidColorBrush(Color.FromArgb(0x38, 0xE0, 0x7A, 0x1F)));
+    private static readonly Brush ErrorStroke = Freeze(new SolidColorBrush(Color.FromArgb(0x80, 0xE8, 0x5C, 0x5C)));
+    private static readonly Brush ErrorFill = Freeze(new SolidColorBrush(Color.FromArgb(0x38, 0xE8, 0x5C, 0x5C)));
 
     private static Brush Freeze(Brush brush)
     {

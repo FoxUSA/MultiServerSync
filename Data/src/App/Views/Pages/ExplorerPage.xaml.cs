@@ -410,12 +410,13 @@ public partial class ExplorerPage : Page
                 "Заменить",
                 "Пропустить их",
                 "Больше не спрашивать, заменять сразу",
-                out var dontAsk);
+                out var dontAsk,
+                enterConfirms: true);
 
             if (choice == 1 && dontAsk)
             {
                 tab.ReplaceWithoutAsking = true;
-                AppLog.Hint("Замена без вопроса: вернуть вопрос — снять «не спрашивать перед заменой» в параметрах копирования.");
+                AppLog.Hint("Замена без вопроса: вернуть вопрос — снять «заменять без вопроса» в параметрах копирования.");
             }
 
             return choice switch
@@ -454,6 +455,52 @@ public partial class ExplorerPage : Page
         }
 
         await pane.RefreshAsync();
+    }
+
+    /// <summary>
+    /// Скопированное — сразу в папке назначения, перенесённое — сразу прочь из прежней, если они открыты.
+    /// Пока сервер не закончил, так же покажут и после ухода и возврата (<see cref="PendingFs"/>).
+    /// </summary>
+    private static List<IDisposable> ShowAtOnce(IFileSource source, IReadOnlyList<FsEntry> items, string targetDir, bool move, params FilePane[] panes)
+    {
+        var target = source.Normalize(targetDir);
+        var pending = new List<IDisposable>();
+
+        foreach (var item in items)
+        {
+            pending.Add(PendingFs.Add(source, targetDir, item with { FullPath = source.Combine(targetDir, item.Name) }));
+
+            if (move && source.Parent(item.FullPath) is { } from && source.Normalize(from) != target)
+            {
+                pending.Add(PendingFs.Remove(source, from, item.FullPath));
+            }
+        }
+
+        foreach (var pane in panes)
+        {
+            // та же сторона: тот же источник или тот же сервер
+            if (pane.Source is not { } shown
+                || !(ReferenceEquals(shown, source) || (shown is RemoteSource a && source is RemoteSource b && a.Server == b.Server)))
+            {
+                continue;
+            }
+
+            var here = source.Normalize(pane.CurrentPath);
+
+            if (move && here != target)
+            {
+                pane.HideEntries(items
+                    .Where(i => source.Parent(i.FullPath) is { } parent && source.Normalize(parent) == here)
+                    .Select(i => i.FullPath));
+            }
+
+            if (here == target)
+            {
+                pane.AddEntries(items.Select(i => i with { FullPath = source.Combine(targetDir, i.Name) }));
+            }
+        }
+
+        return pending;
     }
 
     private static string Count(IReadOnlyList<FsEntry> items)
@@ -503,7 +550,8 @@ public partial class ExplorerPage : Page
                     $"В папке уже есть {clashes.Count} с такими же именами",
                     $"{list}\n\nПапки при замене сливаются: совпадающие файлы заменяются, лишние в назначении остаются.",
                     "Заменить",
-                    "Пропустить их");
+                    "Пропустить их",
+                    enterConfirms: true);
 
                 if (choice == 0)
                 {
@@ -516,9 +564,28 @@ public partial class ExplorerPage : Page
 
         var where = source is RemoteSource remote ? remote.Server.Display : LocalSource.ComputerTitle;
 
+        // на сервере cp и mv идут молча, а большие папки — долго: сразу плашка, и строки встают
+        // на новые места, как в проводнике Windows. Перечитывание после покажет, что вышло на самом деле.
+        // На компьютере так не делаем: там о совпадениях спрашивает Windows, и её можно отменить
+        var pending = source.IsRemote ? ShowAtOnce(source, items, targetDir, move, pane, Other(pane)) : [];
+
+        if (source.IsRemote)
+        {
+            AppLog.Hint($"{(move ? "Перенос" : "Копирование")} на сервере: {Count(items)} → {source.Display(targetDir)} …");
+        }
+
+        var label = $"{(move ? "перенос" : "копирование")}: {Count(items)} → {source.Display(targetDir)}";
+
         try
         {
-            var notes = await source.CopyHereAsync(items, targetDir, move, replace);
+            IReadOnlyList<string> notes = [];
+
+            // по очереди: за созданием папки назначения, за действиями с самими файлами
+            await PendingFs.RunAsync(
+                source,
+                items.Select(i => i.FullPath).Concat(items.Select(i => source.Combine(targetDir, i.Name))),
+                label,
+                async () => notes = await source.CopyHereAsync(items, targetDir, move, replace));
 
             foreach (var note in notes)
             {
@@ -527,10 +594,17 @@ public partial class ExplorerPage : Page
 
             AppLog.Success($"{(move ? "Перенесено" : "Скопировано")}: {Count(items)} в {source.Display(targetDir)}", where);
         }
+        catch (PendingFs.CancelledException ex)
+        {
+            AppLog.Warn($"Отменено {label}: не прошло {ex.Label}.", where);
+        }
         catch (Exception ex)
         {
             AppLog.Error($"{(move ? "Перенос" : "Копирование")} не удалось: {ex.Message}", where);
         }
+
+        // сервер закончил — дальше папки показывают то, что вышло на самом деле
+        pending.ForEach(p => p.Dispose());
 
         if (move && pane.Source is { } s)
         {

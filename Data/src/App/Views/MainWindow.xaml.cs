@@ -209,6 +209,8 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        // сменили раздел — прежняя плашка уже не про то, что на экране
+        HideToasts();
         PageFrame.Navigate(page);
     }
 
@@ -1019,13 +1021,26 @@ public partial class MainWindow : FluentWindow
     /// <summary>Плашка о нажатии: у главной кнопки открытой страницы, а где своей нет — в правом нижнем углу.</summary>
     private void ShowToast(LogEntry entry)
     {
-        if (PageFrame.Content is Controls.IToastHost host and FrameworkElement { IsVisible: true })
+        var target = PageFrame.Content is Controls.IToastHost host and FrameworkElement { IsVisible: true }
+            ? host.PageToast
+            : Toast;
+
+        // плашка одна на окно: новая гасит прежнюю, где бы та ни стояла
+        if (target.Show(entry))
         {
-            host.PageToast.Show(entry);
+            HideToasts(except: target);
         }
-        else
+    }
+
+    /// <summary>Погасить плашки — угловую и плашки страниц, кроме указанной.</summary>
+    private void HideToasts(Controls.ActionToast? except = null)
+    {
+        foreach (var toast in _pages.Values.OfType<Controls.IToastHost>().Select(h => h.PageToast).Append(Toast))
         {
-            Toast.Show(entry);
+            if (!ReferenceEquals(toast, except))
+            {
+                toast.HideNow();
+            }
         }
     }
 

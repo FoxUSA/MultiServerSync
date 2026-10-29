@@ -2421,7 +2421,7 @@ public sealed class Workspace : ObservableObject
 
                         if (numbered)
                         {
-                            result.Append($"───── #{step.Number} · {DateTime.Now:HH:mm:ss} ─────");
+                            result.Append($"───── #{step.Number} · {DateTime.Now:dd.MM.yyyy HH:mm:ss} ─────");
                         }
 
                         var current = row = result.BeginStep(step.Number, step.Text);
