@@ -39,6 +39,7 @@ public sealed class Workspace : ObservableObject
     private bool _verifyChecksums;
     private bool _replaceWithoutAsking;
     private string _excludeMasks = string.Empty;
+    private bool _useGlobalExcludes = true;
     private bool _matchByDate;
     private bool _matchByHash;
     /// <summary>Идёт восстановление из файла: правки окон не должны сохранять недочитанное.</summary>
@@ -253,6 +254,46 @@ public sealed class Workspace : ObservableObject
         }
 
         SelectServers([server.Id]);
+        Save();
+    }
+
+    /// <summary>
+    /// Сервер из списка у подписи в ряду разделов («Копирование», «Команда», «Скачивание»).
+    /// Одиночный выбор — он становится единственным отмеченным; иначе его отметка переключается,
+    /// остальные не трогаются. Сервер из другого набора — вкладка переходит на его набор. Замок держит.
+    /// </summary>
+    public void PickTargetServer(ServerEntry server)
+    {
+        if (BlockedByLock())
+        {
+            return;
+        }
+
+        if (!_paneAllSets && PaneSet is { } current && !current.Contains(server)
+            && AppState.Current.ServerSets.FirstOrDefault(s => s.Contains(server)) is { } owner)
+        {
+            PickPaneSet(owner);
+        }
+
+        if (VisibleChecks().FirstOrDefault(c => c.Server.Id == server.Id) is not { } check)
+        {
+            return;
+        }
+
+        if (IsPaneSingleSelect)
+        {
+            foreach (var other in VisibleChecks().Where(c => !ReferenceEquals(c, check) && c.IsSelected))
+            {
+                other.IsSelected = false;
+            }
+
+            check.IsSelected = true;
+        }
+        else
+        {
+            check.IsSelected = !check.IsSelected;
+        }
+
         Save();
     }
 
@@ -497,6 +538,50 @@ public sealed class Workspace : ObservableObject
         }
     }
 
+    // ── «авто», «*.txt» и CopyPass в строке терминала — свои у вкладки ─────────
+
+    private bool _autoCopy;
+    private bool _logAsFile;
+    private bool _copyPass;
+
+    /// <summary>«Авто»: по окончании операции вкладки вывод её серверов сам уходит в буфер. Новая вкладка — без неё.</summary>
+    public bool AutoCopy => _autoCopy;
+
+    /// <summary>«*.txt»: длинный лог автокопии — файлом с полным логом, а не обрезкой.</summary>
+    public bool LogAsFile => _logAsFile;
+
+    /// <summary>CopyPass: лог автокопии сам вставится в первое поле ввода.</summary>
+    public bool CopyPass => _copyPass;
+
+    /// <returns>Галочка изменилась.</returns>
+    public bool SetAutoCopy(bool value) => SetTerminalCheck(ref _autoCopy, value);
+
+    /// <returns>Галочка изменилась.</returns>
+    public bool SetLogAsFile(bool value) => SetTerminalCheck(ref _logAsFile, value);
+
+    /// <returns>Галочка изменилась.</returns>
+    public bool SetCopyPass(bool value) => SetTerminalCheck(ref _copyPass, value);
+
+    private bool SetTerminalCheck(ref bool field, bool value)
+    {
+        if (field == value)
+        {
+            return false;
+        }
+
+        field = value;
+        Save();
+        return true;
+    }
+
+    /// <summary>Вкладка из файла прежней версии, где эти галочки были у раздела: берёт галочки своего раздела.</summary>
+    public void InitTerminalChecks(bool autoCopy, bool logAsFile, bool copyPass)
+    {
+        _autoCopy = autoCopy;
+        _logAsFile = logAsFile;
+        _copyPass = copyPass;
+    }
+
     /// <summary>
     /// Сравнение двух файлов проводника строкой сервера в терминале: <paramref name="work"/>
     /// пишет в вывод что с чем сравнивается и итог.
@@ -573,13 +658,26 @@ public sealed class Workspace : ObservableObject
     public string ExcludeMasks
     {
         get => _excludeMasks;
-        set { if (Set(ref _excludeMasks, value ?? string.Empty)) { Raise(nameof(ExcludeCaption)); Save(); } }
+        set { if (Set(ref _excludeMasks, value ?? string.Empty)) { Raise(nameof(HasExcludes)); Save(); } }
     }
 
-    /// <summary>Подпись кнопки: сразу видно, что на вкладке что-то исключается.</summary>
-    public string ExcludeCaption => ExcludeRules.Count(_excludeMasks) is var n and > 0
-        ? $"Исключения · {n}"
-        : "Исключения";
+    /// <summary>Свои исключения заданы — значок кнопки на зелёной плашке: что-то из списка не поедет.</summary>
+    public bool HasExcludes => ExcludeRules.Count(_excludeMasks) > 0;
+
+    /// <summary>Глобальные исключения действуют и здесь — переключатель на вкладке «Глобально» окна исключений.</summary>
+    public bool UseGlobalExcludes
+    {
+        get => _useGlobalExcludes;
+        set { if (Set(ref _useGlobalExcludes, value)) { Raise(nameof(HasGlobalExcludes)); Save(); } }
+    }
+
+    /// <summary>Глобальные исключения заданы и здесь не выключены — без своих значок на фиолетовой плашке.</summary>
+    public bool HasGlobalExcludes => _useGlobalExcludes && ExcludeRules.Count(AppState.Current.GlobalExcludeMasks) > 0;
+
+    public void RaiseGlobalExcludes() => Raise(nameof(HasGlobalExcludes));
+
+    /// <summary>Глобальные маски для захода — пусто, если на этой вкладке они выключены.</summary>
+    private string GlobalExcludeMasks => _useGlobalExcludes ? AppState.Current.GlobalExcludeMasks : string.Empty;
 
     /// <summary>Заменять файлы с другой датой изменения — в любую сторону, а не только старее.</summary>
     public bool MatchByDate
@@ -779,6 +877,35 @@ public sealed class Workspace : ObservableObject
         return added;
     }
 
+    /// <summary>
+    /// Строке скачивания вписали другой путь на том же сервере: она встаёт на то же место заново,
+    /// размер и дата — после проверки списка. Вернёт причину отказа или null.
+    /// </summary>
+    public string? ReplaceDownloadPath(DownloadItem item, string raw)
+    {
+        var path = SshService.NormalizeRemote(raw.Trim().Trim('"'));
+        var index = Downloads.IndexOf(item);
+
+        if (index < 0 || path == item.Path)
+        {
+            return null;
+        }
+
+        if (path.Length <= 1)
+        {
+            return "корень «/» целиком не скачивается — укажите папку";
+        }
+
+        if (Downloads.Any(d => !ReferenceEquals(d, item) && d.ServerId == item.ServerId && d.Path == path))
+        {
+            return "этот путь уже есть в списке";
+        }
+
+        Downloads[index] = new DownloadItem(item.ServerId, path, item.IsDirectory, -1, default) { IsSelected = item.IsSelected };
+        _ = RefreshDownloadsAsync();
+        return null;
+    }
+
     private bool _checkingDownloads;
 
     /// <summary>
@@ -881,13 +1008,36 @@ public sealed class Workspace : ObservableObject
             return false;
         }
 
+        if (DownloadInputs("скачивание", "скачивать", create: true) is not (var plan, var folder))
+        {
+            return false;
+        }
+
+        await DownloadCoreAsync(plan, folder, CurrentOptions, VerifyChecksums);
+
+        if (notify)
+        {
+            AppState.Current.NotifyFinished(CopyBatch);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Что скачивать, с каких серверов и куда — одни проверки у скачивания и сравнения.
+    /// Null — делать нечего, причина уже показана.
+    /// </summary>
+    /// <param name="create">Создать папку, если её нет: сравнению она не нужна — без неё просто ничего нет здесь.</param>
+    private (Dictionary<ServerEntry, List<string>> Plan, string Folder)? DownloadInputs(string what, string verb, bool create)
+    {
         var picked = PickedDownloads.ToList();
 
         if (picked.Count == 0)
         {
-            return Refuse("скачивание", Downloads.Count == 0
+            Refuse(what, Downloads.Count == 0
                 ? "Список пуст — выберите файлы и папки кнопкой «Выбрать на сервере»."
-                : "Ни одна строка не отмечена — скачивать нечего.");
+                : $"Ни одна строка не отмечена — {verb} нечего.");
+            return null;
         }
 
         var gone = picked.Where(d => d.Server is null).ToList();
@@ -911,33 +1061,32 @@ public sealed class Workspace : ObservableObject
 
         if (plan.Count == 0)
         {
-            return Refuse("скачивание", "Серверы отмеченных строк удалены из списка — скачивать не с чего.");
+            Refuse(what, $"Серверы отмеченных строк удалены из списка — {verb} не с чем.");
+            return null;
         }
 
         var folder = LocalFolder.Trim();
 
         if (folder.Length == 0)
         {
-            return Refuse("скачивание", "Не указана папка, куда скачивать.");
+            Refuse(what, "Не указана папка здесь, на компьютере.");
+            return null;
         }
 
-        try
+        if (create)
         {
-            Directory.CreateDirectory(folder);
-        }
-        catch (Exception ex)
-        {
-            return Refuse("скачивание", $"Папку «{folder}» не создать: {ex.Message}");
-        }
-
-        await DownloadCoreAsync(plan, folder, CurrentOptions, VerifyChecksums);
-
-        if (notify)
-        {
-            AppState.Current.NotifyFinished(CopyBatch);
+            try
+            {
+                Directory.CreateDirectory(folder);
+            }
+            catch (Exception ex)
+            {
+                Refuse(what, $"Папку «{folder}» не создать: {ex.Message}");
+                return null;
+            }
         }
 
-        return true;
+        return (plan, folder);
     }
 
     /// <summary>
@@ -1083,9 +1232,16 @@ public sealed class Workspace : ObservableObject
         Save();
     }
 
-    public void RaiseChain() => RaiseMany(
-        nameof(AfterCopyEnabled), nameof(Personal), nameof(HasPersonal), nameof(IsCopyTab),
-        nameof(Notices), nameof(HasNotices));
+    public void RaiseChain()
+    {
+        RaiseMany(
+            nameof(AfterCopyEnabled), nameof(Personal), nameof(HasPersonal), nameof(IsCopyTab),
+            nameof(Notices), nameof(HasNotices));
+
+        // галочка «+ команды» в терминале видна, только пока свитч включён. Current ещё нет,
+        // пока вкладки читаются при запуске — тогда и показывать нечего
+        AppState.Current?.RaiseChainCopy();
+    }
 
     /// <summary>
     /// Плашка у пути на сервере: что мешает сделать то, о чём попросили, и требует внимания,
@@ -1638,10 +1794,39 @@ public sealed class Workspace : ObservableObject
 
         if (added > 0)
         {
-            AppLog.Hint($"В список добавлено объектов: {added} (всего {Items.Count}).");
+            ActionLog.Info($"В список добавлено: {added} · всего {Items.Count}", ActionLog.Computer, null, this,
+                Items.TakeLast(added).Select(i => (i.IsDirectory ? "папка " : "файл ") + i.FullPath));
         }
 
         return added;
+    }
+
+    /// <summary>
+    /// Строке вписали другой путь: она встаёт на то же место заново, с прежней галочкой.
+    /// Вернёт причину отказа или null, если путь сменился.
+    /// </summary>
+    public string? ReplaceItemPath(TransferItem item, string raw)
+    {
+        var path = raw.Trim().Trim('"');
+        var index = Items.IndexOf(item);
+
+        if (index < 0 || string.Equals(path, item.FullPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (!File.Exists(path) && !Directory.Exists(path))
+        {
+            return "такого файла или папки на компьютере нет";
+        }
+
+        if (Items.Any(i => !ReferenceEquals(i, item) && string.Equals(i.FullPath, path, StringComparison.OrdinalIgnoreCase)))
+        {
+            return "этот путь уже есть в списке";
+        }
+
+        Items[index] = new TransferItem(path) { IsSelected = item.IsSelected };
+        return null;
     }
 
     public void RemoveItems(IEnumerable<TransferItem> items)
@@ -1729,28 +1914,9 @@ public sealed class Workspace : ObservableObject
             return false;
         }
 
-        var payload = Items.Where(i => i.IsSelected).ToList();
-
-        if (payload.Count == 0)
+        if (CopyInputs("копирование", "копировать") is not (var payload, var remotePath, var targets))
         {
-            return Refuse("копирование", Items.Count == 0
-                ? "Список файлов пуст — копировать нечего."
-                : "Ни один объект не отмечен галочкой — копировать нечего.");
-        }
-
-        var remotePath = SshService.NormalizeRemote(RemotePath);
-
-        if (string.IsNullOrWhiteSpace(remotePath) || remotePath == "/")
-        {
-            return Refuse("копирование",
-                "Не указан путь на сервере — укажите каталог, корень «/» не принимается.");
-        }
-
-        var targets = CopyTargets;
-
-        if (targets.Count == 0)
-        {
-            return Refuse("копирование", "Не отмечено ни одного сервера для копирования.");
+            return false;
         }
 
         // умный режим: сервер непривычный для этой вкладки — сначала спросить
@@ -1768,7 +1934,8 @@ public sealed class Workspace : ObservableObject
         }
 
         var settings = AppState.Current.Settings;
-        var options = new UploadOptions(OverwriteFiles, PreserveTimestamps, MatchByDate, MatchByHash, ExcludeMasks);
+        var options = new UploadOptions(
+            OverwriteFiles, PreserveTimestamps, MatchByDate, MatchByHash, ExcludeMasks, GlobalExcludeMasks);
         var verify = VerifyChecksums;
 
         // без переноса даты у файла на сервере стоит время заливки, а не оригинала, — тогда
@@ -1818,8 +1985,280 @@ public sealed class Workspace : ObservableObject
         return true;
     }
 
-    /// <summary>Параметры переноса этой вкладки — те, что выставлены в блоке параметров.</summary>
-    public UploadOptions CurrentOptions => new(OverwriteFiles, PreserveTimestamps, MatchByDate, MatchByHash, ExcludeMasks);
+    /// <summary>
+    /// Что копировать, куда и на какие серверы — одни проверки у копирования и сравнения.
+    /// Null — делать нечего, причина уже показана.
+    /// </summary>
+    /// <param name="what">Название действия для метки на ярлыке: «копирование», «сравнение».</param>
+    /// <param name="verb">Глагол для причины: «копировать нечего», «сравнивать нечего».</param>
+    private (List<TransferItem> Payload, string RemotePath, IReadOnlyList<ServerEntry> Targets)? CopyInputs(string what, string verb)
+    {
+        var payload = Items.Where(i => i.IsSelected).ToList();
+
+        if (payload.Count == 0)
+        {
+            Refuse(what, Items.Count == 0
+                ? $"Список файлов пуст — {verb} нечего."
+                : $"Ни один объект не отмечен галочкой — {verb} нечего.");
+            return null;
+        }
+
+        var remotePath = SshService.NormalizeRemote(RemotePath);
+
+        if (string.IsNullOrWhiteSpace(remotePath) || remotePath == "/")
+        {
+            Refuse(what, "Не указан путь на сервере — укажите каталог, корень «/» не принимается.");
+            return null;
+        }
+
+        var targets = CopyTargets;
+
+        if (targets.Count == 0)
+        {
+            Refuse(what, $"Не отмечено ни одного сервера — {verb} не с чем.");
+            return null;
+        }
+
+        return (payload, remotePath, targets);
+    }
+
+    /// <summary>Начало названия операции сравнения — по нему окончание отличают от копирования.</summary>
+    public const string CompareName = "Сравнение";
+
+    /// <summary>
+    /// «Сравнить» на «Копировании»: сверка отмеченных файлов с сервером по правилу из параметров —
+    /// вывод тот же, что у копирования, только ничего не копируется. Умный режим не спрашивает:
+    /// на сервере ничего не меняется.
+    /// </summary>
+    /// <param name="notify">Сообщить об окончании (автокопия вывода). «Везде» сообщает само — по сводке.</param>
+    public async Task<bool> RunCompareCopyAsync(bool notify = true)
+    {
+        if (CopyBatch.IsRunning)
+        {
+            AppLog.Hint("Копирование или сравнение уже идёт.", LogLevel.Warning);
+            return false;
+        }
+
+        if (CopyInputs("сравнение", "сравнивать") is not (var payload, var remotePath, var targets))
+        {
+            return false;
+        }
+
+        var settings = AppState.Current.Settings;
+        var options = CurrentOptions;
+
+        // файлы могли измениться с прошлого раза — суммы заново, как перед копированием
+        _localHashes.Clear();
+        _ = RefreshItemsInfoAsync();
+
+        AppLog.Info($"Сравнение {payload.Count} объект(ов) с {remotePath} — ничего не копируется.", Title);
+
+        await CompareCoreAsync(targets, (server, result, ct) =>
+        {
+            result.Append($"Сравнение с {remotePath} — ничего не копируется");
+
+            return SshService.CompareUploadAsync(
+                server,
+                settings,
+                payload,
+                remotePath,
+                options,
+                _localHashes,
+                line => result.Append(line),
+                ct,
+                step => result.Message = (step switch
+                {
+                    UploadStep.CheckingHashes => StepCheckingHashes,
+                    UploadStep.CheckingDates => StepCheckingDates,
+                    _ => StepConnecting,
+                }) + "…");
+        }, "на сервере");
+
+        if (notify)
+        {
+            AppState.Current.NotifyFinished(CopyBatch);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// «Сравнить» на «Скачивании»: сверка файлов сервера с тем, что лежит в папке здесь, по правилу
+    /// из параметров. Вывод тот же, что у скачивания, только ничего не скачивается.
+    /// </summary>
+    /// <param name="notify">Сообщить об окончании (автокопия вывода). «Везде» сообщает само — по сводке.</param>
+    public async Task<bool> RunCompareDownloadAsync(bool notify = true)
+    {
+        if (CopyBatch.IsRunning)
+        {
+            AppLog.Hint("Скачивание или сравнение уже идёт.", LogLevel.Warning);
+            return false;
+        }
+
+        if (DownloadInputs("сравнение", "сравнивать", create: false) is not (var plan, var folder))
+        {
+            return false;
+        }
+
+        var settings = AppState.Current.Settings;
+        var options = CurrentOptions;
+        var perServer = plan.Count > 1;
+
+        AppLog.Info($"Сравнение: путей {plan.Values.Sum(p => p.Count)} с {plan.Count} сервер(ов) и папки {folder} — ничего не скачивается.", Title);
+
+        await CompareCoreAsync(plan.Keys.ToList(), (server, result, ct) =>
+        {
+            var root = perServer ? Path.Combine(folder, FolderName(server)) : folder;
+            result.Append($"Сравнение с {root} — ничего не скачивается");
+
+            return DownloadService.CompareAsync(server, settings, plan[server], root, options, line => result.Append(line), ct);
+        }, "здесь");
+
+        if (notify)
+        {
+            AppState.Current.NotifyFinished(CopyBatch);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Сравнение — одно для копирования и скачивания: строка на сервер, итог «сошлось / не сошлось»
+    /// в статусе, разбор — в выводе, коротко — на ярлыке.
+    /// </summary>
+    /// <param name="where">Где может не быть файла: «на сервере» или «здесь».</param>
+    private async Task CompareCoreAsync(
+        IReadOnlyList<ServerEntry> targets,
+        Func<ServerEntry, OperationResult, CancellationToken, Task<CompareStats>> compare,
+        string where)
+    {
+        var settings = AppState.Current.Settings;
+        var gate = new Lock();
+        var worst = 0;
+
+        SetScope();
+        ShowStatus("сравнение", string.Empty, WorkspaceStatus.Running);
+        AppState.Current.RequestTerminal();
+        ShowResults(CopyBatch);
+
+        await CopyBatch.RunAsync(
+            Operation(CompareName),
+            targets,
+            async (server, result, ct) =>
+            {
+                result.Message = StepConnecting + "…";
+
+                var stats = await compare(server, result, ct);
+
+                lock (gate)
+                {
+                    worst = Math.Max(worst, stats.Mismatches);
+                }
+
+                ReportCompare(result, stats, where);
+            },
+            settings.MaxParallel);
+
+        if (CopyBatch.IsRunning)
+        {
+            return;
+        }
+
+        FinishStatus(
+            CopyBatch,
+            "сравнение",
+            worst == 0 ? "сошлось" : $"отличий {worst}",
+            worst == 0 ? "файлы одинаковые" : "что именно не сошлось — в выводе терминала");
+    }
+
+    /// <summary>
+    /// Итог сравнения в строку сервера. Статус — сразу ответ «сошлось или нет»; в выводе — счёт
+    /// и списки: чего нет, что отличается и чем. «Не сошлось» — не ошибка, а ответ: оранжевым.
+    /// </summary>
+    private static void ReportCompare(OperationResult result, CompareStats stats, string where)
+    {
+        result.Append("── итог сравнения ──");
+        result.Append($"совпало файлов: {stats.Same} из {stats.Total}");
+
+        if (stats.MissingFiles.Count > 0)
+        {
+            result.Append($"нет {where} файлов: {stats.MissingFiles.Count}");
+        }
+
+        if (stats.Different.Count > 0)
+        {
+            result.Append($"отличаются: {stats.Different.Count}");
+        }
+
+        if (stats.MissingDirs.Count > 0)
+        {
+            result.Append($"нет {where} папок: {stats.MissingDirs.Count}");
+        }
+
+        result.Append("время: " + stats.Clock);
+
+        if (stats.MissingDirs.Count > 0)
+        {
+            result.Append($"── нет {where} папок ({stats.MissingDirs.Count}) ──");
+
+            foreach (var dir in stats.MissingDirs)
+            {
+                result.Append($"→ {dir}/");
+            }
+        }
+
+        if (stats.MissingFiles.Count > 0)
+        {
+            result.Append($"── нет {where} файлов ({stats.MissingFiles.Count}) ──");
+
+            foreach (var file in stats.MissingFiles)
+            {
+                result.Append($"→ {file}");
+            }
+        }
+
+        if (stats.Different.Count > 0)
+        {
+            result.Append($"── отличаются ({stats.Different.Count}) ──");
+
+            foreach (var diff in stats.Different)
+            {
+                result.Append($"≠ {diff.Path} · {diff.Reason}");
+            }
+        }
+
+        if (stats.Mismatches == 0)
+        {
+            result.Message = stats.Total == 0 ? "сошлось · файлов нет" : $"сошлось · одинаковых файлов {stats.Same}";
+            result.Status = OperationStatus.Success;
+            return;
+        }
+
+        var parts = new List<string>();
+
+        if (stats.MissingFiles.Count > 0)
+        {
+            parts.Add($"нет {where} {stats.MissingFiles.Count}");
+        }
+
+        if (stats.Different.Count > 0)
+        {
+            parts.Add($"отличаются {stats.Different.Count}");
+        }
+
+        if (stats.MissingDirs.Count > 0)
+        {
+            parts.Add($"папок нет {stats.MissingDirs.Count}");
+        }
+
+        result.Message = "не сошлось · " + string.Join(" · ", parts) + $" · одинаковых {stats.Same}";
+        result.Warning = true;
+        result.Status = OperationStatus.Success;
+    }
+
+    /// <summary>Параметры захода; исключения — свои и общие порознь, чтобы в выводе было видно, что чем отсеяно.</summary>
+    public UploadOptions CurrentOptions =>
+        new(OverwriteFiles, PreserveTimestamps, MatchByDate, MatchByHash, ExcludeMasks, GlobalExcludeMasks);
 
     /// <summary>
     /// Заливка — одна на всю программу: её зовут и «Копирование», и «Проводник». Подключение
@@ -2673,6 +3112,9 @@ public sealed class Workspace : ObservableObject
         IsMain = IsMain,
         IsArchived = IsArchived,
         KeepOutputLog = KeepOutputLog,
+        AutoCopy = _autoCopy,
+        LogAsFile = _logAsFile,
+        CopyPass = _copyPass,
         SelectedServerIds = CopyServers.Where(c => c.IsSelected).Select(c => c.Server.Id).ToList(),
         CommandServerIds = CommandServers.Where(c => c.IsSelected).Select(c => c.Server.Id).ToList(),
         CopyList = Items.Select(i => new SavedTransferItem { Path = i.FullPath, IsSelected = i.IsSelected }).ToList(),
@@ -2683,6 +3125,7 @@ public sealed class Workspace : ObservableObject
         VerifyChecksums = VerifyChecksums,
         ReplaceWithoutAsking = ReplaceWithoutAsking,
         ExcludeMasks = ExcludeMasks,
+        UseGlobalExcludes = UseGlobalExcludes,
         MatchByDate = MatchByDate,
         MatchByHash = MatchByHash,
         CommandText = CommandText,
@@ -2706,12 +3149,16 @@ public sealed class Workspace : ObservableObject
         _verifyChecksums = state.VerifyChecksums;
         _replaceWithoutAsking = state.ReplaceWithoutAsking;
         _excludeMasks = state.ExcludeMasks ?? string.Empty;
+        _useGlobalExcludes = state.UseGlobalExcludes;
         _matchByDate = state.MatchByDate;
         _matchByHash = state.MatchByHash;
         _afterCopyTabId = state.AfterCopyTabId ?? string.Empty;
         _afterCopyEnabled = state.AfterCopyEnabled && _afterCopyTabId.Length > 0;
         _isArchived = state.IsArchived && !IsMain;
         _keepOutputLog = state.KeepOutputLog ?? LegacyKeepLog;
+        _autoCopy = state.AutoCopy ?? false;
+        _logAsFile = state.LogAsFile ?? false;
+        _copyPass = state.CopyPass ?? false;
         OwnerCopyTabId = state.OwnerCopyTabId ?? string.Empty;
 
         _localFolder = state.LocalFolder ?? string.Empty;
@@ -2790,7 +3237,9 @@ public sealed class Workspace : ObservableObject
             nameof(VerifyChecksums),
             nameof(ReplaceWithoutAsking),
             nameof(ExcludeMasks),
-            nameof(ExcludeCaption),
+            nameof(HasExcludes),
+            nameof(HasGlobalExcludes),
+            nameof(UseGlobalExcludes),
             nameof(MatchByDate),
             nameof(MatchByHash),
             nameof(SendEverything),
@@ -2810,7 +3259,8 @@ public sealed class Workspace : ObservableObject
     /// </summary>
     private void SetScope()
     {
-        var scope = AppState.Current.TabsOf(this).Count > 1 ? Title : null;
+        var tabs = AppState.Current.TabsOf(this);
+        var scope = tabs.Count > 1 && tabs.Contains(this) ? Title : null;
 
         CopyBatch.Scope = scope;
         CommandBatch.Scope = scope;
@@ -2821,6 +3271,18 @@ public sealed class Workspace : ObservableObject
         CommandBatch.Section = section;
         // проверку связи зовут и со страницы «Серверы» — запись туда, откуда позвали
         CheckBatch.Section = AppState.Current.Section;
+    }
+
+    /// <summary>Прогон, в который ложатся строки разовых действий: у командной вкладки — команд, у прочих — копирования.</summary>
+    private OperationBatch ActionBatch => AppState.Current.CommandTabs.Contains(this) ? CommandBatch : CopyBatch;
+
+    /// <summary>Разовое действие — строкой в терминал этой вкладки; терминал переключается на этот прогон.</summary>
+    internal void AddActionRow(ServerEntry where, LogLevel level, string summary, IReadOnlyList<string> lines)
+    {
+        SetScope();
+        var batch = ActionBatch;
+        batch.AddAction(where, level, summary, lines);
+        ShowResults(batch);
     }
 
     /// <summary>Терминал внизу окна показывает ту операцию, которую запустили последней.</summary>

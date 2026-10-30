@@ -17,6 +17,15 @@ public sealed class TerminalRowState
 
     public double DurationMs { get; set; }
 
+    /// <summary>Строка разового действия с оговоркой — оранжевый треугольник, а не «отменено».</summary>
+    public bool Warning { get; set; }
+
+    /// <summary>Строка разового действия, не запуска: автокопия её не берёт.</summary>
+    public bool IsAction { get; set; }
+
+    /// <summary>Номер запуска строки — по нему таблица собирает строки одного нажатия вместе.</summary>
+    public long RunId { get; set; }
+
     public DateTime? FinishedUtc { get; set; }
 
     public bool Skipped { get; set; }

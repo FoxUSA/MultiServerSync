@@ -19,7 +19,7 @@ public partial class DownloadPage : Page, Controls.IToastHost
     public DownloadPage()
     {
         InitializeComponent();
-        BarToast.Follow(EverywhereButton);
+        BarToast.Follow(EverywhereSwitch);
 
         DataContext = AppState.Current.ActiveWorkspace;
         AppState.Current.ActiveWorkspaceChanged += workspace =>
@@ -75,12 +75,12 @@ public partial class DownloadPage : Page, Controls.IToastHost
         }
 
         var settings = AppState.Current.Settings;
-        var last = workspace.Downloads.LastOrDefault(d => d.Server is not null);
 
-        // открываем там, где выбирали в прошлый раз
+        // обзор открывается на отмеченном слева сервере, из нескольких — на первом в списке;
+        // ничего не отмечено — на сервере последней строки, как в прошлый раз
         var server =
-            last?.Server
-            ?? workspace.CopyTargets.FirstOrDefault()
+            workspace.CopyTargets.FirstOrDefault()
+            ?? workspace.Downloads.LastOrDefault(d => d.Server is not null)?.Server
             ?? AppState.Current.Servers.FirstOrDefault(s => s.Id == settings.BrowseServerId)
             ?? AppState.Current.Servers.FirstOrDefault();
 
@@ -90,6 +90,8 @@ public partial class DownloadPage : Page, Controls.IToastHost
             return;
         }
 
+        // папка — последней строки этого же сервера, иначе последняя открытая
+        var last = workspace.Downloads.LastOrDefault(d => d.Server == server);
         var start = last is not null
             ? SshService.ParentRemote(last.Path)
             : settings.LastRemotePath;
@@ -133,9 +135,15 @@ public partial class DownloadPage : Page, Controls.IToastHost
             dialog.Server,
             dialog.SelectedItems.Select(i => (i.FullPath, i.IsDirectory, i.Length, i.Modified)));
 
-        AppLog.Hint(added > 0
-                ? $"Добавлено для скачивания с «{dialog.Server.PaneLabel}»: {added}."
-                : "Всё выбранное уже есть в списке.");
+        if (added > 0)
+        {
+            ActionLog.Info($"Добавлено для скачивания: {added} · всего {workspace.Downloads.Count}", dialog.Server, AppSection.Download, workspace,
+                dialog.SelectedItems.Select(i => (i.IsDirectory ? "папка " : "файл ") + i.FullPath));
+        }
+        else
+        {
+            AppLog.Hint("Всё выбранное уже есть в списке.");
+        }
 
         // у новых папок сразу видны число файлов и размер
         Check();
@@ -152,16 +160,55 @@ public partial class DownloadPage : Page, Controls.IToastHost
 
     private void OnExcludes(object sender, RoutedEventArgs e)
     {
-        if (Workspace is not { } workspace
-            || ExcludeDialog.Ask(Window.GetWindow(this), workspace.ExcludeMasks) is not { } masks
-            || masks == workspace.ExcludeMasks)
+        if (Workspace is { } workspace)
+        {
+            ExcludeDialog.Edit(Window.GetWindow(this), workspace, "скачивании");
+        }
+    }
+
+    /// <summary>Значок в конце строки: путь на сервере — в буфер.</summary>
+    private void OnCopyRowPath(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: DownloadItem item } && ClipboardText.Copy(item.Path))
+        {
+            AppLog.Hint("Путь скопирован: " + item.Path);
+        }
+    }
+
+    /// <summary>Значок в конце строки: вписать другой путь на том же сервере — строка встаёт на то же место.</summary>
+    private void OnEditRowPath(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: DownloadItem item } || Workspace is not { } workspace)
         {
             return;
         }
 
-        workspace.ExcludeMasks = masks;
-        var count = ExcludeRules.Count(masks);
-        AppLog.Hint(count > 0 ? $"Исключения при скачивании: {count}." : "Исключения при скачивании сняты.");
+        var dialog = new InputDialog("Путь строки", $"Путь на сервере «{item.ServerLabel}»:", item.Path) { Owner = Window.GetWindow(this) };
+
+        if (dialog.ShowDialog() != true || dialog.Value.Length == 0 || dialog.Value == item.Path)
+        {
+            return;
+        }
+
+        if (workspace.ReplaceDownloadPath(item, dialog.Value) is { } problem)
+        {
+            AppLog.Hint("Путь не сменён: " + problem + ".", LogLevel.Warning);
+            return;
+        }
+
+        ActionLog.Info($"Путь строки сменён: {item.Name} → {dialog.Value.TrimEnd('/').Split('/').Last()}", item.Server, AppSection.Download, workspace,
+            [$"было: {item.Path}", $"стало: {dialog.Value}"]);
+    }
+
+    /// <summary>Корзина в конце строки: строка уходит из списка, на сервере ничего не удаляется.</summary>
+    private void OnRemoveRow(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: DownloadItem item } && Workspace is { } workspace)
+        {
+            workspace.Downloads.Remove(item);
+            ActionLog.Info($"Убрана строка: {item.Name}", item.Server, AppSection.Download, workspace,
+                [item.Path, $"в списке осталось: {workspace.Downloads.Count}"]);
+        }
     }
 
     private void OnRemoveSelected(object sender, RoutedEventArgs e)
@@ -173,20 +220,28 @@ public partial class DownloadPage : Page, Controls.IToastHost
 
         var picked = PathsList.SelectedItems.OfType<DownloadItem>().ToList();
 
+        if (picked.Count == 0)
+        {
+            AppLog.Hint("Выделите строки, которые убрать (Ctrl, Shift).");
+            return;
+        }
+
         foreach (var item in picked)
         {
             workspace.Downloads.Remove(item);
         }
 
-        AppLog.Hint(picked.Count > 0 ? $"Убрано строк: {picked.Count}." : "Выделите строки, которые убрать (Ctrl, Shift).");
+        ActionLog.Info($"Убрано строк: {picked.Count}", null, AppSection.Download, workspace,
+            picked.Select(i => $"{i.ServerLabel}: {i.Path}").Append($"в списке осталось: {workspace.Downloads.Count}"));
     }
 
     private void OnClear(object sender, RoutedEventArgs e)
     {
         if (Workspace is { Downloads.Count: > 0 } workspace)
         {
+            var gone = workspace.Downloads.Select(i => $"{i.ServerLabel}: {i.Path}").ToList();
             workspace.Downloads.Clear();
-            AppLog.Hint("Список путей для скачивания очищен.");
+            ActionLog.Info($"Список скачивания очищен: убрано {gone.Count}", null, AppSection.Download, workspace, gone);
         }
     }
 
@@ -226,26 +281,68 @@ public partial class DownloadPage : Page, Controls.IToastHost
         Process.Start(new ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true });
     }
 
-    /// <summary>«Выполнить тут» — только эта вкладка: её пути, её папка, её отмеченные серверы.</summary>
+    /// <summary>«Выполнить»: эта вкладка — её пути, папка и серверы; со свитчем «Везде» — все вкладки.</summary>
     private async void OnDownload(object sender, RoutedEventArgs e)
-    {
-        if (Workspace is { } workspace)
-        {
-            await workspace.RunDownloadAsync();
-        }
-    }
-
-    /// <summary>
-    /// «Выполнить везде» — скачивание во всех вкладках сразу, каждая со своими условиями.
-    /// Сводка показывается на той вкладке, с которой нажали.
-    /// </summary>
-    private async void OnDownloadEverywhere(object sender, RoutedEventArgs e)
     {
         if (Workspace is not { } workspace)
         {
             return;
         }
 
+        if (AppState.Current.Everywhere)
+        {
+            await DownloadEverywhereAsync(workspace);
+        }
+        else
+        {
+            await workspace.RunDownloadAsync();
+        }
+    }
+
+    /// <summary>
+    /// «Сравнить»: файлы сервера против папки здесь по правилам из параметров, без скачивания.
+    /// Со свитчем «Везде» — на всех вкладках сразу и без вопроса: ничего не меняется.
+    /// </summary>
+    private async void OnCompare(object sender, RoutedEventArgs e)
+    {
+        if (Workspace is not { } workspace)
+        {
+            return;
+        }
+
+        var all = AppState.Current.Everywhere ? AppState.Current.DownloadTabs.ToList() : [workspace];
+
+        if (all.Count <= 1)
+        {
+            await workspace.RunCompareDownloadAsync();
+            return;
+        }
+
+        AppLog.Info($"Сравнение на всех вкладках: {all.Count}.");
+
+        var running = all.Select(w => w.RunCompareDownloadAsync(notify: false)).ToList();
+        var started = all.Where((_, i) => !(running[i].IsCompletedSuccessfully && !running[i].Result)).ToList();
+
+        if (started.Count == 0)
+        {
+            AppLog.Warn("Сравнение не начато ни на одной вкладке — причины выше.");
+            await Task.WhenAll(running);
+            return;
+        }
+
+        workspace.ShowSummary(started.Select(w => w.CopyBatch).ToList(), Services.Workspace.CompareName);
+
+        await Task.WhenAll(running);
+
+        AppState.Current.NotifyFinished(workspace.SummaryBatch);
+    }
+
+    /// <summary>
+    /// «Выполнить» со свитчем «Везде» — скачивание во всех вкладках сразу, каждая со своими условиями.
+    /// Сводка показывается на той вкладке, с которой нажали.
+    /// </summary>
+    private async Task DownloadEverywhereAsync(Workspace workspace)
+    {
         var all = AppState.Current.DownloadTabs.ToList();
 
         if (!ConfirmDialog.Ask(
@@ -254,7 +351,7 @@ public partial class DownloadPage : Page, Controls.IToastHost
                 string.Empty,
                 "Скачать везде"))
         {
-            AppLog.Hint("«Выполнить везде» отменено.");
+            AppLog.Hint("Запуск на всех вкладках отменён.");
             return;
         }
 
@@ -264,7 +361,7 @@ public partial class DownloadPage : Page, Controls.IToastHost
             return;
         }
 
-        AppLog.Info($"«Выполнить везде» — скачивание запускается во всех вкладках: {all.Count}.");
+        AppLog.Info($"Везде: скачивание запускается во всех вкладках: {all.Count}.");
 
         // операции стартуют синхронно, поэтому строки уже созданы и попадут в сводку
         var running = all.Select(w => w.RunDownloadAsync(notify: false)).ToList();

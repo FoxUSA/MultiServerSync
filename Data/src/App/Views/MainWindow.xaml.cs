@@ -115,7 +115,22 @@ public partial class MainWindow : FluentWindow
             _ => typeof(FilesPage),
         });
 
-        AppState.Current.ActiveServerSetChanged += set => SetStrip.SelectedItem = set;
+        // лента наборов — основная или архив — идёт за набором выбранной таблицы, как лента вкладок
+        SetupSetView();
+        AppState.Current.ActiveServerSetChanged += set =>
+        {
+            if (set.IsArchived)
+            {
+                _lastArchivedSet = set;
+            }
+            else
+            {
+                _lastMainSet = set;
+            }
+
+            FollowActiveSet();
+        };
+        AppState.Current.SetArchiveChanged += _ => FollowActiveSet();
 
         // ряд разделов следит за открытым разделом: в раздел попадают и не кнопкой (из вкладки, из проводника)
         State.PropertyChanged += (_, e) =>
@@ -126,6 +141,7 @@ public partial class MainWindow : FluentWindow
             }
         };
         ShowSection();
+        SetupSectionMarks();
 
         // рамка не копит историю: страницы и так живут всё время работы программы
         PageFrame.Navigated += (_, _) =>
@@ -163,6 +179,9 @@ public partial class MainWindow : FluentWindow
 
             // записи загрузки плашкой не показываем — только то, что сделано после открытия окна
             AppLog.Written += ShowToast;
+
+            // файл длинного лога в буфере живёт, пока буфер не сменится
+            ClipboardText.Watch(this);
         };
 
         Closing += OnClosing;
@@ -256,6 +275,96 @@ public partial class MainWindow : FluentWindow
         CommandSection.IsChecked = section == AppSection.Command;
         FilesSection.IsChecked = section == AppSection.Files;
         DownloadSection.IsChecked = section == AppSection.Download;
+
+        // в «Настройках» разовых действий нет — и настраивать нечего
+        OutputPrefsButton.Visibility = section == AppSection.Settings ? Visibility.Collapsed : Visibility.Visible;
+
+        // в раздел пришли — его ошибки увидены
+        _unseenFailures.RemoveWhere(tab => State.SectionOfTab(tab) == section);
+        ShowSectionMarks();
+    }
+
+    /// <summary>Вкладки, кончившие ошибкой, пока их раздел был не на экране. Гаснут, когда в раздел заходят.</summary>
+    private readonly HashSet<Workspace> _unseenFailures = new();
+
+    /// <summary>Кнопки разделов следят за статусами вкладок всех разделов, и уже открытых, и новых.</summary>
+    private void SetupSectionMarks()
+    {
+        foreach (var tabs in new[] { State.Workspaces, State.CommandTabs, State.DownloadTabs, State.ExplorerTabs })
+        {
+            foreach (var tab in tabs)
+            {
+                tab.PropertyChanged += OnTabStatusChanged;
+            }
+
+            tabs.CollectionChanged += (_, e) =>
+            {
+                foreach (Workspace tab in e.OldItems ?? Array.Empty<Workspace>())
+                {
+                    tab.PropertyChanged -= OnTabStatusChanged;
+                    _unseenFailures.Remove(tab);
+                }
+
+                foreach (Workspace tab in e.NewItems ?? Array.Empty<Workspace>())
+                {
+                    tab.PropertyChanged += OnTabStatusChanged;
+                }
+
+                ShowSectionMarks();
+            };
+        }
+
+        ShowSectionMarks();
+    }
+
+    private void OnTabStatusChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(Workspace.Status) || sender is not Workspace tab)
+        {
+            return;
+        }
+
+        if (tab.Status is WorkspaceStatus.Failed or WorkspaceStatus.Partial && State.SectionOfTab(tab) != State.Section)
+        {
+            _unseenFailures.Add(tab);
+        }
+        else
+        {
+            _unseenFailures.Remove(tab);
+        }
+
+        ShowSectionMarks();
+    }
+
+    /// <summary>
+    /// Рамка на кнопке раздела, которого нет на экране: красная — там что-то кончилось ошибкой
+    /// без человека, иначе зелёная, пока там что-то идёт. У открытого раздела рамки нет — всё видно на ярлыках.
+    /// </summary>
+    private void ShowSectionMarks()
+    {
+        Mark(ExplorerSection, AppSection.Explorer, State.ExplorerTabs);
+        Mark(CommandSection, AppSection.Command, State.CommandTabs);
+        Mark(FilesSection, AppSection.Files, State.Workspaces);
+        Mark(DownloadSection, AppSection.Download, State.DownloadTabs);
+
+        void Mark(DependencyObject button, AppSection section, IEnumerable<Workspace> tabs)
+        {
+            var status = WorkspaceStatus.None;
+
+            if (State.Section != section)
+            {
+                if (tabs.Any(_unseenFailures.Contains))
+                {
+                    status = WorkspaceStatus.Failed;
+                }
+                else if (tabs.Any(t => t.Status == WorkspaceStatus.Running))
+                {
+                    status = WorkspaceStatus.Running;
+                }
+            }
+
+            Controls.SectionMark.SetStatus(button, status);
+        }
     }
 
     /// <summary>
@@ -396,7 +505,7 @@ public partial class MainWindow : FluentWindow
     {
         if (State.ShowsServerSetTabs)
         {
-            State.ActiveServerSet = State.AddServerSet();
+            State.ActiveServerSet = State.AddServerSet(archived: _setArchiveMode);
         }
         else if (State.ShowsWorkspaceTabs)
         {
@@ -463,6 +572,64 @@ public partial class MainWindow : FluentWindow
         }
     }
 
+    /// <summary>Шестерёнка у «Терминал / Журнал»: галочки открытого раздела, как сохранены.</summary>
+    private void OnOutputPrefs(object sender, RoutedEventArgs e)
+    {
+        var section = State.Section;
+        var prefs = State.ActionOutputOf(section);
+
+        OutputPrefsTitle.Text = $"ЧТО ПИСАТЬ · {LogEntry.NameOf(section).ToUpperInvariant()}";
+        ServerTerminalBox.IsChecked = prefs.ServerTerminal;
+        ServerJournalBox.IsChecked = prefs.ServerJournal;
+        ComputerTerminalBox.IsChecked = prefs.ComputerTerminal;
+        ComputerJournalBox.IsChecked = prefs.ComputerJournal;
+        ProgramTerminalBox.IsChecked = prefs.ProgramTerminal;
+        ProgramJournalBox.IsChecked = prefs.ProgramJournal;
+
+        // только те строки, что в разделе бывают
+        var (server, computer) = OutputKinds(section);
+        ShowRow(server, ServerRowLabel, ServerTerminalBox, ServerJournalBox);
+        ShowRow(computer, ComputerRowLabel, ComputerTerminalBox, ComputerJournalBox);
+
+        OutputPrefsPopup.IsOpen = true;
+
+        static void ShowRow(bool on, params UIElement[] cells)
+        {
+            foreach (var cell in cells)
+            {
+                cell.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Чьи разовые действия бывают в разделе. «Программа» есть везде, кроме «Настроек»: там
+    /// действий нет вовсе, и шестерёнки тоже нет. Сервер — где действуют на сервере
+    /// (правая панель «Проводника», строки скачивания, сами серверы), Компьютер — где на этом ПК.
+    /// </summary>
+    private static (bool Server, bool Computer) OutputKinds(AppSection section) => section switch
+    {
+        AppSection.Explorer => (true, true),
+        AppSection.Files => (false, true),
+        AppSection.Download => (true, false),
+        AppSection.Servers => (true, false),
+        _ => (false, false),
+    };
+
+    /// <summary>Галочку переключили — раздел запоминает сразу, без кнопки «Сохранить».</summary>
+    private void OnOutputPrefChanged(object sender, RoutedEventArgs e)
+    {
+        State.SetActionOutput(State.Section, prefs =>
+        {
+            prefs.ServerTerminal = ServerTerminalBox.IsChecked == true;
+            prefs.ServerJournal = ServerJournalBox.IsChecked == true;
+            prefs.ComputerTerminal = ComputerTerminalBox.IsChecked == true;
+            prefs.ComputerJournal = ComputerJournalBox.IsChecked == true;
+            prefs.ProgramTerminal = ProgramTerminalBox.IsChecked == true;
+            prefs.ProgramJournal = ProgramJournalBox.IsChecked == true;
+        });
+    }
+
     /// <summary>
     /// Галочки «авто» в терминале: вывод сам уходит в буфер.
     /// Срабатывает выбор того вида операции, что закончилась, а не того раздела, что открыт.
@@ -477,18 +644,23 @@ public partial class MainWindow : FluentWindow
         }
 
         var copying = State.IsCopyBatch(batch);
-        var finished = copying ? "Копирование закончилось" : "Команда закончилась";
+        var finished = batch.OperationName.StartsWith(Services.Workspace.CompareName, StringComparison.OrdinalIgnoreCase) ? "Сравнение закончилось"
+            : copying ? "Копирование закончилось"
+            : "Команда закончилась";
 
-        // «авто» у каждого раздела свои — смотрим раздел операции, а не тот, что открыт
-        var section = State.SectionOfBatch(batch);
-
-        if (State.StoredAutoCopyAll(section))
+        // «авто» у каждой вкладки своя — смотрим вкладку операции, а не ту, что открыта.
+        // «Авто» одна на обе кнопки: несколько серверов — вывод всех, один — его же.
+        // Считаются серверы запуска: в таблице могут лежать и строки разовых действий
+        if (State.TabOfBatch(batch).AutoCopy)
         {
-            Terminal.CopyAll(batch, finished);
-        }
-        else if (State.StoredAutoCopyCurrent(section))
-        {
-            Terminal.CopyCurrentAfter(batch, finished);
+            if (batch.LastRun.Count > 1)
+            {
+                Terminal.CopyAll(batch, finished);
+            }
+            else
+            {
+                Terminal.CopyCurrentAfter(batch, finished);
+            }
         }
     }
 
@@ -636,18 +808,37 @@ public partial class MainWindow : FluentWindow
             },
         };
 
+        // наборы переставляются все, закреплённого нет; место в ленте → место в списке, как у вкладок
         _ = new Controls.TabReorder(
             SetStrip,
             null,
-            item => item is ServerSet { IsMain: false },
-            fixedCount: 1,
+            item => item is ServerSet,
+            fixedCount: 0,
             (item, to) =>
             {
-                if (item is ServerSet set && State.MoveServerSet(set, to))
+                if (item is ServerSet set
+                    && SetStrip.Items.Count > 0
+                    && SetStrip.Items[Math.Min(to, SetStrip.Items.Count - 1)] is ServerSet anchor
+                    && State.MoveServerSet(set, State.ServerSets.IndexOf(anchor)))
                 {
                     SetStrip.SelectedItem = State.ActiveServerSet;
                 }
-            });
+            })
+        {
+            OutTarget = ArchiveButton,
+            DroppedOut = item =>
+            {
+                if (item is ServerSet set && State.SetArchived(set, !set.IsArchived))
+                {
+                    PulseArchive();
+                }
+            },
+            OverOutTarget = over =>
+            {
+                _dropOver = over;
+                UpdateArchiveButton();
+            },
+        };
     }
 
     /// <summary>Кнопки разделов — в том порядке, в каком их расставили; незнакомые имена пропускаются.</summary>
@@ -700,21 +891,31 @@ public partial class MainWindow : FluentWindow
         ShowExplorerServer();
     }
 
-    /// <summary>У «Проводника» карточки «Целевые сервера» нет: сервер выбирается в самой правой панели.</summary>
+    /// <summary>
+    /// Карточки «Целевые сервера» нет у «Проводника» (сервер выбирается в самой правой панели)
+    /// и у «Серверов»: там правят сами наборы, а целевые серверы — дело вкладок других разделов.
+    /// </summary>
     private void ApplyServerPane()
     {
-        var explorer = State.Section == AppSection.Explorer;
-        PaneCard.Visibility = explorer ? Visibility.Collapsed : Visibility.Visible;
-        PaneColumn.Width = new GridLength(explorer ? 0 : 220);
+        var hidden = State.Section is AppSection.Explorer or AppSection.Servers;
+        PaneCard.Visibility = hidden ? Visibility.Collapsed : Visibility.Visible;
+        PaneColumn.Width = new GridLength(hidden ? 0 : 220);
     }
 
-    /// <summary>Вкладка «Проводника», за сменой сервера которой следит подпись в ряду разделов.</summary>
+    /// <summary>Вкладка, за сменой сервера которой следит подпись в ряду разделов.</summary>
     private Workspace? _explorerTagTab;
 
-    /// <summary>Сервер правой панели «Проводника» — подписью у правого края ряда разделов.</summary>
+    /// <summary>
+    /// Подпись сервера у правого края ряда разделов. «Проводник» — сервер правой панели;
+    /// «Копирование», «Команда», «Скачивание» — отмеченный целевой сервер, а отмечено несколько —
+    /// их число. Щелчок — тот же список серверов.
+    /// </summary>
     private void ShowExplorerServer()
     {
-        var tab = State.Section == AppSection.Explorer ? State.ActiveWorkspace : null;
+        var tab = State.Section is AppSection.Explorer or AppSection.Files or AppSection.Command or AppSection.Download
+            && State.Tabs.Count > 0
+            ? State.ActiveWorkspace
+            : null;
 
         if (!ReferenceEquals(tab, _explorerTagTab))
         {
@@ -737,17 +938,28 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        var server = tab.ExplorerServer;
+        var explorer = State.Section == AppSection.Explorer;
+        var picked = explorer
+            ? (tab.ExplorerServer is { } one ? [one] : [])
+            : tab.SelectedServers;
+        var server = picked.Count == 1 ? picked[0] : null;
+
         ExplorerServerIcon.Source ??= ShellIcons.Server;
-        ExplorerServerName.Text = server?.PaneLabel ?? "Сервер не выбран";
+        ExplorerServerName.Text = server?.PaneLabel ?? (picked.Count > 1 ? $"Серверов: {picked.Count}" : "Сервер не выбран");
         ExplorerServerUser.Text = server is null || string.IsNullOrWhiteSpace(server.User) ? string.Empty : $"({server.User})";
         ExplorerServerAddress.Text = server is null ? string.Empty : $"{server.Host}:{server.Port}";
+        ExplorerServerTag.ToolTip = explorer
+            ? "Сервер правой панели — щелчок открывает список серверов"
+            : picked.Count > 1
+                ? "Отмечены: " + string.Join(", ", picked.Select(s => s.PaneLabel)) + ". Щелчок — список серверов"
+                : "Целевой сервер вкладки — щелчок открывает список серверов";
         ExplorerServerTag.Visibility = Visibility.Visible;
     }
 
     private void OnExplorerTagTabChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(Workspace.ExplorerServer))
+        // отметки серверов поднимают и то и другое — подпись перечитывается по любому
+        if (e.PropertyName is nameof(Workspace.ExplorerServer) or nameof(Workspace.SelectionInfo))
         {
             ShowExplorerServer();
         }
@@ -755,10 +967,19 @@ public partial class MainWindow : FluentWindow
 
     private void OnExplorerServerTag(object sender, RoutedEventArgs e)
     {
-        if (_explorerTagTab is { } tab)
+        if (_explorerTagTab is not { } tab)
+        {
+            return;
+        }
+
+        if (State.Section == AppSection.Explorer)
         {
             Controls.ServerMenu.Show(ExplorerServerTag, tab.ExplorerServer, tab.PickExplorerServer);
+            return;
         }
+
+        var picked = tab.SelectedServers;
+        Controls.ServerMenu.Show(ExplorerServerTag, s => picked.Contains(s), tab.PickTargetServer);
     }
 
     /// <summary>Высота ленты ярлыков сейчас и самая низкая за сеанс — в один ряд.</summary>
@@ -806,6 +1027,22 @@ public partial class MainWindow : FluentWindow
     private void OnTabStripRightDown(object sender, MouseButtonEventArgs e)
     {
         e.Handled = true;
+
+        if (ReferenceEquals(sender, SetStrip))
+        {
+            if (System.Windows.Controls.ItemsControl.ContainerFromElement(SetStrip, e.OriginalSource as DependencyObject)
+                is System.Windows.Controls.ListBoxItem { DataContext: ServerSet set } box)
+            {
+                var flightSet = FlyToArchive(box);
+
+                if (!State.SetArchived(set, !set.IsArchived))
+                {
+                    flightSet?.Invoke();
+                }
+            }
+
+            return;
+        }
 
         if (!ReferenceEquals(sender, TabStrip)
             || System.Windows.Controls.ItemsControl.ContainerFromElement(TabStrip, e.OriginalSource as DependencyObject)
@@ -878,6 +1115,48 @@ public partial class MainWindow : FluentWindow
         ApplyArchiveMode();
     }
 
+    // ── архив наборов серверов: та же вторая лента под «+», что у вкладок ─────────
+
+    private ListCollectionView? _setView;
+
+    /// <summary>Лента наборов показывает архив, а не основные наборы.</summary>
+    private bool _setArchiveMode;
+
+    /// <summary>Последний открытый набор основной ленты и архива.</summary>
+    private ServerSet? _lastMainSet;
+    private ServerSet? _lastArchivedSet;
+
+    private void SetupSetView()
+    {
+        _setView = new ListCollectionView(State.ServerSets)
+        {
+            Filter = item => item is ServerSet set && set.IsArchived == _setArchiveMode,
+            IsLiveFiltering = true,
+        };
+        _setView.LiveFilteringProperties.Add(nameof(ServerSet.IsArchived));
+        ((System.Collections.Specialized.INotifyCollectionChanged)_setView).CollectionChanged += (_, _) => UpdateArchiveButton();
+
+        SetStrip.IsSynchronizedWithCurrentItem = false;
+        _setArchiveMode = State.ServerSets.Count > 0 && State.ActiveServerSet.IsArchived;
+        _setView.Refresh();
+        SetStrip.ItemsSource = _setView;
+    }
+
+    /// <summary>Лента наборов идёт за набором выбранной таблицы: он в архиве — показан архив.</summary>
+    private void FollowActiveSet()
+    {
+        var archive = State.ActiveServerSet.IsArchived;
+
+        if (archive != _setArchiveMode)
+        {
+            _setArchiveMode = archive;
+            _setView?.Refresh();
+        }
+
+        SetStrip.SelectedItem = State.ActiveServerSet;
+        UpdateArchiveButton();
+    }
+
     /// <summary>Лента идёт за открытой вкладкой: открыта архивная — показан архив, и наоборот.</summary>
     private void FollowActive()
     {
@@ -918,26 +1197,36 @@ public partial class MainWindow : FluentWindow
     /// </summary>
     private void UpdateArchiveButton()
     {
-        var shown = State.ShowsWorkspaceTabs;
-        var archived = shown ? State.Tabs.Count(t => t.IsArchived) : 0;
+        var sets = State.ShowsServerSetTabs;
+        var shown = State.ShowsWorkspaceTabs || sets;
+        var mode = sets ? _setArchiveMode : _archiveMode;
+        var archived = sets ? State.ServerSets.Count(s => s.IsArchived)
+            : shown ? State.Tabs.Count(t => t.IsArchived) : 0;
+        var what = sets ? "набор" : "вкладку";
 
         ArchiveButton.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
         ArchiveRow.Height = shown ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
-        ArchiveIcon.Symbol = _archiveMode ? SymbolRegular.TabArrowLeft24 : SymbolRegular.Archive24;
+        ArchiveIcon.Symbol = mode ? SymbolRegular.TabArrowLeft24 : SymbolRegular.Archive24;
         ArchiveCount.Text = archived.ToString();
-        ArchiveCount.Visibility = archived > 0 && !_archiveMode ? Visibility.Visible : Visibility.Collapsed;
-        ArchiveButton.Opacity = archived > 0 || _archiveMode ? 1 : 0.6;
+        ArchiveCount.Visibility = archived > 0 && !mode ? Visibility.Visible : Visibility.Collapsed;
+        ArchiveButton.Opacity = archived > 0 || mode ? 1 : 0.6;
         ArchiveButton.Appearance = _dropOver ? ControlAppearance.Success
-            : _archiveMode ? ControlAppearance.Primary
+            : mode ? ControlAppearance.Primary
             : ControlAppearance.Secondary;
-        ArchiveButton.ToolTip = _archiveMode
-            ? "Открыт архив. Щелчок — назад к основной ленте. Правый щелчок по ярлыку или перетаскивание сюда — вернуть вкладку в основную ленту"
-            : "Архив вкладок: щелчок — открыть. Убрать сюда — правый щелчок по ярлыку или перетащить ярлык на этот значок";
+        ArchiveButton.ToolTip = mode
+            ? $"Открыт архив. Щелчок — назад к основной ленте. Правый щелчок по ярлыку или перетаскивание сюда — вернуть {what} в основную ленту"
+            : $"Архив: щелчок — открыть. Убрать сюда {what} — правый щелчок по ярлыку или перетащить ярлык на этот значок";
     }
 
     /// <summary>Значок переключает ленту: основная ↔ архив. Открывается вкладка, что была открыта там последней.</summary>
     private void OnArchiveClick(object sender, RoutedEventArgs e)
     {
+        if (State.ShowsServerSetTabs)
+        {
+            ToggleSetArchive();
+            return;
+        }
+
         var tabs = State.Tabs;
 
         if (_archiveMode)
@@ -957,6 +1246,32 @@ public partial class MainWindow : FluentWindow
         }
 
         State.ActiveWorkspace = _lastArchived.GetValueOrDefault(tabs) is { IsArchived: true } last && tabs.Contains(last)
+            ? last
+            : archived[0];
+    }
+
+    /// <summary>Значок на «Серверах»: основная лента наборов ↔ архив, в выбранной таблице — последний открытый там набор.</summary>
+    private void ToggleSetArchive()
+    {
+        var sets = State.ServerSets;
+
+        if (_setArchiveMode)
+        {
+            State.ActiveServerSet = _lastMainSet is { IsArchived: false } back && sets.Contains(back)
+                ? back
+                : sets.First(s => !s.IsArchived);
+            return;
+        }
+
+        var archived = sets.Where(s => s.IsArchived).ToList();
+
+        if (archived.Count == 0)
+        {
+            AppLog.Hint("Архив пуст. Сюда набор убирает правый щелчок по ярлыку или перетаскивание на этот значок.");
+            return;
+        }
+
+        State.ActiveServerSet = _lastArchivedSet is { IsArchived: true } last && sets.Contains(last)
             ? last
             : archived[0];
     }
@@ -1097,13 +1412,13 @@ public partial class MainWindow : FluentWindow
 
         if (!copy.AfterCopyEnabled)
         {
-            AppLog.Hint($"Команды после копирования выключены: «{copy.Title}».");
+            ActionLog.Info($"Команды после копирования выключены: «{copy.Title}»", null, AppSection.Files, copy);
             return;
         }
 
         if (copy.Personal is { } personal)
         {
-            AppLog.Hint($"Команды после копирования включены: «{copy.Title}».");
+            ActionLog.Info($"Команды после копирования включены: «{copy.Title}»", null, AppSection.Files, copy);
             return;
         }
 
@@ -1376,6 +1691,9 @@ public partial class MainWindow : FluentWindow
     private void OnClosing(object? sender, CancelEventArgs e)
     {
         var settings = AppState.Current.Settings;
+
+        // файл длинного лога, которого в буфере уже нет, — удалить; ещё лежащий там уберётся при следующем запуске
+        ClipboardText.Release();
 
         // развёрнутое или свёрнутое окно — запоминается его обычный размер, а не весь экран
         var bounds = WindowState == WindowState.Normal || RestoreBounds.IsEmpty

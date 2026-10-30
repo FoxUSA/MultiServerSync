@@ -25,6 +25,8 @@
           Зазор везде один — 4, как между страницей и нижней панелью: вбок, между рядами,
           у кнопок слева, до краёв окна и до страницы  -->
     <Style x:Key="WorkspaceTabStyle" TargetType="ListBoxItem">
+      <!--  цвет рамки выбранного ярлыка: у вкладок — акцент, у наборов серверов свой  -->
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
       <Setter Property="Margin" Value="0,2,4,2" />
       <Setter Property="Padding" Value="0" />
       <Setter Property="VerticalAlignment" Value="Top" />
@@ -47,7 +49,7 @@
               <ContentPresenter Margin="1" />
               <Border
                 x:Name="Ring"
-                BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
+                BorderBrush="{TemplateBinding BorderBrush}"
                 BorderThickness="2"
                 CornerRadius="6"
                 IsHitTestVisible="False"
@@ -118,6 +120,8 @@
       x:Key="ServerSetTabStyle"
       BasedOn="{StaticResource WorkspaceTabStyle}"
       TargetType="ListBoxItem">
+      <!--  выбранный набор — в тусклой оранжевой рамке, а выбранная таблица на «Серверах» — в синей  -->
+      <Setter Property="BorderBrush" Value="#80E07A1F" />
       <Setter Property="Opacity" Value="1" />
       <Setter Property="IsHitTestVisible" Value="True" />
     </Style>
@@ -563,14 +567,25 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="RadioButton">
-            <Border
-              x:Name="Bd"
-              Padding="{TemplateBinding Padding}"
-              Background="Transparent"
-              BorderBrush="Transparent"
-              BorderThickness="0,0,0,2">
-              <ContentPresenter VerticalAlignment="Center" />
-            </Border>
+            <Grid>
+              <Border
+                x:Name="Bd"
+                Padding="{TemplateBinding Padding}"
+                Background="Transparent"
+                BorderBrush="Transparent"
+                BorderThickness="0,0,0,2">
+                <ContentPresenter VerticalAlignment="Center" />
+              </Border>
+              <!--  рамка работы вкладок раздела, пока человек в другом: как у ярлыков — зелёная мигает, пока идёт,
+                    красная стоит, если кончилось ошибкой  -->
+              <Border
+                x:Name="StatusRing"
+                BorderBrush="#3FB950"
+                BorderThickness="2"
+                CornerRadius="6"
+                IsHitTestVisible="False"
+                Visibility="Collapsed" />
+            </Grid>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
                 <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
@@ -581,6 +596,30 @@
                 <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
                 <Setter Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
                 <Setter Property="FontWeight" Value="SemiBold" />
+              </Trigger>
+              <Trigger Property="controls:SectionMark.Status" Value="Running">
+                <Setter TargetName="StatusRing" Property="Visibility" Value="Visible" />
+                <Trigger.EnterActions>
+                  <BeginStoryboard x:Name="SectionBusyPulse">
+                    <Storyboard>
+                      <DoubleAnimation
+                        AutoReverse="True"
+                        RepeatBehavior="Forever"
+                        Storyboard.TargetName="StatusRing"
+                        Storyboard.TargetProperty="Opacity"
+                        From="1"
+                        To="0.25"
+                        Duration="0:0:0.7" />
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.EnterActions>
+                <Trigger.ExitActions>
+                  <StopStoryboard BeginStoryboardName="SectionBusyPulse" />
+                </Trigger.ExitActions>
+              </Trigger>
+              <Trigger Property="controls:SectionMark.Status" Value="Failed">
+                <Setter TargetName="StatusRing" Property="Visibility" Value="Visible" />
+                <Setter TargetName="StatusRing" Property="BorderBrush" Value="#E85C5C" />
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -598,19 +637,23 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
+            <!--  сервер «Проводника» — как отмеченный сервер в панели слева: тусклая оранжевая рамка
+                  на тусклом оранжевом фоне; под мышью и при нажатии фон чуть плотнее  -->
             <Border
               x:Name="Bd"
               Padding="10,5"
-              Background="Transparent"
-              CornerRadius="4">
+              Background="#26E07A1F"
+              BorderBrush="#80E07A1F"
+              BorderThickness="1"
+              CornerRadius="6">
               <ContentPresenter VerticalAlignment="Center" />
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                <Setter TargetName="Bd" Property="Background" Value="#38E07A1F" />
               </Trigger>
               <Trigger Property="IsPressed" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                <Setter TargetName="Bd" Property="Background" Value="#4AE07A1F" />
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -1086,7 +1129,6 @@
           ItemContainerStyle="{StaticResource ServerSetTabStyle}"
           ItemTemplate="{StaticResource CompactSetTemplate}"
           ItemsPanel="{StaticResource TabsPanel}"
-          ItemsSource="{Binding State.ServerSets}"
           MouseDoubleClick="OnRenameTab"
           PreviewMouseRightButtonDown="OnTabStripRightDown"
           ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -1313,11 +1355,14 @@
               ToolTip="Включено — отметить можно только один сервер: выбор другого снимает прежний. У команд и у копирования свой, запоминается для каждого набора серверов и отдельно для «Всех»" />
           </Border>
 
+          <!--  прокрутка выходит на 4 точки в поле карточки, а список возвращается на место: рамка отмеченного
+                сервера шире строки на те же 4 с каждого бока, и прокрутка её больше не обрезает  -->
           <ScrollViewer
             x:Name="PaneScroller"
             Grid.Row="2"
+            Margin="-4,0,-4,0"
             VerticalScrollBarVisibility="Auto">
-            <StackPanel>
+            <StackPanel Margin="4,0,4,0">
               <!--  «Отметить все» — первой строкой, как галочка в шапке таблицы на «Серверах»; под ней черта.
                     В одиночном выборе её нет  -->
               <Border
@@ -1346,6 +1391,15 @@
                         Background="Transparent"
                         BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
                         BorderThickness="0,1,0,0">
+                        <!--  отмеченный сервер — в тусклой оранжевой рамке на тусклом оранжевом фоне, шрифт на пункт
+                              крупнее: среди многих серверов он виден сразу. Рамка выходит на 4 точки в поле карточки,
+                              чтобы галочка и название не сдвигались вбок; сверху и снизу строка раздвигается, чтобы
+                              рамка не налезала на черты соседей  -->
+                        <Border
+                          x:Name="Pick"
+                          BorderBrush="Transparent"
+                          BorderThickness="1"
+                          CornerRadius="6">
                         <!--  замок — в конце строки: под мышью открытый, у закреплённого сервера закрытый всегда  -->
                         <DockPanel>
                         <Button
@@ -1401,6 +1455,7 @@
                           </StackPanel>
                         </CheckBox>
                         </DockPanel>
+                        </Border>
                       </Border>
                       <DataTemplate.Triggers>
                         <MultiDataTrigger>
@@ -1422,6 +1477,17 @@
                         <DataTrigger Binding="{Binding IsMuted}" Value="True">
                           <Setter TargetName="Item" Property="Opacity" Value="0.5" />
                         </DataTrigger>
+                        <MultiDataTrigger>
+                          <MultiDataTrigger.Conditions>
+                            <Condition Binding="{Binding IsSelected}" Value="True" />
+                            <Condition Binding="{Binding DataContext.State.PaneHighlightsPicks, RelativeSource={RelativeSource AncestorType=Window}}" Value="True" />
+                          </MultiDataTrigger.Conditions>
+                          <Setter TargetName="Pick" Property="Background" Value="#26E07A1F" />
+                          <Setter TargetName="Pick" Property="BorderBrush" Value="#80E07A1F" />
+                          <Setter TargetName="Pick" Property="Margin" Value="-4,2,-4,2" />
+                          <Setter TargetName="Pick" Property="Padding" Value="3,3,3,3" />
+                          <Setter TargetName="Check" Property="FontSize" Value="14" />
+                        </MultiDataTrigger>
                         <DataTrigger Binding="{Binding RelativeSource={RelativeSource PreviousData}}" Value="{x:Null}">
                           <Setter TargetName="Item" Property="Margin" Value="0" />
                           <Setter TargetName="Item" Property="Padding" Value="0" />
@@ -1564,7 +1630,7 @@
             строки под ярлыками нет, под таблицу и вывод остаётся больше места  -->
       <Grid Margin="12">
         <Grid>
-          <controls:ResultsView x:Name="Terminal" DataContext="{Binding State.ActiveWorkspace.ResultsBatch}" />
+          <controls:ResultsView x:Name="Terminal" DataContext="{Binding State.TerminalOwner.ResultsBatch}" />
           <controls:LogPanel x:Name="Log" Visibility="Collapsed" />
         </Grid>
 
@@ -1585,6 +1651,111 @@
             Checked="OnBottomTabChanged"
             Content="Журнал"
             Style="{StaticResource PanelTabStyle}" />
+
+          <!--  что из разовых действий открытого раздела писать в терминал и журнал; у каждого раздела своё  -->
+          <Button
+            x:Name="OutputPrefsButton"
+            Margin="2,0,0,0"
+            Click="OnOutputPrefs"
+            Style="{StaticResource RowPathButtonStyle}"
+            ToolTip="Что писать в терминал и журнал в этом разделе">
+            <ui:SymbolIcon FontSize="15" Symbol="Settings24" />
+          </Button>
+          <Popup
+            x:Name="OutputPrefsPopup"
+            AllowsTransparency="True"
+            Placement="Bottom"
+            PlacementTarget="{Binding ElementName=OutputPrefsButton}"
+            StaysOpen="False">
+            <Border
+              Margin="0,4,8,8"
+              Padding="14,12"
+              Background="{DynamicResource SolidBackgroundFillColorTertiaryBrush}"
+              BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
+              BorderThickness="1"
+              CornerRadius="8">
+              <Border.Effect>
+                <DropShadowEffect
+                  BlurRadius="12"
+                  Opacity="0.25"
+                  ShadowDepth="2" />
+              </Border.Effect>
+              <StackPanel>
+                <TextBlock
+                  x:Name="OutputPrefsTitle"
+                  Margin="0,0,0,8"
+                  FontSize="11"
+                  FontWeight="SemiBold"
+                  Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                  </Grid.RowDefinitions>
+
+                  <TextBlock
+                    Grid.Row="0"
+                    Grid.Column="1"
+                    Margin="16,0,0,4"
+                    FontSize="12"
+                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                    Text="Терминал" />
+                  <TextBlock
+                    Grid.Row="0"
+                    Grid.Column="2"
+                    Margin="16,0,0,4"
+                    FontSize="12"
+                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                    Text="Журнал" />
+
+                  <!--  строки, которых в разделе не бывает, прячутся: в «Команде» остаётся одна «Программа»  -->
+                  <TextBlock
+                    x:Name="ServerRowLabel"
+                    Grid.Row="1"
+                    VerticalAlignment="Center"
+                    FontSize="13"
+                    Text="Сервер"
+                    ToolTip="Действия на сервере: создать, удалить, переименовать, права, правка файла" />
+                  <CheckBox x:Name="ServerTerminalBox" Grid.Row="1" Grid.Column="1" Margin="16,2,0,2" HorizontalAlignment="Center" Click="OnOutputPrefChanged" />
+                  <CheckBox x:Name="ServerJournalBox" Grid.Row="1" Grid.Column="2" Margin="16,2,0,2" HorizontalAlignment="Center" Click="OnOutputPrefChanged" />
+
+                  <TextBlock
+                    x:Name="ComputerRowLabel"
+                    Grid.Row="2"
+                    VerticalAlignment="Center"
+                    FontSize="13"
+                    Text="Компьютер"
+                    ToolTip="Действия с файлами на этом компьютере и строки списка копирования" />
+                  <CheckBox x:Name="ComputerTerminalBox" Grid.Row="2" Grid.Column="1" Margin="16,2,0,2" HorizontalAlignment="Center" Click="OnOutputPrefChanged" />
+                  <CheckBox x:Name="ComputerJournalBox" Grid.Row="2" Grid.Column="2" Margin="16,2,0,2" HorizontalAlignment="Center" Click="OnOutputPrefChanged" />
+
+                  <TextBlock
+                    x:Name="ProgramRowLabel"
+                    Grid.Row="3"
+                    VerticalAlignment="Center"
+                    FontSize="13"
+                    Text="Программа"
+                    ToolTip="Списки, вкладки, наборы, исключения, окна команд, вставка из буфера" />
+                  <CheckBox x:Name="ProgramTerminalBox" Grid.Row="3" Grid.Column="1" Margin="16,2,0,2" HorizontalAlignment="Center" Click="OnOutputPrefChanged" />
+                  <CheckBox x:Name="ProgramJournalBox" Grid.Row="3" Grid.Column="2" Margin="16,2,0,2" HorizontalAlignment="Center" Click="OnOutputPrefChanged" />
+                </Grid>
+                <TextBlock
+                  MaxWidth="260"
+                  Margin="0,10,0,0"
+                  FontSize="11"
+                  Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                  Text="Ошибки и предупреждения пишутся всегда. Запуски по «Выполнить» это не трогает."
+                  TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+          </Popup>
         </StackPanel>
       </Grid>
     </Border>

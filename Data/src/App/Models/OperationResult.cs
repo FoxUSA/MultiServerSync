@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -192,7 +192,8 @@ public sealed class OperationResult : ObservableObject
                 _ => string.IsNullOrWhiteSpace(Message) ? "в очереди" : Message,
             };
 
-            return text.Length > 60 ? text[..57] + "…" : text;
+            // не резать по буквам: столбец сам ставит «…» по своей ширине, целиком — в подсказке и в выводе
+            return text;
         }
     }
 
@@ -214,6 +215,39 @@ public sealed class OperationResult : ObservableObject
     {
         get => _skipped;
         set { if (Set(ref _skipped, value)) { RaiseMany(nameof(StatusBrush), nameof(StatusSymbol), nameof(ShortStatus), nameof(StatusText)); } }
+    }
+
+    /// <summary>
+    /// Строка разового действия (создали папку, убрали строку из списка), а не запуска по
+    /// «Выполнить». Автокопия и CopyPass такие строки не берут: они про настоящие команды.
+    /// </summary>
+    public bool IsAction { get; set; }
+
+    /// <summary>
+    /// Номер запуска: у всех строк одного нажатия он один. По нему таблица ставит свежий запуск
+    /// сверху, а строки внутри запуска — в прежнем порядке. 0 — строка из файла старой версии.
+    /// </summary>
+    public long RunId { get; set; }
+
+    private bool _startsRun;
+
+    /// <summary>С этой строки в таблице начинается запуск, а над ней — предыдущий: черта сверху.</summary>
+    public bool StartsRun
+    {
+        get => _startsRun;
+        set => Set(ref _startsRun, value);
+    }
+
+    private bool _warning;
+
+    /// <summary>
+    /// Строка разового действия, которое прошло с оговоркой: не ошибка, но и не «успешно» —
+    /// оранжевый треугольник, сообщение целиком.
+    /// </summary>
+    public bool Warning
+    {
+        get => _warning;
+        set { if (Set(ref _warning, value)) { RaiseMany(nameof(StatusBrush), nameof(StatusSymbol), nameof(ShortStatus), nameof(StatusText)); } }
     }
 
     private bool _stopping;
@@ -605,11 +639,14 @@ public sealed class OperationResult : ObservableObject
     /// Строка под выводом: когда закончилось по местному времени и сколько шла работа на сервере.
     /// По дате и секундам видно, к какому запуску лог, — строки в терминале копятся.
     /// </summary>
-    public string? TimeLine => Duration <= TimeSpan.Zero
-        ? null
-        : _finishedUtc is { } finished
-            ? $"— выполнено {finished.ToLocalTime():dd.MM.yyyy HH:mm:ss} за {DurationText} —"
-            : $"— выполнено за {DurationText} —";
+    public string? TimeLine => IsAction
+        // разовое действие длительности не имеет — только когда сделано
+        ? _finishedUtc is { } done ? $"— сделано {done.ToLocalTime():dd.MM.yyyy HH:mm:ss} —" : null
+        : Duration <= TimeSpan.Zero
+            ? null
+            : _finishedUtc is { } finished
+                ? $"— выполнено {finished.ToLocalTime():dd.MM.yyyy HH:mm:ss} за {DurationText} —"
+                : $"— выполнено за {DurationText} —";
 
     public string Output
     {
@@ -653,6 +690,8 @@ public sealed class OperationResult : ObservableObject
 
     public SymbolRegular StatusSymbol => Status switch
     {
+        OperationStatus.Cancelled when Warning => SymbolRegular.Warning24,
+        OperationStatus.Success when Warning => SymbolRegular.Warning24,
         OperationStatus.Cancelled when Skipped => SymbolRegular.Circle24,
         OperationStatus.Success => SymbolRegular.CheckmarkCircle24,
         OperationStatus.Failed => SymbolRegular.ErrorCircle24,
@@ -664,6 +703,9 @@ public sealed class OperationResult : ObservableObject
     public Brush StatusBrush => Status switch
     {
         OperationStatus.Cancelled when Skipped => Grey,
+
+        // сделано, но с оговоркой (сравнение «не сошлось»): не ошибка программы — не красным
+        OperationStatus.Success when Warning => Orange,
         OperationStatus.Success => Green,
         OperationStatus.Failed => Red,
         OperationStatus.Running => Blue,
@@ -836,6 +878,9 @@ public sealed class OperationResult : ObservableObject
                 DurationMs = _duration.TotalMilliseconds,
                 FinishedUtc = _finishedUtc,
                 Skipped = _skipped,
+                Warning = _warning,
+                IsAction = IsAction,
+                RunId = RunId,
                 Output = _output.ToString(),
                 StepNumber = StepNumber,
                 StepCommand = StepCommand,
@@ -872,6 +917,9 @@ public sealed class OperationResult : ObservableObject
         };
 
         row._skipped = state.Skipped || state.Status == OperationStatus.Pending;
+        row._warning = state.Warning;
+        row.IsAction = state.IsAction;
+        row.RunId = state.RunId;
         row._duration = TimeSpan.FromMilliseconds(state.DurationMs);
         row._finishedUtc = state.FinishedUtc;
         row._output.Append(state.Output);

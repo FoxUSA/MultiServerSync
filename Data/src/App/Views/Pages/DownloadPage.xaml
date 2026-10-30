@@ -1,9 +1,10 @@
-<Page
+﻿<Page
   x:Class="MultiServerSync.Views.Pages.DownloadPage"
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:controls="clr-namespace:MultiServerSync.Views.Controls"
   xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+  xmlns:services="clr-namespace:MultiServerSync.Services"
   Title="Скачивание"
   ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
   ui:Design.Foreground="{DynamicResource TextFillColorPrimaryBrush}"
@@ -46,12 +47,19 @@
         Icon="{ui:SymbolIcon FolderOpen24}"
         Style="{StaticResource ToolButtonStyle}"
         ToolTip="Обзор сервера: выделите файлы и папки (Ctrl, Shift) и нажмите «Выбрать». Ничего не выделено — берётся открытая папка" />
+      <!--  заданы исключения — значок на зелёной плашке: видно, что не всё из списка скачается.
+            Плашка выходит влево на свой отступ, чтобы значок стоял там же, где у соседних кнопок  -->
       <ui:Button
         Click="OnExcludes"
-        Content="{Binding ExcludeCaption}"
-        Icon="{ui:SymbolIcon Filter24}"
         Style="{StaticResource ToolButtonStyle}"
-        ToolTip="Что не скачивать: маски вроде *.log, node_modules, .git" />
+        ToolTip="Что не скачивать: маски вроде *.log, node_modules, .git">
+        <StackPanel Orientation="Horizontal">
+          <Border Margin="-2,0,6,0" Style="{StaticResource ExcludeBadgeStyle}">
+            <ui:SymbolIcon Style="{StaticResource ExcludeGlyphStyle}" />
+          </Border>
+          <TextBlock VerticalAlignment="Center" Text="Исключения" />
+        </StackPanel>
+      </ui:Button>
       <ui:Button
         Click="OnRemoveSelected"
         Content="Убрать строки"
@@ -141,17 +149,46 @@
             Binding="{Binding ModifiedText}"
             Header="Дата изменения"
             SortMemberPath="Modified" />
-          <DataGridTextColumn
+          <!--  в конце строки — копировать и вписать путь, как в адресной строке «Проводника»  -->
+          <DataGridTemplateColumn
             Width="*"
             MinWidth="150"
-            Binding="{Binding Path}"
-            Header="Путь на сервере">
-            <DataGridTextColumn.ElementStyle>
-              <Style TargetType="TextBlock">
-                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
-              </Style>
-            </DataGridTextColumn.ElementStyle>
-          </DataGridTextColumn>
+            Header="Путь на сервере"
+            SortMemberPath="Path">
+            <DataGridTemplateColumn.CellTemplate>
+              <DataTemplate>
+                <DockPanel>
+                  <StackPanel
+                    Margin="4,0,2,0"
+                    DockPanel.Dock="Right"
+                    Orientation="Horizontal">
+                    <Button
+                      Click="OnCopyRowPath"
+                      Style="{StaticResource RowPathButtonStyle}"
+                      ToolTip="Копировать путь">
+                      <ui:SymbolIcon FontSize="14" Symbol="Copy24" />
+                    </Button>
+                    <Button
+                      Click="OnEditRowPath"
+                      Style="{StaticResource RowPathButtonStyle}"
+                      ToolTip="Вписать другой путь на этом сервере">
+                      <ui:SymbolIcon FontSize="14" Symbol="Edit24" />
+                    </Button>
+                    <Button
+                      Click="OnRemoveRow"
+                      Style="{StaticResource RowPathButtonStyle}"
+                      ToolTip="Убрать строку из списка — на сервере ничего не удаляется">
+                      <ui:SymbolIcon FontSize="14" Symbol="Delete24" />
+                    </Button>
+                  </StackPanel>
+                  <TextBlock
+                    VerticalAlignment="Center"
+                    Text="{Binding Path}"
+                    TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+              </DataTemplate>
+            </DataGridTemplateColumn.CellTemplate>
+          </DataGridTemplateColumn>
         </DataGrid.Columns>
       </DataGrid>
 
@@ -222,23 +259,32 @@
       Grid.Row="5"
       Margin="0,4,0,0"
       Orientation="Horizontal">
+      <!--  «Везде» решает, где пойдут «Выполнить» и «Сравнить»: эта вкладка или все вкладки раздела  -->
       <ui:Button
-        Margin="0,0,4,0"
+        Margin="0,0,8,0"
         Appearance="Primary"
         Click="OnDownload"
-        Content="Выполнить тут"
+        Content="Выполнить"
         Icon="{ui:SymbolIcon ArrowDownload24}"
         IsEnabled="{Binding CopyBatch.IsIdle}"
-        ToolTip="Пути этой вкладки с её отмеченных серверов" />
+        ToolTip="Пути этой вкладки с её отмеченных серверов. Со свитчем «Везде» — на всех вкладках сразу, после вопроса" />
 
       <ui:Button
-        x:Name="EverywhereButton"
-        Appearance="Danger"
-        Click="OnDownloadEverywhere"
-        Content="Выполнить везде"
-        Icon="{ui:SymbolIcon ArrowDownload24}"
+        x:Name="CompareButton"
+        Click="OnCompare"
+        Content="Сравнить"
+        Icon="{ui:SymbolIcon BranchCompare24}"
         IsEnabled="{Binding CopyBatch.IsIdle}"
-        ToolTip="Запускает скачивание сразу во всех вкладках — каждая со своими путями, папкой и серверами. Итог по каждой видно на её ярлыке." />
+        ToolTip="Сверяет файлы сервера с папкой здесь по правилам из параметров и ничего не скачивает. В статусе — сошлось или нет, что именно отличается — в выводе" />
+
+      <ui:ToggleSwitch
+        x:Name="EverywhereSwitch"
+        Margin="12,0,0,0"
+        VerticalAlignment="Center"
+        Content="Везде"
+        IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=Everywhere, Mode=TwoWay}"
+        Style="{StaticResource DangerSwitchStyle}"
+        ToolTip="Включено — «Выполнить» скачивает сразу на всех вкладках, каждая со своими путями, папкой и серверами, после вопроса. «Сравнить» тоже идёт на всех. Итог по каждой — на её ярлыке" />
     </StackPanel>
 
     <!--  плашка о нажатии — не в углу окна, а сразу справа от главной кнопки; место ставит Follow  -->

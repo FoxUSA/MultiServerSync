@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 
 namespace MultiServerSync.Models;
 
@@ -8,6 +8,26 @@ public sealed class SavedTransferItem
     public string Path { get; set; } = string.Empty;
 
     public bool IsSelected { get; set; } = true;
+}
+
+/// <summary>
+/// Шестерёнка у «Терминал / Журнал»: какие разовые действия раздела писать в терминал и в журнал.
+/// Сервер — действия на сервере, Компьютер — на этом ПК, Программа — списки, вкладки, наборы.
+/// Ошибки и предупреждения пишутся всегда, запуски «Выполнить» это не трогает.
+/// </summary>
+public sealed class ActionOutputPrefs
+{
+    public bool ServerTerminal { get; set; } = true;
+
+    public bool ServerJournal { get; set; } = true;
+
+    public bool ComputerTerminal { get; set; } = true;
+
+    public bool ComputerJournal { get; set; } = true;
+
+    public bool ProgramTerminal { get; set; } = true;
+
+    public bool ProgramJournal { get; set; } = true;
 }
 
 public sealed class AppSettings
@@ -129,6 +149,15 @@ public sealed class AppSettings
     public Dictionary<string, bool> CopyPassBySection { get; set; } = new();
 
     /// <summary>
+    /// Галочка «*.txt» по разделам: автокопия лога длиннее предела уходит в буфер файлом с полным
+    /// логом, а не обрезанным текстом. Работает вместе с «авто», как CopyPass.
+    /// </summary>
+    public Dictionary<string, bool> LogAsFileBySection { get; set; } = new();
+
+    /// <summary>Свитч «Везде» рядом с «Выполнить» — у каждого раздела свой: «Команда», «Копирование», «Скачивание».</summary>
+    public Dictionary<string, bool> EverywhereBySection { get; set; } = new();
+
+    /// <summary>
     /// Защита от двойного запуска: ту же команду сразу после окончания прошлой — только
     /// повторным нажатием. Выключается в «Настройках».
     /// </summary>
@@ -139,6 +168,21 @@ public sealed class AppSettings
     /// или вкладки копирования. Выключен, пока не включат переключателем в панели слева.
     /// </summary>
     public bool SmartMode { get; set; }
+
+    /// <summary>
+    /// Общие исключения — маски для всех вкладок «Копирования», «Проводника» и «Скачивания»,
+    /// вдобавок к своим у вкладки. С чистой установки пусто.
+    /// </summary>
+    public string GlobalExcludeMasks { get; set; } = string.Empty;
+
+    /// <summary>Окно исключений в прошлый раз закрыли на вкладке общих — там и откроется.</summary>
+    public bool ExcludeDialogOnGlobal { get; set; }
+
+    /// <summary>
+    /// Куда писать разовые действия — у каждого раздела своё (ключ — имя раздела). Раздела нет —
+    /// всё включено.
+    /// </summary>
+    public Dictionary<string, ActionOutputPrefs> ActionOutputBySection { get; set; } = new();
 
     /// <summary>
     /// Чем зашифрованы пароли серверов: Windows — учётной записью (по умолчанию, без вопросов),

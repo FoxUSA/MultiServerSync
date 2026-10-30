@@ -42,7 +42,10 @@ public sealed class LogEntry
 
     public string TimeText => Time.ToString("HH:mm:ss");
 
-    public string SectionText => Section switch
+    public string SectionText => NameOf(Section);
+
+    /// <summary>Раздел словами, как на кнопке: «Проводник», «Копирование».</summary>
+    public static string NameOf(AppSection? section) => section switch
     {
         AppSection.Servers => "Серверы",
         AppSection.Command => "Команда",

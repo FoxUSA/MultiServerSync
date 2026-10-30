@@ -130,6 +130,10 @@ public partial class ExplorerPage : Page
         DataContext = tab;
         tab.PropertyChanged += OnTabChanged;
 
+        // строки действий панелей — в терминал этой вкладки
+        LocalPane.Tab = tab;
+        RemotePane.Tab = tab;
+
         SetActive(tab.Explorer.RemoteActive ? RemotePane : LocalPane);
 
         await LocalPane.AttachAsync(Local, tab.Explorer.Local, LocalSource.ComputerTitle, ShellIcons.Computer);
@@ -562,7 +566,7 @@ public partial class ExplorerPage : Page
             }
         }
 
-        var where = source is RemoteSource remote ? remote.Server.Display : LocalSource.ComputerTitle;
+        var where = ActionLog.Where(source);
 
         // на сервере cp и mv идут молча, а большие папки — долго: сразу плашка, и строки встают
         // на новые места, как в проводнике Windows. Перечитывание после покажет, что вышло на самом деле.
@@ -575,6 +579,13 @@ public partial class ExplorerPage : Page
         }
 
         var label = $"{(move ? "перенос" : "копирование")}: {Count(items)} → {source.Display(targetDir)}";
+        var done = move ? "Перенесено" : "Скопировано";
+
+        // полный вывод строки: куда и что именно, по объекту на строку
+        var listed = items
+            .Select(i => (i.IsDirectory ? "папка " : "файл ") + source.Display(i.FullPath))
+            .Prepend($"куда: {source.Display(targetDir)}")
+            .ToList();
 
         try
         {
@@ -587,20 +598,23 @@ public partial class ExplorerPage : Page
                 label,
                 async () => notes = await source.CopyHereAsync(items, targetDir, move, replace));
 
-            foreach (var note in notes)
+            if (notes.Count == 0)
             {
-                AppLog.Warn(note, where);
+                ActionLog.Success($"{done}: {Count(items)} в {source.Display(targetDir)}", where, AppSection.Explorer, _tab, listed);
             }
-
-            AppLog.Success($"{(move ? "Перенесено" : "Скопировано")}: {Count(items)} в {source.Display(targetDir)}", where);
+            else
+            {
+                ActionLog.Warn($"{done} не всё: {Count(items)} в {source.Display(targetDir)}", where, AppSection.Explorer, _tab,
+                    notes.Prepend("не прошло:").Concat(listed));
+            }
         }
         catch (PendingFs.CancelledException ex)
         {
-            AppLog.Warn($"Отменено {label}: не прошло {ex.Label}.", where);
+            ActionLog.Warn($"Отменено {label}: не прошло {ex.Label}.", where, AppSection.Explorer, _tab, listed);
         }
         catch (Exception ex)
         {
-            AppLog.Error($"{(move ? "Перенос" : "Копирование")} не удалось: {ex.Message}", where);
+            ActionLog.Error($"{(move ? "Перенос" : "Копирование")} не удалось: {ex.Message}", where, AppSection.Explorer, _tab, listed);
         }
 
         // сервер закончил — дальше папки показывают то, что вышло на самом деле
@@ -721,6 +735,10 @@ public partial class ExplorerPage : Page
                 TransferOptionsDialog.Open(Window.GetWindow(this), tab);
                 break;
 
+            case PaneCommand.Excludes when _tab is { } tab:
+                ExcludeDialog.Edit(Window.GetWindow(this), tab, "копировании");
+                break;
+
             case PaneCommand.Open:
             case PaneCommand.OpenWith:
                 if (focused is null || focused.IsDirectory)
@@ -771,16 +789,24 @@ public partial class ExplorerPage : Page
                 var dir = focused is { IsDirectory: true } ? focused.FullPath : pane.CurrentPath;
                 var copyTab = AppState.Current.ActiveCopyTab;
                 copyTab.RemotePath = dir;
-                AppLog.Success($"Путь назначения вкладки «{copyTab.Title}» в «Копировании»: {dir}");
+                ActionLog.Success($"Путь назначения вкладки «{copyTab.Title}» в «Копировании»: {dir}", null, AppSection.Explorer, _tab,
+                    [$"сервер: {((RemoteSource)pane.Source).Server.Display}", $"путь: {dir}"]);
                 break;
 
             // строки встают ниже уже имеющихся в списке
             case PaneCommand.SendToDownload when pane.Source is RemoteSource remote && picked.Count > 0:
                 var downloadTab = AppState.Current.MainDownloadTab;
                 var added = downloadTab.AddDownloads(remote.Server, picked.Select(p => (p.FullPath, p.IsDirectory, p.Length, p.Modified)));
-                AppLog.Success(added > 0
-                    ? $"В список основной вкладки «{downloadTab.Title}» в «Скачивании» добавлено: {added}"
-                    : $"Всё выбранное уже есть в списке «{downloadTab.Title}» в «Скачивании».");
+                if (added > 0)
+                {
+                    ActionLog.Success($"В список основной вкладки «{downloadTab.Title}» в «Скачивании» добавлено: {added}",
+                        remote.Server, AppSection.Explorer, _tab, picked.Select(p => (p.IsDirectory ? "папка " : "файл ") + p.FullPath));
+                }
+                else
+                {
+                    AppLog.Hint($"Всё выбранное уже есть в списке «{downloadTab.Title}» в «Скачивании».");
+                }
+
                 break;
         }
     }

@@ -1,4 +1,4 @@
-<Page
+﻿<Page
   x:Class="MultiServerSync.Views.Pages.ServersPage"
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -10,30 +10,28 @@
   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
   ScrollViewer.CanContentScroll="False">
 
+  <Page.Resources>
+    <!--  колонки обеих таблиц одинаковые; галочка в шапке — своя у каждой, её ставит код  -->
+    <DataTemplate x:Key="RowCheckTemplate">
+      <CheckBox
+        MinWidth="0"
+        MinHeight="0"
+        Margin="0"
+        Padding="0"
+        HorizontalAlignment="Center"
+        VerticalAlignment="Center"
+        IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+    </DataTemplate>
+  </Page.Resources>
+
   <Grid Margin="12">
     <Grid.RowDefinitions>
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" MinHeight="150" />
     </Grid.RowDefinitions>
 
-    <TextBlock
-      Grid.Row="0"
-      Margin="0,0,0,4"
-      FontSize="24"
-      FontWeight="SemiBold"
-      Text="Серверы" />
-
-    <TextBlock
-      Grid.Row="1"
-      Margin="0,0,0,4"
-      Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-      Text="У каждой вкладки свой набор серверов. Выбранный набор целиком стоит в панели «Целевые сервера» слева. Галочки здесь — чтобы удалить, дублировать, скопировать в другой набор или проверить связь."
-      TextWrapping="Wrap" />
-
-    <!--  нижний зазор 4 до таблицы дают сами кнопки  -->
-    <WrapPanel Grid.Row="2">
+    <!--  кнопки общие: действуют на выбранную таблицу (в рамке). Нижний зазор 4 до таблиц дают сами кнопки  -->
+    <WrapPanel Grid.Row="0">
       <ui:Button
         Margin="0,0,4,4"
         Appearance="Primary"
@@ -42,10 +40,9 @@
         Icon="{ui:SymbolIcon Add24}" />
       <ui:Button
         Margin="0,0,4,4"
-        Click="OnImport"
-        Content="Импорт…"
-        Icon="{ui:SymbolIcon ArrowImport24}"
-        ToolTip="Серверы из ~/.ssh/config, PuTTY и WinSCP — без паролей" />
+        Click="OnTest"
+        Content="Проверить связь"
+        Icon="{ui:SymbolIcon PlugConnected24}" />
       <ui:Button
         Margin="0,0,4,4"
         Click="OnEdit"
@@ -58,109 +55,177 @@
         Icon="{ui:SymbolIcon Copy24}" />
       <ui:Button
         Margin="0,0,4,4"
-        Click="OnCopyToSets"
-        Content="Скопировать в…"
-        Icon="{ui:SymbolIcon CopyArrowRight24}"
-        ToolTip="Скопировать отмеченные серверы в другие наборы (вкладки)" />
-      <ui:Button
-        Margin="0,0,4,4"
         Click="OnDelete"
         Content="Удалить"
         Icon="{ui:SymbolIcon Delete24}" />
       <Separator Margin="0,0,4,4" />
       <ui:Button
+        x:Name="MoveButton"
         Margin="0,0,4,4"
-        Click="OnTest"
-        Content="Проверить связь"
-        Icon="{ui:SymbolIcon PlugConnected24}" />
+        Click="OnMove"
+        Content="Перенести"
+        Icon="{ui:SymbolIcon ArrowRight24}"
+        ToolTip="Отмеченные серверы выбранной таблицы уходят в набор другой таблицы" />
       <ui:Button
+        x:Name="CopyButton"
         Margin="0,0,4,4"
-        Click="OnExplorer"
-        Content="Проводник"
-        Icon="{ui:SymbolIcon Folder24}"
-        ToolTip="Открыть папки выделенного сервера рядом с папками этого компьютера" />
-      <TextBlock
-        x:Name="SelectionInfo"
-        Margin="0,0,0,4"
-        VerticalAlignment="Center"
-        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-        Text="{Binding State.ActiveServerSet.SelectionInfo}" />
+        Click="OnCopyOver"
+        Content="Скопировать"
+        Icon="{ui:SymbolIcon ArrowRight24}"
+        ToolTip="Копии отмеченных серверов выбранной таблицы — в набор другой таблицы, оригиналы остаются на месте" />
     </WrapPanel>
 
-    <DataGrid
-      x:Name="ServersGrid"
-      Grid.Row="3"
-      CellStyle="{StaticResource AppDataGridCellStyle}"
-      ColumnHeaderStyle="{StaticResource AppColumnHeaderStyle}"
-      ItemsSource="{Binding State.ActiveServerSet.Rows}"
-      MouseDoubleClick="OnGridDoubleClick"
-      RowStyle="{StaticResource AppDataGridRowStyle}"
-      Style="{StaticResource AppDataGridStyle}">
-      <DataGrid.Columns>
-        <DataGridTemplateColumn
-          Width="44"
-          CellStyle="{StaticResource FirstColumnCellStyle}"
-          HeaderStyle="{StaticResource FirstColumnHeaderStyle}">
-          <DataGridTemplateColumn.Header>
-            <CheckBox
-              MinWidth="0"
-              MinHeight="0"
-              Margin="0"
-              Padding="0"
-              HorizontalAlignment="Center"
-              VerticalAlignment="Center"
-              Click="OnToggleAll"
-              IsChecked="{Binding DataContext.State.ActiveServerSet.AllSelected, RelativeSource={RelativeSource AncestorType=DataGrid}, Mode=OneWay}"
-              IsThreeState="True"
-              ToolTip="Отметить или снять все серверы набора" />
-          </DataGridTemplateColumn.Header>
-          <DataGridTemplateColumn.CellTemplate>
-            <DataTemplate>
-              <CheckBox
-                MinWidth="0"
-                MinHeight="0"
-                Margin="0"
-                Padding="0"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-                IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-            </DataTemplate>
-          </DataGridTemplateColumn.CellTemplate>
-        </DataGridTemplateColumn>
+    <!--  два набора рядом, как панели «Проводника»: щелчок выбирает таблицу, ярлык наверху меняет её набор  -->
+    <Grid Grid.Row="1">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="4" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
 
-        <DataGridTextColumn
-          Width="Auto"
-          Binding="{Binding Server.Name}"
-          Header="Имя" />
-        <DataGridTextColumn
-          Width="Auto"
-          Binding="{Binding Server.Host}"
-          Header="IP / хост" />
-        <DataGridTextColumn
-          Width="Auto"
-          Binding="{Binding Server.Port}"
-          Header="Порт" />
-        <DataGridTextColumn
-          Width="Auto"
-          Binding="{Binding Server.User}"
-          Header="Пользователь" />
-        <DataGridTextColumn
-          Width="Auto"
-          Binding="{Binding Server.LastStatus}"
-          Header="Последняя проверка" />
-        <!--  заметки забирают всё оставшееся место; правятся в окне сервера  -->
-        <DataGridTextColumn
-          Width="*"
-          MinWidth="160"
-          Binding="{Binding Server.NotesLine}"
-          Header="Заметки" />
-      </DataGrid.Columns>
-    </DataGrid>
+      <Grid
+        Grid.Column="0"
+        Background="Transparent"
+        PreviewMouseDown="OnLeftPicked">
+        <DataGrid
+          x:Name="LeftGrid"
+          CellStyle="{StaticResource AppDataGridCellStyle}"
+          ColumnHeaderStyle="{StaticResource AppColumnHeaderStyle}"
+          GotKeyboardFocus="OnLeftPicked"
+          ItemsSource="{Binding State.ServersLeft.Rows}"
+          MouseDoubleClick="OnGridDoubleClick"
+          RowStyle="{StaticResource AppDataGridRowStyle}"
+          Style="{StaticResource AppDataGridStyle}"
+          VerticalScrollBarVisibility="Auto">
+          <DataGrid.Columns>
+            <DataGridTemplateColumn
+              Width="44"
+              CellStyle="{StaticResource FirstColumnCellStyle}"
+              CellTemplate="{StaticResource RowCheckTemplate}"
+              HeaderStyle="{StaticResource FirstColumnHeaderStyle}">
+              <DataGridTemplateColumn.Header>
+                <CheckBox
+                  MinWidth="0"
+                  MinHeight="0"
+                  Margin="0"
+                  Padding="0"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  Click="OnToggleAllLeft"
+                  IsChecked="{Binding DataContext.State.ServersLeft.AllSelected, RelativeSource={RelativeSource AncestorType=DataGrid}, Mode=OneWay}"
+                  IsThreeState="True"
+                  ToolTip="Отметить или снять все серверы набора" />
+              </DataGridTemplateColumn.Header>
+            </DataGridTemplateColumn>
+            <DataGridTextColumn
+              Width="Auto"
+              Binding="{Binding Server.Name}"
+              Header="Имя" />
+            <DataGridTextColumn
+              Width="Auto"
+              Binding="{Binding Server.Host}"
+              Header="IP / хост" />
+            <DataGridTextColumn
+              Width="Auto"
+              Binding="{Binding Server.Port}"
+              Header="Порт" />
+            <DataGridTextColumn
+              Width="Auto"
+              Binding="{Binding Server.User}"
+              Header="Пользователь" />
+            <!--  заметки забирают всё оставшееся место; правятся в окне сервера  -->
+            <DataGridTextColumn
+              Width="*"
+              MinWidth="100"
+              Binding="{Binding Server.NotesLine}"
+              Header="Заметки" />
+          </DataGrid.Columns>
+        </DataGrid>
 
-    <!--  плашка о нажатии — не в углу окна, а сразу справа от главной кнопки; место ставит Follow  -->
+        <!--  выбранная таблица — в синей рамке акцента, её набор наверху — в оранжевой; мышь рамка не ловит  -->
+        <Border
+          x:Name="LeftFrame"
+          BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
+          BorderThickness="2"
+          CornerRadius="4"
+          IsHitTestVisible="False"
+          Visibility="Collapsed" />
+      </Grid>
+
+      <Grid
+        Grid.Column="2"
+        Background="Transparent"
+        PreviewMouseDown="OnRightPicked">
+        <DataGrid
+          x:Name="RightGrid"
+          CellStyle="{StaticResource AppDataGridCellStyle}"
+          ColumnHeaderStyle="{StaticResource AppColumnHeaderStyle}"
+          GotKeyboardFocus="OnRightPicked"
+          ItemsSource="{Binding State.ServersRight.Rows}"
+          MouseDoubleClick="OnGridDoubleClick"
+          RowStyle="{StaticResource AppDataGridRowStyle}"
+          Style="{StaticResource AppDataGridStyle}"
+          VerticalScrollBarVisibility="Auto">
+          <DataGrid.Columns>
+            <DataGridTemplateColumn
+              Width="44"
+              CellStyle="{StaticResource FirstColumnCellStyle}"
+              CellTemplate="{StaticResource RowCheckTemplate}"
+              HeaderStyle="{StaticResource FirstColumnHeaderStyle}">
+              <DataGridTemplateColumn.Header>
+                <CheckBox
+                  MinWidth="0"
+                  MinHeight="0"
+                  Margin="0"
+                  Padding="0"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  Click="OnToggleAllRight"
+                  IsChecked="{Binding DataContext.State.ServersRight.AllSelected, RelativeSource={RelativeSource AncestorType=DataGrid}, Mode=OneWay}"
+                  IsThreeState="True"
+                  ToolTip="Отметить или снять все серверы набора" />
+              </DataGridTemplateColumn.Header>
+            </DataGridTemplateColumn>
+            <DataGridTextColumn
+              Width="Auto"
+              Binding="{Binding Server.Name}"
+              Header="Имя" />
+            <DataGridTextColumn
+              Width="Auto"
+              Binding="{Binding Server.Host}"
+              Header="IP / хост" />
+            <DataGridTextColumn
+              Width="Auto"
+              Binding="{Binding Server.Port}"
+              Header="Порт" />
+            <DataGridTextColumn
+              Width="Auto"
+              Binding="{Binding Server.User}"
+              Header="Пользователь" />
+            <DataGridTextColumn
+              Width="*"
+              MinWidth="100"
+              Binding="{Binding Server.NotesLine}"
+              Header="Заметки" />
+          </DataGrid.Columns>
+        </DataGrid>
+
+        <Border
+          x:Name="RightFrame"
+          BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
+          BorderThickness="2"
+          CornerRadius="4"
+          IsHitTestVisible="False"
+          Visibility="Collapsed" />
+      </Grid>
+    </Grid>
+
+    <!--  плашка о нажатии — внутри таблиц, у нижнего края: главной кнопки, за которой встать, тут нет  -->
     <controls:ActionToast
       x:Name="BarToast"
-      Grid.RowSpan="9"
-      Grid.ColumnSpan="2" />
+      Grid.Row="1"
+      Margin="0,0,16,16"
+      HorizontalAlignment="Right"
+      VerticalAlignment="Bottom" />
   </Grid>
 </Page>

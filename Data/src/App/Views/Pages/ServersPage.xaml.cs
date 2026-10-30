@@ -1,16 +1,18 @@
+﻿using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using MultiServerSync.Models;
 using MultiServerSync.Services;
 using MultiServerSync.Views.Dialogs;
+using Wpf.Ui.Controls;
 
 namespace MultiServerSync.Views.Pages;
 
 /// <summary>
-/// Серверы выбранного набора (вкладки этого раздела) — здесь их заводят, правят и удаляют.
-/// Галочки в таблице нужны только для действий на этой странице: удалить, дублировать,
-/// проверить связь. Куда копировать и где выполнять команду, отмечается в панели слева.
+/// Наборы серверов — две таблицы рядом, как панели «Проводника». Щелчок выбирает таблицу
+/// (она в рамке), ярлык наверху меняет её набор, кнопки действуют на неё. Галочки нужны
+/// только для действий на этой странице: удалить, дублировать, перенести, проверить связь.
 /// </summary>
 public partial class ServersPage : Page, Controls.IToastHost
 {
@@ -18,13 +20,14 @@ public partial class ServersPage : Page, Controls.IToastHost
     {
         InitializeComponent();
 
-        // плашка — за последним в ряду кнопок: за подписью «отмечено …» или, если её нет, за «Проводником»
-        BarToast.Follow(SelectionInfo);
-
         DataContext = this;
 
-        // порядок в таблице выбирается щелчком по заголовку и не сбрасывается
-        GridSort.Keep(ServersGrid, "servers");
+        // порядок в таблицах выбирается щелчком по заголовку и не сбрасывается; колонки у них одни
+        GridSort.Keep(LeftGrid, "servers");
+        GridSort.Keep(RightGrid, "servers");
+
+        AppState.Current.PropertyChanged += OnStateChanged;
+        ShowPicked();
 
         // ярлыки наверху показывают наборы серверов, пока открыт этот раздел
         IsVisibleChanged += (_, _) =>
@@ -36,13 +39,38 @@ public partial class ServersPage : Page, Controls.IToastHost
         };
     }
 
-    /// <summary>Общее состояние: через него таблица смотрит на выбранный набор.</summary>
+    /// <summary>Общее состояние: через него таблицы смотрят на свои наборы.</summary>
     public AppState State => AppState.Current;
 
+    /// <summary>Набор выбранной таблицы.</summary>
     private ServerSet Set => AppState.Current.ActiveServerSet;
 
+    private System.Windows.Controls.DataGrid PickedGrid => AppState.Current.ServersRightActive ? RightGrid : LeftGrid;
+
+    private void OnStateChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(AppState.ServersRightActive))
+        {
+            ShowPicked();
+        }
+    }
+
+    /// <summary>Рамка у выбранной таблицы, стрелка «Перенести» — в сторону другой.</summary>
+    private void ShowPicked()
+    {
+        var right = AppState.Current.ServersRightActive;
+        LeftFrame.Visibility = right ? Visibility.Collapsed : Visibility.Visible;
+        RightFrame.Visibility = right ? Visibility.Visible : Visibility.Collapsed;
+        MoveButton.Icon = new SymbolIcon(right ? SymbolRegular.ArrowLeft24 : SymbolRegular.ArrowRight24);
+        CopyButton.Icon = new SymbolIcon(right ? SymbolRegular.ArrowLeft24 : SymbolRegular.ArrowRight24);
+    }
+
+    private void OnLeftPicked(object sender, RoutedEventArgs e) => AppState.Current.ServersRightActive = false;
+
+    private void OnRightPicked(object sender, RoutedEventArgs e) => AppState.Current.ServersRightActive = true;
+
     /// <summary>
-    /// С чем работают кнопки: отмеченные галочкой, а если галочек нет — выделенные строки.
+    /// С чем работают кнопки: отмеченные галочкой в выбранной таблице, а если галочек нет — выделенные строки.
     /// </summary>
     private IReadOnlyList<ServerEntry> Picked
     {
@@ -52,7 +80,7 @@ public partial class ServersPage : Page, Controls.IToastHost
 
             return checkedOnes.Count > 0
                 ? checkedOnes
-                : ServersGrid.SelectedItems.OfType<ServerCheck>().Select(c => c.Server).ToList();
+                : PickedGrid.SelectedItems.OfType<ServerCheck>().Select(c => c.Server).ToList();
         }
     }
 
@@ -60,17 +88,20 @@ public partial class ServersPage : Page, Controls.IToastHost
     /// Клик по галочке в шапке. Состояние считаем сами, а не через двустороннюю привязку:
     /// трёхпозиционный CheckBox иначе на первом же клике из «частично» уходит не туда.
     /// </summary>
-    private void OnToggleAll(object sender, RoutedEventArgs e) => Set.ToggleAll();
+    private void OnToggleAllLeft(object sender, RoutedEventArgs e) => AppState.Current.ServersLeft.ToggleAll();
+
+    private void OnToggleAllRight(object sender, RoutedEventArgs e) => AppState.Current.ServersRight.ToggleAll();
 
     private void OnAdd(object sender, RoutedEventArgs e)
     {
+        var set = Set;
         var entry = new ServerEntry
         {
             Name = string.Empty,
             Host = string.Empty,
             Port = 22,
             User = "root",
-            SetId = Set.Id,
+            SetId = set.Id,
         };
 
         if (!Edit(entry, isNew: true))
@@ -81,56 +112,30 @@ public partial class ServersPage : Page, Controls.IToastHost
         AppState.Current.Servers.Add(entry);
 
         // новый сервер приходит без отметки — выбирает его сам человек; строку только показываем
-        if (Set.Rows.FirstOrDefault(c => ReferenceEquals(c.Server, entry)) is { } row)
+        if (set.Rows.FirstOrDefault(c => ReferenceEquals(c.Server, entry)) is { } row)
         {
-            ServersGrid.SelectedItem = row;
-            ServersGrid.ScrollIntoView(row);
+            PickedGrid.SelectedItem = row;
+            PickedGrid.ScrollIntoView(row);
         }
 
         AppState.Current.SaveServers();
-        AppLog.Success($"Добавлен сервер в набор «{Set.Title}»: {entry.Display}");
+        ActionLog.Success($"Добавлен сервер в набор «{set.Title}»: {entry.Display}", entry, AppSection.Servers, null,
+            [$"пользователь: {entry.User}", $"адрес: {entry.Host}:{entry.Port}"]);
     }
 
-    /// <summary>Импорт из ~/.ssh/config, PuTTY и WinSCP — в открытый набор, без отметок.</summary>
-    private void OnImport(object sender, RoutedEventArgs e)
+    private void OnEdit(object sender, RoutedEventArgs e) => EditSelected(PickedGrid);
+
+    private void OnGridDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        var found = ServerImport.FindAll();
-
-        if (found.Count == 0)
+        if (sender is System.Windows.Controls.DataGrid grid)
         {
-            AppLog.Hint("Импортировать нечего: в ~/.ssh/config, PuTTY и WinSCP серверов не найдено.", LogLevel.Warning);
-            return;
+            EditSelected(grid);
         }
-
-        if (ImportServersDialog.Ask(Window.GetWindow(this), found, Set.Title) is not { Count: > 0 } picked)
-        {
-            return;
-        }
-
-        foreach (var c in picked)
-        {
-            AppState.Current.Servers.Add(new ServerEntry
-            {
-                Name = c.Name,
-                Host = c.Host,
-                Port = c.Port,
-                User = c.User,
-                KeyPath = c.KeyPath,
-                SetId = Set.Id,
-            });
-        }
-
-        AppState.Current.SaveServers();
-        AppLog.Success($"Импортировано серверов в набор «{Set.Title}»: {picked.Count} ({string.Join(", ", picked.Select(c => c.Source).Distinct())}).");
     }
 
-    private void OnEdit(object sender, RoutedEventArgs e) => EditSelected();
-
-    private void OnGridDoubleClick(object sender, MouseButtonEventArgs e) => EditSelected();
-
-    private void EditSelected()
+    private void EditSelected(System.Windows.Controls.DataGrid grid)
     {
-        if (ServersGrid.SelectedItem is not ServerCheck { Server: { } entry })
+        if (grid.SelectedItem is not ServerCheck { Server: { } entry })
         {
             return;
         }
@@ -138,7 +143,8 @@ public partial class ServersPage : Page, Controls.IToastHost
         if (Edit(entry, isNew: false))
         {
             AppState.Current.SaveServers();
-            AppLog.Info($"Изменён сервер: {entry.Display}");
+            ActionLog.Info($"Изменён сервер: {entry.Display}", entry, AppSection.Servers, null,
+                [$"пользователь: {entry.User}", $"адрес: {entry.Host}:{entry.Port}"]);
         }
     }
 
@@ -150,12 +156,13 @@ public partial class ServersPage : Page, Controls.IToastHost
 
     private void OnDuplicate(object sender, RoutedEventArgs e)
     {
+        var set = Set;
         var picked = Picked;
 
         foreach (var s in picked)
         {
             var copy = s.Clone();
-            copy.SetId = Set.Id;
+            copy.SetId = set.Id;
             copy.Name = s.Name + " (копия)";
             AppState.Current.Servers.Add(copy);
         }
@@ -163,77 +170,84 @@ public partial class ServersPage : Page, Controls.IToastHost
         if (picked.Count > 0)
         {
             AppState.Current.SaveServers();
-            AppLog.Info($"Скопировано записей: {picked.Count}.");
+            ActionLog.Info($"Продублировано серверов в наборе «{set.Title}»: {picked.Count}", null, AppSection.Servers, null,
+                picked.Select(s => $"{s.Display} → {s.Name} (копия)"));
         }
     }
 
     /// <summary>
-    /// Копии отмеченных серверов уходят в выбранные наборы. Сервер с тем же адресом,
-    /// портом и пользователем, что уже стоит в наборе, второй раз не добавляется.
+    /// «Перенести» отправляет отмеченные серверы выбранной таблицы в набор другой, «Скопировать»
+    /// кладёт туда копии, а оригиналы оставляет. Сервер с тем же адресом, портом и пользователем,
+    /// что уже стоит в том наборе, второй раз не кладётся и остаётся на месте.
     /// </summary>
-    private void OnCopyToSets(object sender, RoutedEventArgs e)
+    private void OnMove(object sender, RoutedEventArgs e) => Transfer(keep: false);
+
+    private void OnCopyOver(object sender, RoutedEventArgs e) => Transfer(keep: true);
+
+    private void Transfer(bool keep)
     {
+        var state = AppState.Current;
+        var action = keep ? "Скопировать" : "Перенести";
+        var from = Set;
+        var to = state.ServersOther;
         var picked = Picked;
 
         if (picked.Count == 0)
         {
-            AppLog.Hint("Скопировать в набор: не отмечено ни одного сервера.", LogLevel.Warning);
+            AppLog.Hint($"{action}: не отмечено ни одного сервера.", LogLevel.Warning);
             return;
         }
 
-        var others = AppState.Current.ServerSets.Where(s => !ReferenceEquals(s, Set)).ToList();
-
-        if (others.Count == 0)
+        if (ReferenceEquals(from, to))
         {
-            AppLog.Hint("Скопировать в набор: других наборов нет — сначала добавьте вкладку плюсом слева вверху.", LogLevel.Warning);
+            AppLog.Hint($"В обеих таблицах набор «{from.Title}» — откройте в другой таблице другой набор.", LogLevel.Warning);
             return;
         }
 
-        var targets = CopyToSetDialog.Ask(Window.GetWindow(this), picked.Count, others);
-
-        if (targets.Count == 0)
-        {
-            return;
-        }
-
-        var added = 0;
+        var done = new List<ServerEntry>();
         var skipped = 0;
 
-        foreach (var target in targets)
+        foreach (var s in picked)
         {
-            foreach (var s in picked)
+            if (to.Servers.Any(t => SameServer(t, s)))
             {
-                if (target.Servers.Any(t => SameServer(t, s)))
-                {
-                    skipped++;
-                    continue;
-                }
+                skipped++;
+                continue;
+            }
 
+            if (keep)
+            {
                 var copy = s.Clone();
-                copy.SetId = target.Id;
+                copy.SetId = to.Id;
                 copy.IsSelected = false;
-                AppState.Current.Servers.Add(copy);
-                added++;
+                state.Servers.Add(copy);
+            }
+            else
+            {
+                s.SetId = to.Id;
+            }
+
+            done.Add(s);
+        }
+
+        if (done.Count > 0)
+        {
+            if (keep)
+            {
+                state.SaveServers();
+            }
+            else
+            {
+                state.ServersRegrouped();
             }
         }
 
-        if (added > 0)
-        {
-            AppState.Current.SaveServers();
-        }
-
-        var where = string.Join(", ", targets.Select(t => $"«{t.Title}»"));
         var note = skipped > 0 ? $", уже были там: {skipped}" : string.Empty;
-        var message = $"Скопировано серверов в {where}: {added}{note}.";
+        var verb = keep ? "Скопировано" : "Перенесено";
 
-        if (added > 0)
-        {
-            AppLog.Success(message);
-        }
-        else
-        {
-            AppLog.Info(message);
-        }
+        ActionLog.Write(done.Count > 0 ? LogLevel.Success : LogLevel.Info,
+            $"{verb} серверов из «{from.Title}» в «{to.Title}»: {done.Count}{note}.", null, AppSection.Servers, null,
+            done.Select(s => s.Display));
     }
 
     private static bool SameServer(ServerEntry a, ServerEntry b) =>
@@ -243,6 +257,7 @@ public partial class ServersPage : Page, Controls.IToastHost
 
     private void OnDelete(object sender, RoutedEventArgs e)
     {
+        var set = Set;
         var picked = Picked;
 
         if (picked.Count == 0)
@@ -255,7 +270,7 @@ public partial class ServersPage : Page, Controls.IToastHost
 
         if (!ConfirmDialog.Ask(
                 Window.GetWindow(this),
-                $"Удалить серверы ({picked.Count}) из набора «{Set.Title}»?",
+                $"Удалить серверы ({picked.Count}) из набора «{set.Title}»?",
                 names,
                 "Удалить",
                 enterConfirms: true))
@@ -269,32 +284,16 @@ public partial class ServersPage : Page, Controls.IToastHost
         }
 
         AppState.Current.SaveServers();
-        AppLog.Warn($"Удалено записей: {picked.Count}.");
-    }
-
-    /// <summary>Проводник на выделенном (или первом отмеченном) сервере — в основной вкладке проводника.</summary>
-    private void OnExplorer(object sender, RoutedEventArgs e)
-    {
-        var server = (ServersGrid.SelectedItem as ServerCheck)?.Server ?? Picked.FirstOrDefault();
-
-        if (server is null)
-        {
-            AppLog.Hint("Выделите сервер в таблице — его папки откроются в «Проводнике».", LogLevel.Warning);
-            return;
-        }
-
-        var tab = AppState.Current.ExplorerFor(server);
-        AppLog.Hint($"Проводник: {server.PaneLabel}.");
-        AppState.Current.ShowTab(tab);
+        ActionLog.Warn($"Удалено серверов из набора «{set.Title}»: {picked.Count}", null, AppSection.Servers, null,
+            picked.Select(s => s.Display));
     }
 
     private async void OnTest(object sender, RoutedEventArgs e)
     {
         var picked = Picked;
 
-        // результат уходит в терминал внизу окна — там же, где вывод команд и копирования,
-        // а если проверять нечего, сама операция развернёт журнал с причиной
-        await AppState.Current.ActiveWorkspace.RunCheckAsync(picked);
+        // у раздела свой терминал: ответ проверки не попадает во вкладки копирования
+        await AppState.Current.ServersDesk.RunCheckAsync(picked);
     }
 
     Controls.ActionToast Controls.IToastHost.PageToast => BarToast;

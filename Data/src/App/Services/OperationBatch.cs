@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -21,6 +21,9 @@ public sealed class OperationBatch : ObservableObject
     private Action<IReadOnlyList<ServerEntry>>? _beforeRetry;
     private Action? _afterRetry;
     private string _operationName = string.Empty;
+
+    /// <summary>Как называется последний запуск: «Копирование · вкладка», «Сравнение · вкладка».</summary>
+    public string OperationName => _operationName;
 
     /// <summary>Прогоны других вкладок, если этот прогон — сводный.</summary>
     private IReadOnlyList<OperationBatch> _sources = [];
@@ -304,13 +307,25 @@ public sealed class OperationBatch : ObservableObject
     /// Весь вывод одним текстом — по одному блоку на сервер, как в терминале:
     /// «Сервер: Имя (адрес):», под ним строка команды и её ответ.
     /// </summary>
-    public string BuildTranscript()
+    /// <param name="maxLines">Автокопия: не длиннее стольких строк на сервер, середина вырезается. Null — целиком.</param>
+    /// <param name="runsOnly">Автокопия: только строки запусков, без строк разовых действий.</param>
+    public string BuildTranscript(int? maxLines = null, bool runsOnly = false)
     {
         var text = new StringBuilder();
 
         foreach (var result in Results)
         {
+            if (runsOnly && result.IsAction)
+            {
+                continue;
+            }
+
             var output = result.Output.TrimEnd();
+
+            if (maxLines is { } max)
+            {
+                output = LogTrim.Lines(output, max, "Все логи");
+            }
 
             // название вкладки — только в сводке, где рядом строки разных вкладок
             text.AppendLine(result.CopyHeader(IsSummary));
@@ -650,6 +665,7 @@ public sealed class OperationBatch : ObservableObject
         // Только свою: копирование, стартовавшее рядом на тот же сервер, чужую ждущую строку не берёт
         var run = new List<OperationResult>();
         var claimed = ClaimedRow.Value;
+        var runId = NextRunId();
 
         foreach (var server in servers)
         {
@@ -670,6 +686,7 @@ public sealed class OperationBatch : ObservableObject
 
             row.Batch = this;
             row.Work = work;
+            row.RunId = runId;
             prepare?.Invoke(row);
             run.Add(row);
         }
@@ -681,6 +698,14 @@ public sealed class OperationBatch : ObservableObject
     private readonly List<OperationResult> _waiting = [];
 
     /// <summary>
+    /// Номера запусков растут от времени старта программы: номера строк, прочитанных из файла после
+    /// перезапуска, всегда меньше новых — свежие встают выше.
+    /// </summary>
+    private static long _runCounter = DateTime.UtcNow.Ticks;
+
+    public static long NextRunId() => Interlocked.Increment(ref _runCounter);
+
+    /// <summary>
     /// Строка «в очереди», которую займёт запуск из этого хода работы. AsyncLocal: значение видно
     /// только вызовам, ушедшим из того места, где его поставили, — соседний запуск его не увидит.
     /// </summary>
@@ -689,9 +714,53 @@ public sealed class OperationBatch : ObservableObject
     /// <summary>Запуск встал в очередь — его строка «в очереди · что и куда» появляется сразу.</summary>
     public OperationResult AddWaiting(ServerEntry server, string what)
     {
-        var row = new OperationResult(server, Scope) { Message = "в очереди · " + what, Batch = this };
+        var row = new OperationResult(server, Scope) { Message = "в очереди · " + what, Batch = this, RunId = NextRunId() };
         _waiting.Add(row);
         Results.Add(row);
+        return row;
+    }
+
+    /// <summary>
+    /// Строка разового действия, уже законченного: создали папку, убрали строку из списка, сменили
+    /// исключения. Ложится в тот же прогон, что и копирование, — в терминале вкладки видно всё подряд.
+    /// Старые строки уходят по тому же правилу, что перед новым прогоном. Только из потока окна.
+    /// </summary>
+    public OperationResult AddAction(ServerEntry where, LogLevel level, string summary, IReadOnlyList<string> lines)
+    {
+        var life = AppState.Current.OutputLife;
+
+        if (!IsRunning && !KeepLog && (_lifeFrom is not { } last || DateTime.Now - last > life))
+        {
+            Results.Clear();
+
+            foreach (var waiting in _waiting)
+            {
+                Results.Add(waiting);
+            }
+        }
+
+        var row = new OperationResult(where, Scope) { Batch = this, IsAction = true, RunId = NextRunId() };
+
+        // в выводе — сначала сама суть, под ней подробности по строке на объект
+        row.Append(summary);
+
+        foreach (var line in lines)
+        {
+            row.Append(line);
+        }
+
+        row.Message = summary;
+        row.Warning = level == LogLevel.Warning;
+        row.Status = level switch
+        {
+            LogLevel.Error => OperationStatus.Failed,
+            LogLevel.Warning => OperationStatus.Cancelled,
+            _ => OperationStatus.Success,
+        };
+
+        Results.Add(row);
+        _lifeFrom = DateTime.Now;
+        TerminalStore.MarkDirty();
         return row;
     }
 

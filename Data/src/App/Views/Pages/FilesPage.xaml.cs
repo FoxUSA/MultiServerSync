@@ -18,7 +18,7 @@ public partial class FilesPage : Page, Controls.IToastHost
     public FilesPage()
     {
         InitializeComponent();
-        BarToast.Follow(EverywhereButton);
+        BarToast.Follow(EverywhereSwitch);
 
         // история путей сквозная — одна на все вкладки
         RemotePathBox.ItemsSource = AppState.Current.Settings.RemotePathHistory;
@@ -90,22 +90,89 @@ public partial class FilesPage : Page, Controls.IToastHost
 
     private void OnExcludes(object sender, RoutedEventArgs e)
     {
-        if (Workspace is not { } workspace
-            || ExcludeDialog.Ask(Window.GetWindow(this), workspace.ExcludeMasks) is not { } masks
-            || masks == workspace.ExcludeMasks)
+        if (Workspace is { } workspace)
+        {
+            ExcludeDialog.Edit(Window.GetWindow(this), workspace, "копировании");
+        }
+    }
+
+    /// <summary>Значок в конце строки: путь строки — в буфер.</summary>
+    private void OnCopyItemPath(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: TransferItem item } && ClipboardText.Copy(item.FullPath))
+        {
+            AppLog.Hint("Путь скопирован: " + item.FullPath);
+        }
+    }
+
+    /// <summary>Значок в конце строки: вписать другой путь — строка встаёт на то же место.</summary>
+    private void OnEditItemPath(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: TransferItem item } || Workspace is not { } workspace)
         {
             return;
         }
 
-        workspace.ExcludeMasks = masks;
-        var count = Core.ExcludeRules.Count(masks);
-        AppLog.Hint(count > 0 ? $"Исключения при копировании: {count}." : "Исключения при копировании сняты.");
+        var dialog = new InputDialog("Путь строки", "Файл или папка на компьютере:", item.FullPath) { Owner = Window.GetWindow(this) };
+
+        if (dialog.ShowDialog() != true || dialog.Value.Length == 0
+            || string.Equals(dialog.Value, item.FullPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (workspace.ReplaceItemPath(item, dialog.Value) is { } problem)
+        {
+            AppLog.Hint("Путь не сменён: " + problem + ".", LogLevel.Warning);
+            return;
+        }
+
+        ActionLog.Info($"Путь строки сменён: {item.Name} → {System.IO.Path.GetFileName(dialog.Value.TrimEnd('\\'))}",
+            ActionLog.Computer, AppSection.Files, workspace, [$"было: {item.FullPath}", $"стало: {dialog.Value}"]);
     }
 
-    private void OnRemoveSelected(object sender, RoutedEventArgs e) =>
-        Workspace?.RemoveItems(ItemsGrid.SelectedItems.OfType<TransferItem>());
+    /// <summary>Корзина в конце строки: строка уходит из списка, файл на месте.</summary>
+    private void OnRemoveItemRow(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: TransferItem item } && Workspace is { } workspace)
+        {
+            workspace.RemoveItems([item]);
+            ActionLog.Info($"Убрана строка: {item.Name}", null, AppSection.Files, workspace,
+                [item.FullPath, $"в списке осталось: {workspace.Items.Count}"]);
+        }
+    }
 
-    private void OnClearItems(object sender, RoutedEventArgs e) => Workspace?.Items.Clear();
+    private void OnRemoveSelected(object sender, RoutedEventArgs e)
+    {
+        if (Workspace is not { } workspace)
+        {
+            return;
+        }
+
+        var picked = ItemsGrid.SelectedItems.OfType<TransferItem>().ToList();
+
+        if (picked.Count == 0)
+        {
+            AppLog.Hint("Выделите строки, которые убрать (Ctrl, Shift).");
+            return;
+        }
+
+        workspace.RemoveItems(picked);
+        ActionLog.Info($"Убрано строк: {picked.Count}", null, AppSection.Files, workspace,
+            picked.Select(i => i.FullPath).Append($"в списке осталось: {workspace.Items.Count}"));
+    }
+
+    private void OnClearItems(object sender, RoutedEventArgs e)
+    {
+        if (Workspace is not { Items.Count: > 0 } workspace)
+        {
+            return;
+        }
+
+        var gone = workspace.Items.Select(i => i.FullPath).ToList();
+        workspace.Items.Clear();
+        ActionLog.Info($"Список копирования очищен: убрано {gone.Count}", null, AppSection.Files, workspace, gone);
+    }
 
     private void OnToggleAllItems(object sender, RoutedEventArgs e) => Workspace?.ToggleAllItems();
 
@@ -137,7 +204,7 @@ public partial class FilesPage : Page, Controls.IToastHost
         }
 
         AppState.Current.SaveSettings();
-        AppLog.Hint($"Из истории путей удалено: {value}");
+        ActionLog.Info($"Из истории путей на сервере удалено: {value}", null, AppSection.Files, Workspace);
 
         // удаление выбранной строки очищает поле ввода — возвращаем то, что там было
         Dispatcher.BeginInvoke(new Action(() => RemotePathBox.Text = typed));
@@ -178,9 +245,11 @@ public partial class FilesPage : Page, Controls.IToastHost
 
         var settings = AppState.Current.Settings;
 
+        // обзор открывается на отмеченном слева сервере, из нескольких — на первом в списке;
+        // ничего не отмечено — там, где выбирали в прошлый раз
         var browseServer =
-            AppState.Current.Servers.FirstOrDefault(s => s.Id == settings.BrowseServerId)
-            ?? workspace.CopyTargets.FirstOrDefault()
+            workspace.CopyTargets.FirstOrDefault()
+            ?? AppState.Current.Servers.FirstOrDefault(s => s.Id == settings.BrowseServerId)
             ?? AppState.Current.Servers.FirstOrDefault();
 
         if (browseServer is null)
@@ -202,26 +271,68 @@ public partial class FilesPage : Page, Controls.IToastHost
         }
     }
 
-    /// <summary>«Выполнить тут» — только эта вкладка: её файлы, её путь, её отмеченные серверы.</summary>
+    /// <summary>«Выполнить»: эта вкладка — её файлы, путь и серверы; со свитчем «Везде» — все вкладки.</summary>
     private async void OnCopy(object sender, RoutedEventArgs e)
-    {
-        if (Workspace is { } workspace)
-        {
-            await workspace.RunCopyAsync();
-        }
-    }
-
-    /// <summary>
-    /// «Выполнить везде» — копирование запускается во всех вкладках сразу, каждая со своими
-    /// условиями. Кнопка есть на любой вкладке; сводка показывается на той, с которой нажали.
-    /// </summary>
-    private async void OnCopyEverywhere(object sender, RoutedEventArgs e)
     {
         if (Workspace is not { } workspace)
         {
             return;
         }
 
+        if (AppState.Current.Everywhere)
+        {
+            await CopyEverywhereAsync(workspace);
+        }
+        else
+        {
+            await workspace.RunCopyAsync();
+        }
+    }
+
+    /// <summary>
+    /// «Сравнить»: файлы вкладки против сервера по правилам из параметров, без копирования.
+    /// Со свитчем «Везде» — на всех вкладках сразу и без вопроса: на серверах ничего не меняется.
+    /// </summary>
+    private async void OnCompare(object sender, RoutedEventArgs e)
+    {
+        if (Workspace is not { } workspace)
+        {
+            return;
+        }
+
+        var all = AppState.Current.Everywhere ? AppState.Current.Workspaces.ToList() : [workspace];
+
+        if (all.Count <= 1)
+        {
+            await workspace.RunCompareCopyAsync();
+            return;
+        }
+
+        AppLog.Info($"Сравнение на всех вкладках: {all.Count}.");
+
+        var running = all.Select(w => w.RunCompareCopyAsync(notify: false)).ToList();
+        var started = all.Where((_, i) => !(running[i].IsCompletedSuccessfully && !running[i].Result)).ToList();
+
+        if (started.Count == 0)
+        {
+            AppLog.Warn("Сравнение не начато ни на одной вкладке — причины выше.");
+            await Task.WhenAll(running);
+            return;
+        }
+
+        workspace.ShowSummary(started.Select(w => w.CopyBatch).ToList(), Services.Workspace.CompareName);
+
+        await Task.WhenAll(running);
+
+        AppState.Current.NotifyFinished(workspace.SummaryBatch);
+    }
+
+    /// <summary>
+    /// «Выполнить» со свитчем «Везде» — копирование запускается во всех вкладках сразу, каждая со своими
+    /// условиями. Сводка показывается на той вкладке, с которой нажали.
+    /// </summary>
+    private async Task CopyEverywhereAsync(Workspace workspace)
+    {
         var all = AppState.Current.Workspaces.ToList();
 
         // широкое действие: копирование уходит со всех вкладок сразу — сначала спросить.
@@ -232,7 +343,7 @@ public partial class FilesPage : Page, Controls.IToastHost
                 string.Empty,
                 "Копировать везде"))
         {
-            AppLog.Hint("«Выполнить везде» отменено.");
+            AppLog.Hint("Запуск на всех вкладках отменён.");
             return;
         }
 
@@ -251,7 +362,7 @@ public partial class FilesPage : Page, Controls.IToastHost
 
         if (chosen.Count == 0)
         {
-            AppLog.Info("«Выполнить везде»: запускать нечего — все вкладки пропущены.");
+            AppLog.Info("Запуск на всех вкладках: запускать нечего — все вкладки пропущены.");
             return;
         }
 
@@ -261,7 +372,7 @@ public partial class FilesPage : Page, Controls.IToastHost
             return;
         }
 
-        AppLog.Info($"«Выполнить везде» — копирование запускается во всех вкладках: {chosen.Count}.");
+        AppLog.Info($"Везде: копирование запускается во всех вкладках: {chosen.Count}.");
 
         // операции стартуют синхронно, поэтому строки уже созданы и попадут в сводку
         var running = chosen.Select(w => w.RunCopyAsync(notify: false, approved: true)).ToList();

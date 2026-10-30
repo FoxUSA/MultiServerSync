@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows;
@@ -161,9 +161,10 @@ public partial class ResultsView : UserControl
     }
 
     /// <summary>
-    /// Копирование с командами после него: под строкой копирования каждого сервера — строка
-    /// его команд, та же, что в разделе «Команда». Команды прошлого прогона не показываются:
-    /// пока идёт новое копирование, они ещё не начались.
+    /// Строки таблицы. Свежий запуск — сверху, строки внутри запуска — в порядке, как пошли
+    /// (серверы — как в панели слева), между запусками черта. Копирование с командами после него:
+    /// под строкой копирования каждого сервера — строки его команд, те же, что в разделе «Команда».
+    /// Сам прогон строки не переставляет — на его порядок опираются копирование логов и цепочки.
     /// </summary>
     private void ShowRows()
     {
@@ -193,71 +194,89 @@ public partial class ResultsView : UserControl
             return;
         }
 
-        if (_chain is null)
-        {
-            WatchSteps([]);
-
-            if (!ReferenceEquals(ResultsGrid.ItemsSource, shown.Results))
-            {
-                ResultsGrid.ItemsSource = shown.Results;
-            }
-
-            return;
-        }
-
         var picked = ResultsGrid.SelectedItem;
-
-        // проверено выше: без команд после копирования сюда не доходит
-        OperationBatch following = _chain;
-
-        _rows.Clear();
-
+        var following = _chain;
+        var rows = new List<OperationResult>();
         var watched = new HashSet<OperationResult>();
 
-        foreach (var row in shown.Results)
+        // запуски — по номеру; свежий тот, чья строка добавлена позже всех. Строки старых версий без
+        // номера — каждая сама по себе
+        var runs = shown.Results
+            .Select((row, index) => (Row: row, Index: index))
+            .GroupBy(x => x.Row.RunId != 0 ? x.Row.RunId : -(x.Index + 1))
+            .OrderByDescending(g => g.Max(x => x.Index));
+
+        foreach (var run in runs)
         {
-            _rows.Add(row);
+            var first = true;
 
-            if (AppState.AfterRowOf(shown, row, following) is { } after)
+            foreach (var (row, _) in run.OrderBy(x => x.Index))
             {
-                watched.Add(after);
+                // черта — над первой строкой каждого запуска, кроме самого верхнего
+                row.StartsRun = first && rows.Count > 0;
+                first = false;
+                rows.Add(row);
 
-                // команды — каждая своей строкой: копирование, #1, #2…; пока ни одна не пошла — общая строка
-                var steps = after.Steps;
-
-                if (steps.Count == 0)
+                if (following is null)
                 {
-                    _rows.Add(after);
+                    continue;
+                }
+
+                if (AppState.AfterRowOf(shown, row, following) is { } after)
+                {
+                    watched.Add(after);
+
+                    // команды — каждая своей строкой: копирование, #1, #2…; пока ни одна не пошла — общая строка
+                    var steps = after.Steps;
+
+                    if (steps.Count == 0)
+                    {
+                        after.StartsRun = false;
+                        rows.Add(after);
+                    }
+                    else
+                    {
+                        foreach (var step in steps)
+                        {
+                            step.StartsRun = false;
+                            rows.Add(step);
+                        }
+                    }
                 }
                 else
                 {
-                    foreach (var step in steps)
-                    {
-                        _rows.Add(step);
-                    }
-                }
-            }
-            else
-            {
-                // цепочка ещё не пошла — её команды стоят строками «ждёт копирования» с самого старта
-                // копирования; строка копирования получает их сразу после появления — следим за ней
-                watched.Add(row);
+                    // цепочка ещё не пошла — её команды стоят строками «ждёт копирования» с самого старта
+                    // копирования; строка копирования получает их сразу после появления — следим за ней
+                    watched.Add(row);
 
-                foreach (var step in row.Steps)
-                {
-                    _rows.Add(step);
+                    foreach (var step in row.Steps)
+                    {
+                        step.StartsRun = false;
+                        rows.Add(step);
+                    }
                 }
             }
         }
 
         WatchSteps(watched);
 
+        // те же строки в том же порядке — таблицу не дёргаем: выделение и прокрутка на месте
+        if (!rows.SequenceEqual(_rows))
+        {
+            _rows.Clear();
+
+            foreach (var row in rows)
+            {
+                _rows.Add(row);
+            }
+        }
+
         if (!ReferenceEquals(ResultsGrid.ItemsSource, _rows))
         {
             ResultsGrid.ItemsSource = _rows;
         }
 
-        if (picked is not null && _rows.Contains(picked))
+        if (picked is not null && _rows.Contains(picked) && !ReferenceEquals(ResultsGrid.SelectedItem, picked))
         {
             ResultsGrid.SelectedItem = picked;
         }
@@ -301,9 +320,10 @@ public partial class ResultsView : UserControl
         // новый прогон: команды после копирования могли включить или выключить
         ShowRows();
 
-        if (ResultsGrid.SelectedItem is null && Batch is { Results.Count: > 0 } batch)
+        // верхняя строка — самая свежая
+        if (ResultsGrid.SelectedItem is null && _rows.Count > 0)
         {
-            ResultsGrid.SelectedItem = batch.Results[0];
+            ResultsGrid.SelectedItem = _rows[0];
         }
 
         if (e.Action == NotifyCollectionChangedAction.Add)
@@ -317,8 +337,8 @@ public partial class ResultsView : UserControl
     private bool _following;
 
     /// <summary>
-    /// Прогоны копятся сверху вниз — терминал сам идёт за новым: его первая строка выбирается
-    /// (справа её вывод), строки встают в видимую часть. Строки прогона добавляются по одной —
+    /// Свежий запуск встаёт сверху — терминал сам идёт за ним: его первая строка выбирается
+    /// (справа её вывод), таблица прокручивается к ней. Строки запуска добавляются по одной —
     /// переход один, после последней.
     /// </summary>
     private void FollowNewRun()
@@ -334,16 +354,14 @@ public partial class ResultsView : UserControl
         {
             _following = false;
 
-            if (Batch is not { LastRun: { Count: > 0 } run } || !ResultsGrid.Items.Contains(run[0]))
+            // свежее — верхняя строка таблицы: запуск или разовое действие, что добавлено последним
+            if (_rows.Count == 0)
             {
                 return;
             }
 
-            ResultsGrid.SelectedItem = run[0];
-
-            // сначала последняя, потом первая: видна первая строка прогона и сколько влезет следом
-            ResultsGrid.ScrollIntoView(run[^1]);
-            ResultsGrid.ScrollIntoView(run[0]);
+            ResultsGrid.SelectedItem = _rows[0];
+            ResultsGrid.ScrollIntoView(_rows[0]);
         }), System.Windows.Threading.DispatcherPriority.Background);
     }
 
@@ -504,16 +522,41 @@ public partial class ResultsView : UserControl
             return;
         }
 
-        var text = batch.BuildTranscript();
+        var chain = AppState.Current.ChainFor(batch);
+        var tab = AppState.Current.TabOfBatch(batch);
+
+        // автокопия — только строки запусков: «убрана строка», «создана папка» в чат не идут
+        var runsOnly = finished is not null;
 
         // «+ команды»: следом вывод личных команд вкладки — один отчёт, сначала копирование
-        if (AppState.Current.ChainFor(batch) is { } chain)
+        string Build(int? share) => chain is null
+            ? batch.BuildTranscript(share, runsOnly)
+            : "═════ Копирование ═════" + Environment.NewLine + batch.BuildTranscript(share, runsOnly) + Environment.NewLine
+                + OutputFeed.ChainHeader + Environment.NewLine + chain.BuildTranscript(share, runsOnly);
+
+        var text = Build(null);
+
+        // автокопия длиннее LogTrim.AllServers строк подвешивала программу, куда её вставляли (и CopyPass):
+        // с «*.txt» — файлом с полным логом, без неё — обрезкой, всем серверам поровну. Кнопка — целиком
+        if (finished is not null && LogTrim.Count(text) > LogTrim.AllServers)
         {
-            text = "═════ Копирование ═════" + Environment.NewLine + text + Environment.NewLine
-                + OutputFeed.ChainHeader + Environment.NewLine + chain.BuildTranscript();
+            if (tab.LogAsFile)
+            {
+                var lines = LogTrim.Count(text);
+                var name = batch.Results.FirstOrDefault()?.Scope is { Length: > 0 } scope ? scope : "все серверы";
+
+                if (ClipboardText.CopyTerminalOutputFile(text, name, tab) is { } file)
+                {
+                    AppLog.Hint($"{finished} — лог длинный ({lines:N0} строк), в буфере файлом: {file}.");
+                }
+
+                return;
+            }
+
+            text = Build(LogTrim.ShareOf(batch.Results.Count + (chain?.Results.Count ?? 0)));
         }
 
-        if (ClipboardText.CopyTerminalOutput(text, auto: finished is not null, AppState.Current.SectionOfBatch(batch)))
+        if (ClipboardText.CopyTerminalOutput(text, auto: finished is not null, tab))
         {
             AppLog.Hint((finished is not null ? $"{finished} — вывод всех серверов скопирован в буфер обмена: " : "Вывод скопирован в буфер обмена: ")
                 + $"серверов {batch.Results.Count}, строк {text.Split('\n').Length}.");
@@ -527,11 +570,12 @@ public partial class ResultsView : UserControl
     /// </summary>
     public void CopyCurrentAfter(OperationBatch batch, string finished)
     {
-        var result = ReferenceEquals(Batch, batch) && ResultsGrid.SelectedItem is OperationResult shown
+        // строки разовых действий — не в счёт: автокопия про запуск
+        var result = ReferenceEquals(Batch, batch) && ResultsGrid.SelectedItem is OperationResult { IsAction: false } shown
             ? shown
-            : batch.Picked is { } picked && batch.Results.Contains(picked)
+            : batch.Picked is { IsAction: false } picked && batch.Results.Contains(picked)
                 ? picked
-                : batch.Results.FirstOrDefault();
+                : batch.LastRun.FirstOrDefault() ?? batch.Results.FirstOrDefault(r => !r.IsAction);
 
         if (result is null)
         {
@@ -563,35 +607,58 @@ public partial class ResultsView : UserControl
     /// <summary>Вывод одного сервера в буфер — по кнопке или галочкой «после …».</summary>
     private static void CopyResult(OperationResult result, string? finished, OperationBatch? batch)
     {
-        var text = result.Output.TrimEnd();
-
-        if (text.Length == 0)
+        if (result.Output.TrimEnd().Length == 0)
         {
             AppLog.Hint($"У сервера {result.Title} вывода пока нет.", LogLevel.Warning);
             return;
         }
 
-        if (result.TimeLine is { } time)
+        var auto = finished is not null;
+        var tab = batch is null ? null : AppState.Current.TabOfBatch(batch);
+        var after = batch is not null && AppState.Current.ChainFor(batch) is { } chain
+            ? AppState.AfterRowOf(batch, result, chain)
+            : null;
+
+        // имя и адрес сервера сверху — иначе в буфере не понять, к чему лог;
+        // «+ команды» — следом вывод личных команд этого же сервера
+        string Build(int? max)
         {
-            text += Environment.NewLine + time;
+            var output = result.Output.TrimEnd();
+            output = max is { } m ? LogTrim.Lines(output, m, "Текущий лог") : output;
+
+            var text = result.CopyHeader(batch?.IsSummary == true) + Environment.NewLine + output
+                + (result.TimeLine is { } time ? Environment.NewLine + time : string.Empty);
+
+            if (after?.Output.TrimEnd() is { Length: > 0 } afterText)
+            {
+                afterText = max is { } am ? LogTrim.Lines(afterText, am, "Текущий лог") : afterText;
+                text = "═════ Копирование ═════" + Environment.NewLine + text + Environment.NewLine + Environment.NewLine
+                    + OutputFeed.ChainHeader + Environment.NewLine + afterText
+                    + (after.TimeLine is { } afterTime ? Environment.NewLine + afterTime : string.Empty);
+            }
+
+            return text;
         }
 
-        // имя и адрес сервера сверху — иначе в буфере не понять, к чему лог
-        text = result.CopyHeader(batch?.IsSummary == true) + Environment.NewLine + text;
+        var full = Build(null);
 
-        // «+ команды»: следом вывод личных команд этого же сервера
-        if (batch is not null
-            && AppState.Current.ChainFor(batch) is { } chain
-            && AppState.AfterRowOf(batch, result, chain) is { } after
-            && after.Output.TrimEnd() is { Length: > 0 } afterText)
+        // автокопия длиннее LogTrim.PerServer строк: с «*.txt» — файлом с полным логом, без неё — обрезкой
+        if (auto && LogTrim.Count(full) > LogTrim.PerServer)
         {
-            text = "═════ Копирование ═════" + Environment.NewLine + text + Environment.NewLine + Environment.NewLine
-                + OutputFeed.ChainHeader + Environment.NewLine + afterText
-                + (after.TimeLine is { } afterTime ? Environment.NewLine + afterTime : string.Empty);
+            if (tab is { LogAsFile: true })
+            {
+                if (ClipboardText.CopyTerminalOutputFile(full + Environment.NewLine, result.Server.PaneLabel, tab) is { } file)
+                {
+                    AppLog.Hint($"{finished} — лог длинный ({LogTrim.Count(full):N0} строк), в буфере файлом: {file}.");
+                }
+
+                return;
+            }
+
+            full = Build(LogTrim.PerServer);
         }
 
-        if (ClipboardText.CopyTerminalOutput(text + Environment.NewLine, auto: finished is not null,
-            batch is null ? null : AppState.Current.SectionOfBatch(batch)))
+        if (ClipboardText.CopyTerminalOutput(full + Environment.NewLine, auto: auto, tab))
         {
             AppLog.Hint(finished is not null
                 ? $"{finished} — вывод скопирован в буфер обмена: {result.Title}."

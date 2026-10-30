@@ -21,6 +21,22 @@
       <!--  длинные и многострочные команды в выпадающих списках показываются одной короткой строкой  -->
       <core:ShortLineConverter x:Key="ShortLine" />
 
+      <!--  свитч «Везде» рядом с «Выполнить»: включён — красным, как была кнопка «Выполнить везде».
+            Тема та же, подменены только кисти включённой заливки; обводки у включённого нет  -->
+      <Style
+        x:Key="DangerSwitchStyle"
+        BasedOn="{StaticResource {x:Type ui:ToggleSwitch}}"
+        TargetType="ui:ToggleSwitch">
+        <Style.Resources>
+          <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#E5483B" />
+          <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#EE5A4D" />
+          <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#C93A2F" />
+          <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="Transparent" />
+          <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="Transparent" />
+          <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="Transparent" />
+        </Style.Resources>
+      </Style>
+
       <!--
         Выделение строки: полупрозрачный акцент вместо системного «Highlight».
         Системный красит строку сплошным цветом и заодно меняет цвет текста на белый —
@@ -98,6 +114,70 @@
             </ControlTemplate>
           </Setter.Value>
         </Setter>
+      </Style>
+
+      <!--  значки в конце строки таблицы («Копирование», «Скачивание»): копировать и вписать путь —
+            как в адресной строке «Проводника», только мельче, под высоту строки  -->
+      <Style x:Key="RowPathButtonStyle" TargetType="Button">
+        <Setter Property="Width" Value="24" />
+        <Setter Property="Height" Value="22" />
+        <Setter Property="Margin" Value="2,0,0,0" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="Button">
+              <Border
+                x:Name="Bd"
+                Background="{TemplateBinding Background}"
+                CornerRadius="4">
+                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                  <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                  <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                </Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
+
+      <!--  значок кнопки «Исключения»: белый на плашке — фиолетовой, если заданы только общие исключения,
+            тускло-зелёной, если есть свои у вкладки (с общими или без); иначе обычный.
+            Плашка есть всегда, только прозрачная: кнопка не меняет размер. Зелёный триггер ниже — он и перебивает  -->
+      <Style x:Key="ExcludeBadgeStyle" TargetType="Border">
+        <Setter Property="Padding" Value="2" />
+        <Setter Property="CornerRadius" Value="3" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Background" Value="Transparent" />
+        <Style.Triggers>
+          <DataTrigger Binding="{Binding HasGlobalExcludes}" Value="True">
+            <Setter Property="Background" Value="#6B4FA8" />
+          </DataTrigger>
+          <DataTrigger Binding="{Binding HasExcludes}" Value="True">
+            <Setter Property="Background" Value="#2E7D3E" />
+          </DataTrigger>
+        </Style.Triggers>
+      </Style>
+
+      <Style x:Key="ExcludeGlyphStyle" TargetType="ui:SymbolIcon">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Symbol" Value="Filter24" />
+        <Style.Triggers>
+          <DataTrigger Binding="{Binding HasGlobalExcludes}" Value="True">
+            <Setter Property="Foreground" Value="White" />
+          </DataTrigger>
+          <DataTrigger Binding="{Binding HasExcludes}" Value="True">
+            <Setter Property="Foreground" Value="White" />
+          </DataTrigger>
+        </Style.Triggers>
       </Style>
 
       <!--  карандаш «изменить эту запись» — рядом с крестиком в выпадающем списке  -->

@@ -309,11 +309,6 @@ public partial class PropertiesDialog : FluentWindow
 
             Changed |= done.Count > 0;
 
-            foreach (var note in notes)
-            {
-                AppLog.Error(note, remote.Server.Display);
-            }
-
             if (done.Count == 0)
             {
                 ResultText.Text = "менять нечего — всё как было";
@@ -321,14 +316,17 @@ public partial class PropertiesDialog : FluentWindow
             }
 
             var summary = $"{string.Join(", ", done)}: {(_items.Count == 1 ? _items[0].FullPath : $"{_items.Count} объектов")}";
+            var listed = _items.Select(i => (i.IsDirectory ? "папка " : "файл ") + i.FullPath).ToList();
 
             if (notes.Count == 0)
             {
-                AppLog.Success("Изменено — " + summary, remote.Server.Display);
+                ActionLog.Success("Изменено — " + summary, remote.Server, AppSection.Explorer, null, done.Concat(listed));
                 ResultText.Text = "готово: " + string.Join(", ", done);
             }
             else
             {
+                ActionLog.Warn("Изменено не всё — " + summary, remote.Server, AppSection.Explorer, null,
+                    notes.Prepend("не прошло:").Concat(listed));
                 ResultText.Text = "не всё получилось: " + notes[0];
             }
 
@@ -338,7 +336,7 @@ public partial class PropertiesDialog : FluentWindow
         catch (Exception ex)
         {
             ResultText.Text = "не получилось: " + ex.Message;
-            AppLog.Error("Свойства: " + ex.Message, remote.Server.Display);
+            ActionLog.Error("Свойства: " + ex.Message, remote.Server, AppSection.Explorer);
         }
         finally
         {

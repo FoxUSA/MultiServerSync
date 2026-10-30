@@ -203,15 +203,9 @@ public partial class TransferOptionsPanel : UserControl
 
     private void OnExcludes(object sender, RoutedEventArgs e)
     {
-        if (DataContext is not Workspace workspace
-            || ExcludeDialog.Ask(Window.GetWindow(this), workspace.ExcludeMasks) is not { } masks
-            || masks == workspace.ExcludeMasks)
+        if (DataContext is Workspace workspace)
         {
-            return;
+            ExcludeDialog.Edit(Window.GetWindow(this), workspace, "копировании");
         }
-
-        workspace.ExcludeMasks = masks;
-        var count = Core.ExcludeRules.Count(masks);
-        AppLog.Hint(count > 0 ? $"Исключения при копировании: {count}." : "Исключения при копировании сняты.");
     }
 }

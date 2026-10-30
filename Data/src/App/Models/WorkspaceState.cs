@@ -19,6 +19,15 @@ public sealed class WorkspaceState
     /// <summary>«Сохранять лог» вкладки. Null — сохранено до того, как галочка стала своей у вкладки.</summary>
     public bool? KeepOutputLog { get; set; }
 
+    /// <summary>«Авто» в строке терминала. Null — сохранено, пока галочка была у раздела.</summary>
+    public bool? AutoCopy { get; set; }
+
+    /// <summary>«*.txt» в строке терминала. Null — сохранено, пока галочка была у раздела.</summary>
+    public bool? LogAsFile { get; set; }
+
+    /// <summary>CopyPass в строке терминала. Null — сохранено, пока галочка была у раздела.</summary>
+    public bool? CopyPass { get; set; }
+
     /// <summary>Серверы, отмеченные в разделе «Копирование».</summary>
     public List<string> SelectedServerIds { get; set; } = new();
 
@@ -47,6 +56,9 @@ public sealed class WorkspaceState
 
     /// <summary>Исключения при копировании — маски по одной в строке, см. ExcludeRules.</summary>
     public string ExcludeMasks { get; set; } = string.Empty;
+
+    /// <summary>Глобальные исключения действуют и на этой вкладке. У вкладок до появления флага — да.</summary>
+    public bool UseGlobalExcludes { get; set; } = true;
 
     /// <summary>Заменять файлы с другой датой изменения.</summary>
     public bool MatchByDate { get; set; }

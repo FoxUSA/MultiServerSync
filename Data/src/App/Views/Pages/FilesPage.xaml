@@ -1,9 +1,10 @@
-<Page
+﻿<Page
   x:Class="MultiServerSync.Views.Pages.FilesPage"
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:controls="clr-namespace:MultiServerSync.Views.Controls"
   xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+  xmlns:services="clr-namespace:MultiServerSync.Services"
   Title="Копирование"
   ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
   ui:Design.Foreground="{DynamicResource TextFillColorPrimaryBrush}"
@@ -55,12 +56,19 @@
         Icon="{ui:SymbolIcon FolderOpen24}"
         Style="{StaticResource ToolButtonStyle}"
         ToolTip="Открывает проводник. Выделяйте что угодно — файлы, папки, вперемешку, хоть Ctrl+A — и нажимайте «Добавить»" />
+      <!--  заданы исключения — значок на зелёной плашке: видно, что не всё из списка поедет.
+            Плашка выходит влево на свой отступ, чтобы значок стоял там же, где у соседних кнопок  -->
       <ui:Button
         Click="OnExcludes"
-        Content="{Binding ExcludeCaption}"
-        Icon="{ui:SymbolIcon Filter24}"
         Style="{StaticResource ToolButtonStyle}"
-        ToolTip="Что не копировать: маски вроде *.log, node_modules, .git" />
+        ToolTip="Что не копировать: маски вроде *.log, node_modules, .git">
+        <StackPanel Orientation="Horizontal">
+          <Border Margin="-2,0,6,0" Style="{StaticResource ExcludeBadgeStyle}">
+            <ui:SymbolIcon Style="{StaticResource ExcludeGlyphStyle}" />
+          </Border>
+          <TextBlock VerticalAlignment="Center" Text="Исключения" />
+        </StackPanel>
+      </ui:Button>
       <ui:Button
         Click="OnRemoveSelected"
         Content="Убрать строки"
@@ -153,17 +161,46 @@
           Binding="{Binding ModifiedText}"
           Header="Дата изменения"
           SortMemberPath="Modified" />
-        <DataGridTextColumn
+        <!--  в конце строки — копировать и вписать путь, как в адресной строке «Проводника»  -->
+        <DataGridTemplateColumn
           Width="*"
           MinWidth="150"
-          Binding="{Binding FullPath}"
-          Header="Локальный путь">
-          <DataGridTextColumn.ElementStyle>
-            <Style TargetType="TextBlock">
-              <Setter Property="TextTrimming" Value="CharacterEllipsis" />
-            </Style>
-          </DataGridTextColumn.ElementStyle>
-        </DataGridTextColumn>
+          Header="Локальный путь"
+          SortMemberPath="FullPath">
+          <DataGridTemplateColumn.CellTemplate>
+            <DataTemplate>
+              <DockPanel>
+                <StackPanel
+                  Margin="4,0,2,0"
+                  DockPanel.Dock="Right"
+                  Orientation="Horizontal">
+                  <Button
+                    Click="OnCopyItemPath"
+                    Style="{StaticResource RowPathButtonStyle}"
+                    ToolTip="Копировать путь">
+                    <ui:SymbolIcon FontSize="14" Symbol="Copy24" />
+                  </Button>
+                  <Button
+                    Click="OnEditItemPath"
+                    Style="{StaticResource RowPathButtonStyle}"
+                    ToolTip="Вписать другой путь">
+                    <ui:SymbolIcon FontSize="14" Symbol="Edit24" />
+                  </Button>
+                  <Button
+                    Click="OnRemoveItemRow"
+                    Style="{StaticResource RowPathButtonStyle}"
+                    ToolTip="Убрать строку из списка — сам файл не трогается">
+                    <ui:SymbolIcon FontSize="14" Symbol="Delete24" />
+                  </Button>
+                </StackPanel>
+                <TextBlock
+                  VerticalAlignment="Center"
+                  Text="{Binding FullPath}"
+                  TextTrimming="CharacterEllipsis" />
+              </DockPanel>
+            </DataTemplate>
+          </DataGridTemplateColumn.CellTemplate>
+        </DataGridTemplateColumn>
       </DataGrid.Columns>
     </DataGrid>
 
@@ -284,24 +321,32 @@
       Grid.Row="5"
       Margin="0,4,0,0"
       Orientation="Horizontal">
-      <!--  обе кнопки есть на любой вкладке, включая первую  -->
+      <!--  «Везде» решает, где пойдут «Выполнить» и «Сравнить»: эта вкладка или все вкладки раздела  -->
       <ui:Button
-        Margin="0,0,4,0"
+        Margin="0,0,8,0"
         Appearance="Primary"
         Click="OnCopy"
-        Content="Выполнить тут"
+        Content="Выполнить"
         Icon="{ui:SymbolIcon ArrowUpload24}"
         IsEnabled="{Binding CopyBatch.IsIdle}"
-        ToolTip="Файлы этой вкладки на её отмеченные серверы" />
+        ToolTip="Файлы этой вкладки на её отмеченные серверы. Со свитчем «Везде» — на всех вкладках сразу, после вопроса" />
 
       <ui:Button
-        x:Name="EverywhereButton"
-        Appearance="Danger"
-        Click="OnCopyEverywhere"
-        Content="Выполнить везде"
-        Icon="{ui:SymbolIcon ArrowUpload24}"
+        x:Name="CompareButton"
+        Click="OnCompare"
+        Content="Сравнить"
+        Icon="{ui:SymbolIcon BranchCompare24}"
         IsEnabled="{Binding CopyBatch.IsIdle}"
-        ToolTip="Запускает копирование сразу во всех вкладках — каждая со своими файлами, путём и серверами. Итог по каждой видно на её ярлыке." />
+        ToolTip="Сверяет файлы вкладки с сервером по правилам из параметров и ничего не копирует. В статусе — сошлось или нет, что именно отличается — в выводе" />
+
+      <ui:ToggleSwitch
+        x:Name="EverywhereSwitch"
+        Margin="12,0,0,0"
+        VerticalAlignment="Center"
+        Content="Везде"
+        IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=Everywhere, Mode=TwoWay}"
+        Style="{StaticResource DangerSwitchStyle}"
+        ToolTip="Включено — «Выполнить» копирует сразу на всех вкладках, каждая со своими файлами, путём и серверами, после вопроса. «Сравнить» тоже идёт на всех. Итог по каждой — на её ярлыке" />
     </StackPanel>
 
     <!--  плашка о нажатии — не в углу окна, а сразу справа от главной кнопки; место ставит Follow  -->

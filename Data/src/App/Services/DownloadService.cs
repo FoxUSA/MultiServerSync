@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Formats.Tar;
 using System.Globalization;
 using System.IO;
@@ -73,9 +73,8 @@ public static class DownloadService
                 using var sftp = SshService.NewSftp(server, settings);
                 SshService.ConnectBoth(ssh, sftp);
 
-                var exclude = ExcludeRules.Parse(options.ExcludeMasks);
+                var exclude = options.Excludes();
                 var entries = new List<Entry>();
-                var excluded = 0;
                 var links = 0;
 
                 foreach (var raw in remotePaths)
@@ -91,14 +90,14 @@ public static class DownloadService
                     }
 
                     var listed = List(ssh, sftp, path, report, ref links, ct);
-                    entries.AddRange(Filter(listed, exclude, ref excluded));
+                    entries.AddRange(Filter(listed, exclude));
                 }
 
                 entries = Unique(entries, localRoot, report);
 
-                if (excluded > 0)
+                if (exclude.Summary() is { } excluded)
                 {
-                    report($"исключено по маскам: {excluded}");
+                    report(excluded);
                 }
 
                 if (links > 0)
@@ -197,11 +196,187 @@ public static class DownloadService
                     upToDate,
                     dirs,
                     bytes,
-                    excluded,
+                    exclude.Total,
                     links,
                     mismatches,
                     failed.Count,
                     received.Select(j => j.Entry.Relative).ToList());
+            },
+            ct);
+    }
+
+    /// <summary>
+    /// Сравнение вместо скачивания: та же опись сервера и те же маски, что у скачивания, но здесь
+    /// ничего не создаётся и не меняется. Правило сверки — из параметров, как у копирования:
+    /// по сумме, по дате или только по размеру.
+    /// </summary>
+    public static Task<CompareStats> CompareAsync(
+        ServerEntry server,
+        AppSettings settings,
+        IReadOnlyList<string> remotePaths,
+        string localRoot,
+        UploadOptions options,
+        Action<string> report,
+        CancellationToken ct)
+    {
+        return Task.Run(
+            () =>
+            {
+                var clock = new StageClock();
+
+                using var ssh = SshService.NewSsh(server, settings);
+                using var sftp = SshService.NewSftp(server, settings);
+                SshService.ConnectBoth(ssh, sftp);
+                clock.Mark("подключение");
+
+                var exclude = options.Excludes();
+                var entries = new List<Entry>();
+                var links = 0;
+
+                foreach (var raw in remotePaths)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    var path = SshService.NormalizeRemote(raw).TrimEnd('/');
+
+                    if (path.Length == 0)
+                    {
+                        report("корень «/» целиком не сравнивается — укажите папку");
+                        continue;
+                    }
+
+                    var listed = List(ssh, sftp, path, report, ref links, ct);
+                    entries.AddRange(Filter(listed, exclude));
+                }
+
+                entries = Unique(entries, localRoot, report);
+                clock.Mark("опись");
+
+                if (exclude.Summary() is { } excluded)
+                {
+                    report(excluded);
+                }
+
+                if (links > 0)
+                {
+                    report($"символьные ссылки не сравниваются: {links}");
+                }
+
+                report(SshService.CompareRule(options));
+
+                var missing = new List<string>();
+                var different = new List<CompareDiff>();
+                var hashCandidates = new List<Job>();
+                var same = 0;
+
+                foreach (var entry in entries.Where(e => !e.IsDirectory))
+                {
+                    var local = LocalPath(localRoot, entry.Relative);
+                    var info = new FileInfo(local);
+
+                    if (Directory.Exists(local))
+                    {
+                        different.Add(new CompareDiff(entry.Relative, "здесь на этом месте папка"));
+                        continue;
+                    }
+
+                    if (!info.Exists)
+                    {
+                        missing.Add(entry.Relative);
+                        continue;
+                    }
+
+                    if (info.Length != entry.Size)
+                    {
+                        different.Add(new CompareDiff(entry.Relative, SshService.SizeDifference(info.Length, entry.Size)));
+                        continue;
+                    }
+
+                    if (options.MatchByHash)
+                    {
+                        hashCandidates.Add(new Job(entry, local));
+                        continue;
+                    }
+
+                    var drift = Unix(info.LastWriteTimeUtc) - entry.MTime;
+
+                    if (options.MatchByDate && Math.Abs(drift) > DateSlackSeconds)
+                    {
+                        var remoteTime = DateTimeOffset.FromUnixTimeMilliseconds((long)(entry.MTime * 1000)).LocalDateTime;
+                        different.Add(new CompareDiff(
+                            entry.Relative,
+                            (drift > 0 ? "здесь свежее" : "на сервере свежее")
+                            + $" · локально {info.LastWriteTime:dd.MM.yyyy HH:mm:ss}, на сервере {remoteTime:dd.MM.yyyy HH:mm:ss}"));
+                        continue;
+                    }
+
+                    same++;
+                }
+
+                if (hashCandidates.Count > 0)
+                {
+                    report($"сверка сумм: файлов того же размера {hashCandidates.Count}");
+
+                    var remote = SshService.RemoteSums(ssh, hashCandidates.Select(j => j.Entry.Remote).ToList(), ct, out var complaint);
+
+                    if (remote.Count == 0 && complaint.Length > 0)
+                    {
+                        report("sha256sum на сервере не ответил: " + complaint);
+                    }
+
+                    var mine = new ConcurrentDictionary<string, string>();
+
+                    Parallel.ForEach(
+                        hashCandidates,
+                        new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount, CancellationToken = ct },
+                        j => mine[j.Local] = SshService.ComputeLocalSha256(j.Local));
+
+                    foreach (var job in hashCandidates)
+                    {
+                        if (!remote.TryGetValue(job.Entry.Remote, out var sum))
+                        {
+                            different.Add(new CompareDiff(job.Entry.Relative, "сумма с сервера не получена"));
+                        }
+                        else if (mine.TryGetValue(job.Local, out var local) && string.Equals(sum, local, StringComparison.OrdinalIgnoreCase))
+                        {
+                            same++;
+                        }
+                        else
+                        {
+                            different.Add(new CompareDiff(job.Entry.Relative, "другая контрольная сумма"));
+                        }
+                    }
+
+                    clock.Mark("суммы");
+                }
+
+                // папки — только верхние из отсутствующих: внутри них и так нет ничего
+                var absentDirs = new List<string>();
+
+                foreach (var dir in entries.Where(e => e.IsDirectory).OrderBy(e => e.Relative, StringComparer.Ordinal))
+                {
+                    if (absentDirs.Any(a => dir.Relative.StartsWith(a + "/", StringComparison.Ordinal)))
+                    {
+                        continue;
+                    }
+
+                    if (!Directory.Exists(LocalPath(localRoot, dir.Relative)))
+                    {
+                        absentDirs.Add(dir.Relative);
+                    }
+                }
+
+                clock.Mark("сверка");
+
+                ssh.Disconnect();
+                sftp.Disconnect();
+
+                return new CompareStats(
+                    same,
+                    missing.Order(StringComparer.Ordinal).ToList(),
+                    different.OrderBy(d => d.Path, StringComparer.Ordinal).ToList(),
+                    absentDirs,
+                    clock);
             },
             ct);
     }
@@ -395,7 +570,7 @@ public static class DownloadService
     private static double Unix(DateTime utc) => (utc - DateTime.UnixEpoch).TotalSeconds;
 
     /// <summary>Маски: исключённая папка уходит вместе со всем содержимым.</summary>
-    private static IEnumerable<Entry> Filter(List<Entry> entries, ExcludeRules exclude, ref int excluded)
+    private static IEnumerable<Entry> Filter(List<Entry> entries, ExcludeFilter exclude)
     {
         if (exclude.IsEmpty)
         {
@@ -412,10 +587,8 @@ public static class DownloadService
                 continue;
             }
 
-            if (exclude.Matches(e.Relative, e.IsDirectory))
+            if (exclude.Excludes(e.Relative, e.IsDirectory))
             {
-                excluded++;
-
                 if (e.IsDirectory)
                 {
                     cut.Add(e.Relative + "/");

@@ -232,7 +232,8 @@ public static class RemoteEdit
                         + "Замена затрёт те изменения.",
                         "Заменить"))
                 {
-                    AppLog.Warn($"Правка {name} не залита: на сервере файл уже другой.", server.Display);
+                    ActionLog.Warn($"Правка {name} не залита: на сервере файл уже другой.", server, AppSection.Explorer, null,
+                        [$"файл: {RemotePath}", "замену отклонили — на сервере файл изменили после открытия здесь"]);
                     _syncedWrite = written;
                     IsPending = false;
                     return;
@@ -257,11 +258,12 @@ public static class RemoteEdit
                     _remoteModified = after.Modified;
                 }
 
-                AppLog.Success($"Обновлён на сервере: {name}", server.Display);
+                ActionLog.Success($"Обновлён на сервере: {name}", server, AppSection.Explorer, null,
+                    [$"файл: {RemotePath}", "сохранён во внешней программе и залит на место"]);
             }
             catch (Exception ex)
             {
-                AppLog.Error($"Правка {name} не залита: {ex.Message}", server.Display);
+                ActionLog.Error($"Правка {name} не залита: {ex.Message}", server, AppSection.Explorer, null, [$"файл: {RemotePath}"]);
             }
             finally
             {

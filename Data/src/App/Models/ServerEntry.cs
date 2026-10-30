@@ -212,10 +212,16 @@ public sealed class ServerEntry : ObservableObject
         set => Set(ref _lastStatus, value);
     }
 
+    /// <summary>Не сервер, а условный участник терминала («Компьютер», «Программа»): адреса у него нет.</summary>
     [JsonIgnore]
-    public string Display => string.IsNullOrWhiteSpace(Name)
-        ? $"{Host}:{Port}"
-        : $"{Name} ({Host}:{Port})";
+    public bool IsPseudo => string.IsNullOrWhiteSpace(Host);
+
+    [JsonIgnore]
+    public string Display => IsPseudo
+        ? Name
+        : string.IsNullOrWhiteSpace(Name)
+            ? $"{Host}:{Port}"
+            : $"{Name} ({Host}:{Port})";
 
     /// <summary>Подпись для текста, который уходит наружу: порт показывается только нестандартный.</summary>
     [JsonIgnore]
@@ -223,6 +229,11 @@ public sealed class ServerEntry : ObservableObject
     {
         get
         {
+            if (IsPseudo)
+            {
+                return Name;
+            }
+
             var address = Port is 22 or <= 0 ? Host : $"{Host}:{Port}";
             return string.IsNullOrWhiteSpace(Name) ? address : $"{Name} ({address})";
         }

@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Formats.Tar;
 using System.Globalization;
 using System.IO;
@@ -45,8 +45,12 @@ public sealed record UploadOptions(
     bool PreserveTimestamps,
     bool MatchByDate,
     bool MatchByHash,
-    string ExcludeMasks = "")
+    string ExcludeMasks = "",
+    string GlobalExcludeMasks = "")
 {
+    /// <summary>Исключения захода: свои маски и общие, со счётом, что чем отсеяно.</summary>
+    public ExcludeFilter Excludes() => new(ExcludeMasks, GlobalExcludeMasks);
+
     /// <summary>Надо ли вообще решать, отправлять файл: иначе он отправляется всегда.</summary>
     public bool Matching => MatchByDate || MatchByHash;
 }
@@ -94,6 +98,26 @@ public sealed record UploadStats(
     IReadOnlyList<UploadedFile> Files,
     IReadOnlyList<string> CreatedDirs,
     StageClock Clock);
+
+/// <summary>Файл, который не сошёлся при сравнении, и чем именно.</summary>
+public sealed record CompareDiff(string Path, string Reason);
+
+/// <summary>
+/// Итог сравнения с одного сервера — что было бы при копировании или скачивании, но без них:
+/// сколько файлов совпало, каких нет в назначении, какие отличаются и каких папок нет.
+/// </summary>
+public sealed record CompareStats(
+    int Same,
+    IReadOnlyList<string> MissingFiles,
+    IReadOnlyList<CompareDiff> Different,
+    IReadOnlyList<string> MissingDirs,
+    StageClock Clock)
+{
+    public int Total => Same + MissingFiles.Count + Different.Count;
+
+    /// <summary>Всё, что не сошлось: нет файла, файл другой, нет папки.</summary>
+    public int Mismatches => MissingFiles.Count + Different.Count + MissingDirs.Count;
+}
 
 /// <summary>Время этапов копирования — строкой в вывод сервера: видно, на что уходят секунды.</summary>
 public sealed class StageClock
@@ -631,11 +655,12 @@ public static class SshService
                 step?.Invoke(UploadStep.Connecting);
 
                 var root = NormalizeRemote(remoteRoot);
-                var plan = BuildPlan(items, root, ExcludeRules.Parse(options.ExcludeMasks));
+                var exclude = options.Excludes();
+                var plan = BuildPlan(items, root, exclude);
 
-                if (plan.Excluded > 0)
+                if (exclude.Summary() is { } excluded)
                 {
-                    report($"исключено по маскам: {plan.Excluded}");
+                    report(excluded);
                 }
 
                 using var ssh = NewSsh(server, settings);
@@ -773,6 +798,135 @@ public static class SshService
             },
             ct);
     }
+
+    /// <summary>
+    /// Сравнение вместо копирования: тот же план, та же опись и те же суммы, что у заливки,
+    /// но на сервере ничего не создаётся и не меняется. Файл сверяется по правилу из параметров:
+    /// «по контрольной сумме» — размер и SHA-256, «по дате» — размер и дата, без них — только размер.
+    /// «Заменять» на сравнение не влияет: она про то, что делать с отличием, а не есть ли оно.
+    /// </summary>
+    public static Task<CompareStats> CompareUploadAsync(
+        ServerEntry server,
+        AppSettings settings,
+        IReadOnlyList<TransferItem> items,
+        string remoteRoot,
+        UploadOptions options,
+        ConcurrentDictionary<string, string> localHashes,
+        Action<string> report,
+        CancellationToken ct,
+        Action<UploadStep>? step = null)
+    {
+        return Task.Run(
+            () =>
+            {
+                var clock = new StageClock();
+
+                step?.Invoke(UploadStep.Connecting);
+
+                var root = NormalizeRemote(remoteRoot);
+                var exclude = options.Excludes();
+                var plan = BuildPlan(items, root, exclude);
+
+                if (exclude.Summary() is { } excluded)
+                {
+                    report(excluded);
+                }
+
+                report(CompareRule(options));
+
+                using var ssh = NewSsh(server, settings);
+                using var sftp = NewSftp(server, settings);
+                ConnectBoth(ssh, sftp);
+                clock.Mark("подключение");
+
+                if (!options.MatchByHash)
+                {
+                    step?.Invoke(UploadStep.CheckingDates);
+                }
+
+                var inventory = TakeInventory(ssh, plan, report, ct);
+                var ctx = new UploadContext(sftp, options, localHashes, inventory, new Counters(), report);
+                clock.Mark("опись");
+
+                if (options.MatchByHash)
+                {
+                    ctx.RemoteHashes = FetchRemoteHashes(ssh, ctx, plan.Files, report, ct, step);
+                    clock.Mark("суммы");
+                }
+
+                var missing = new ConcurrentBag<string>();
+                var different = new ConcurrentBag<CompareDiff>();
+                var same = 0;
+
+                RunParallel(plan.Files, ct, job =>
+                {
+                    var remote = ctx.Stat(job.RemotePath);
+
+                    if (remote is null)
+                    {
+                        missing.Add(job.RemotePath);
+                        return;
+                    }
+
+                    var info = new FileInfo(job.LocalPath);
+                    var reason = remote.IsDirectory ? "на сервере на этом месте папка"
+                        : options.Matching ? Difference(info, remote, job.RemotePath, ctx)
+                        : info.Length != remote.Size ? SizeDifference(info.Length, remote.Size)
+                        : null;
+
+                    if (reason is null)
+                    {
+                        Interlocked.Increment(ref same);
+                    }
+                    else
+                    {
+                        different.Add(new CompareDiff(job.RemotePath, reason));
+                    }
+                });
+
+                // папки — только верхние из отсутствующих: внутри них и так нет ничего.
+                // Родитель в плане идёт раньше детей
+                var absentDirs = new List<string>();
+
+                foreach (var dir in plan.Dirs)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    if (absentDirs.Any(a => dir.RemotePath.StartsWith(a + "/", StringComparison.Ordinal)))
+                    {
+                        continue;
+                    }
+
+                    if (ctx.Stat(dir.RemotePath) is not { IsDirectory: true })
+                    {
+                        absentDirs.Add(dir.RemotePath);
+                    }
+                }
+
+                clock.Mark("сверка");
+
+                ssh.Disconnect();
+                sftp.Disconnect();
+
+                return new CompareStats(
+                    same,
+                    missing.Order(StringComparer.Ordinal).ToList(),
+                    different.OrderBy(d => d.Path, StringComparer.Ordinal).ToList(),
+                    absentDirs,
+                    clock);
+            },
+            ct);
+    }
+
+    /// <summary>По какому правилу сравниваются файлы — первой строкой в выводе сравнения.</summary>
+    internal static string CompareRule(UploadOptions options) =>
+        options.MatchByHash ? "сравнение по размеру и контрольной сумме SHA-256"
+        : options.MatchByDate ? "сравнение по размеру и дате изменения"
+        : "сравнение только по размеру: сверка по дате и по контрольной сумме в параметрах выключены";
+
+    /// <summary>Причина «другой размер» — одними словами для копирования, скачивания и сравнения.</summary>
+    internal static string SizeDifference(long local, long remote) =>
+        $"другой размер · локально {TransferItem.Format(local)}, на сервере {TransferItem.Format(remote)}";
 
     /// <summary>
     /// Параллельный обход. Сбой одного файла останавливает остальные и выходит наружу
@@ -1293,15 +1447,14 @@ public static class SshService
     }
 
     /// <summary>Что отправить: все файлы и папки выбранного, с путями на сервере.</summary>
-    private static Plan BuildPlan(IReadOnlyList<TransferItem> items, string root, ExcludeRules exclude)
+    private static Plan BuildPlan(IReadOnlyList<TransferItem> items, string root, ExcludeFilter exclude)
     {
         var plan = new Plan();
 
         foreach (var item in items)
         {
-            if (exclude.Matches(item.Name, item.IsDirectory))
+            if (exclude.Excludes(item.Name, item.IsDirectory))
             {
-                plan.Excluded++;
                 continue;
             }
 
@@ -1324,7 +1477,7 @@ public static class SshService
     }
 
     /// <param name="relative">Путь от копируемого объекта включительно — по нему сверяются маски.</param>
-    private static void AddDirectory(Plan plan, string localDir, string remoteDir, string relative, ExcludeRules exclude)
+    private static void AddDirectory(Plan plan, string localDir, string remoteDir, string relative, ExcludeFilter exclude)
     {
         plan.Dirs.Add(new DirJob(localDir, remoteDir));
 
@@ -1332,9 +1485,8 @@ public static class SshService
         {
             var name = Path.GetFileName(file);
 
-            if (exclude.Matches(relative + "/" + name, isDirectory: false))
+            if (exclude.Excludes(relative + "/" + name, isDirectory: false))
             {
-                plan.Excluded++;
                 continue;
             }
 
@@ -1346,9 +1498,8 @@ public static class SshService
             var name = Path.GetFileName(dir);
 
             // исключённая папка не обходится вовсе: в node_modules десятки тысяч файлов
-            if (exclude.Matches(relative + "/" + name, isDirectory: true))
+            if (exclude.Excludes(relative + "/" + name, isDirectory: true))
             {
-                plan.Excluded++;
                 continue;
             }
 
@@ -1915,11 +2066,10 @@ public static class SshService
     {
         using var cmd = ssh.CreateCommand(
             "dd of=" + ShellQuote(temp) + " bs=1048576 seek=" + (offset / Mebibyte).ToString(CultureInfo.InvariantCulture) + " conv=notrunc");
-        var run = cmd.ExecuteAsync(ct);
-
-        using (var channel = new BufferedStream(cmd.CreateInputStream(), 256 * 1024))
-        using (var file = File.OpenRead(localPath))
+        Rethrow(Feed(cmd, ct, input =>
         {
+            using var channel = new BufferedStream(input, 256 * 1024);
+            using var file = File.OpenRead(localPath);
             file.Seek(offset, SeekOrigin.Begin);
             var buffer = new byte[256 * 1024];
 
@@ -1938,9 +2088,7 @@ public static class SshService
                 meter.Add(read);
                 count -= read;
             }
-        }
-
-        run.GetAwaiter().GetResult();
+        }));
 
         if (cmd.ExitStatus is not 0)
         {
@@ -2264,12 +2412,10 @@ public static class SshService
         CancellationToken ct)
     {
         using var cmd = ssh.CreateCommand(command);
-        var run = cmd.ExecuteAsync(ct);
-        string? broken = null;
 
-        try
+        var broken = Feed(cmd, ct, input =>
         {
-            using var channel = new BufferedStream(cmd.CreateInputStream(), 256 * 1024);
+            using var channel = new BufferedStream(input, 256 * 1024);
             using var gzip = compress ? new GZipStream(channel, CompressionLevel.Fastest, leaveOpen: true) : null;
             using var writer = new TarWriter(gzip ?? (Stream)channel, TarEntryFormat.Pax, leaveOpen: true);
 
@@ -2290,17 +2436,7 @@ public static class SshService
                     DataStream = data,
                 });
             }
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            broken = ex.Message;
-        }
-
-        run.GetAwaiter().GetResult();
+        })?.Message;
 
         if (cmd.ExitStatus is not 0)
         {
@@ -2410,16 +2546,115 @@ public static class SshService
     internal static (string Output, string Error) RunInput(SshClient ssh, string script, CancellationToken ct)
     {
         using var cmd = ssh.CreateCommand("sh -s");
-        var run = cmd.ExecuteAsync(ct);
 
-        using (var input = new BufferedStream(cmd.CreateInputStream(), 64 * 1024))
+        Rethrow(Feed(cmd, ct, channel =>
         {
+            using var input = new BufferedStream(channel, 64 * 1024);
             input.Write(new UTF8Encoding(false).GetBytes(script));
-        }
-
-        run.GetAwaiter().GetResult();
+        }));
 
         return (cmd.Result, cmd.Error ?? string.Empty);
+    }
+
+    /// <summary>
+    /// Пускает команду и пишет ей в ввод. Отмену SSH.NET сразу не отдаём: он убивал команду на
+    /// сервере, та переставала читать, и недописанный хвост ждал окна канала до таймаута
+    /// подключения — «Остановить» на копировании тянулось минуту. Теперь отмена сначала обрывает
+    /// запись — больше ни байта в канал, — а уже потом команда снимается.
+    /// Вернёт ошибку записи, если она была не от отмены: команда к этому времени уже дождана.
+    /// </summary>
+    private static Exception? Feed(SshCommand cmd, CancellationToken ct, Action<Stream> write)
+    {
+        var run = cmd.ExecuteAsync();
+        Exception? broken = null;
+
+        try
+        {
+            using var channel = new CancelGate(cmd.CreateInputStream(), ct);
+            write(channel);
+        }
+        catch (Exception) when (ct.IsCancellationRequested)
+        {
+            TryCancel(cmd);
+            throw new OperationCanceledException(ct);
+        }
+        catch (Exception ex)
+        {
+            broken = ex;
+        }
+
+        using (ct.Register(() => TryCancel(cmd)))
+        {
+            run.GetAwaiter().GetResult();
+        }
+
+        return broken;
+    }
+
+    private static void Rethrow(Exception? broken)
+    {
+        if (broken is not null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(broken);
+        }
+    }
+
+    /// <summary>
+    /// Ввод команды, который после отмены больше не пишет: и недописанное, и то, что сбрасывают
+    /// при закрытии сжатие и tar, обрывается сразу, а не ждёт в канале.
+    /// </summary>
+    private sealed class CancelGate(Stream inner, CancellationToken ct) : Stream
+    {
+        private bool _disposed;
+
+        public override bool CanRead => false;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => true;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            ct.ThrowIfCancellationRequested();
+            inner.Write(buffer, offset, count);
+        }
+
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            ct.ThrowIfCancellationRequested();
+            inner.Write(buffer);
+        }
+
+        public override void Flush()
+        {
+            ct.ThrowIfCancellationRequested();
+            inner.Flush();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && !_disposed)
+            {
+                _disposed = true;
+                inner.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
     }
 
     /// <summary>Номера строк скрипта, на которых он сказал «не получилось».</summary>
@@ -2517,8 +2752,7 @@ public static class SshService
     {
         if (local.Length != remote.Size)
         {
-            return $"другой размер · локально {TransferItem.Format(local.Length)}"
-                + $", на сервере {TransferItem.Format(remote.Size)}";
+            return SizeDifference(local.Length, remote.Size);
         }
 
         if (ctx.Options.MatchByHash)
@@ -2663,18 +2897,16 @@ public static class SshService
             using var cmd = ssh.CreateCommand(
                 "n=$(nproc 2>/dev/null || echo 2); xargs -0 -n 16 -P \"$n\" sha256sum --");
 
-            var run = cmd.ExecuteAsync(ct);
-
-            using (var input = new BufferedStream(cmd.CreateInputStream(), 64 * 1024))
+            Rethrow(Feed(cmd, ct, channel =>
             {
+                using var input = new BufferedStream(channel, 64 * 1024);
+
                 foreach (var path in paths)
                 {
                     input.Write(Encoding.UTF8.GetBytes(path));
                     input.WriteByte(0);
                 }
-            }
-
-            run.GetAwaiter().GetResult();
+            }));
 
             ParseSums(cmd.Result, map);
             complaint = cmd.Error?.Trim() ?? string.Empty;
@@ -3192,9 +3424,6 @@ public static class SshService
         public List<DirJob> Dirs { get; } = [];
 
         public List<FileJob> Files { get; } = [];
-
-        /// <summary>Сколько файлов и папок отсеяно масками (папка — одна, со всем содержимым).</summary>
-        public int Excluded { get; set; }
     }
 
     /// <summary>Опись мест назначения, снятая одной командой find.</summary>

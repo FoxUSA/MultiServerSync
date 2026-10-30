@@ -39,7 +39,8 @@ public static class TerminalStore
     {
         var state = AppState.Current;
         var servers = state.Servers.ToDictionary(s => s.Id, StringComparer.Ordinal);
-        ServerEntry? Server(string id) => servers.GetValueOrDefault(id);
+        // строки действий без сервера — «Компьютер», «Программа» — тоже возвращаются
+        ServerEntry? Server(string id) => servers.GetValueOrDefault(id) ?? ActionLog.Pseudo(id);
 
         if (Read<TerminalFile>(AppPaths.TerminalFile) is { } file)
         {

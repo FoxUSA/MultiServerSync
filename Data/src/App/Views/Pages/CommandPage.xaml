@@ -3,6 +3,7 @@
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
   xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+  xmlns:services="clr-namespace:MultiServerSync.Services"
   xmlns:controls="clr-namespace:MultiServerSync.Views.Controls"
   xmlns:pages="clr-namespace:MultiServerSync.Views.Pages"
   Title="Команда"
@@ -574,10 +575,10 @@
           Margin="0,0,4,0"
           Appearance="Primary"
           Click="OnRun"
-          Content="Выполнить тут"
+          Content="Выполнить"
           Icon="{ui:SymbolIcon Play24}"
           IsEnabled="{Binding CommandBatch.IsIdle}"
-          ToolTip="Все окна этой вкладки по очереди на её отмеченных серверах (Ctrl+Enter в первом окне)">
+          ToolTip="Все окна этой вкладки по очереди на её отмеченных серверах. Со свитчем «Везде» — во всех командных вкладках сразу, после вопроса. Ctrl+Enter в окне — только эта вкладка">
           <!--  во всех окнах пусто — кнопка тусклая, но жмётся: нажатие мигает рамками окон  -->
           <ui:Button.Style>
             <Style BasedOn="{StaticResource {x:Type ui:Button}}" TargetType="ui:Button">
@@ -590,14 +591,14 @@
           </ui:Button.Style>
         </ui:Button>
 
-        <ui:Button
-          x:Name="EverywhereButton"
-          Appearance="Danger"
-          Click="OnRunEverywhere"
-          Content="Выполнить везде"
-          Icon="{ui:SymbolIcon Play24}"
-          IsEnabled="{Binding CommandBatch.IsIdle}"
-          ToolTip="Запускает команды сразу во всех командных вкладках — каждая со своими окнами и серверами. Личные вкладки копирования не запускаются. Итог по каждой видно на её ярлыке." />
+        <ui:ToggleSwitch
+          x:Name="EverywhereSwitch"
+          Margin="4,0,0,0"
+          VerticalAlignment="Center"
+          Content="Везде"
+          IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=Everywhere, Mode=TwoWay}"
+          Style="{StaticResource DangerSwitchStyle}"
+          ToolTip="Включено — «Выполнить» запускает команды сразу во всех командных вкладках, каждая со своими окнами и серверами, после вопроса. Личные вкладки копирования не запускаются. Итог по каждой — на её ярлыке" />
       </StackPanel>
 
       <TextBlock

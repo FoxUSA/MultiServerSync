@@ -112,10 +112,19 @@
           Padding="8,0"
           Click="OnExcludes"
           FontSize="11"
-          Icon="{ui:SymbolIcon Filter24}"
           ToolTip="Какие файлы и папки не копировать: маски вроде node_modules, *.log"
           Visibility="Collapsed">
-          <TextBlock Text="{Binding ExcludeCaption}" />
+          <!--  заданы исключения — значок на зелёной плашке, как у кнопки на «Копировании» и «Скачивании».
+                Плашка здесь мельче: кнопка ниже  -->
+          <StackPanel Orientation="Horizontal">
+            <Border
+              Margin="-2,0,4,0"
+              Padding="1.5"
+              Style="{StaticResource ExcludeBadgeStyle}">
+              <ui:SymbolIcon FontSize="11" Style="{StaticResource ExcludeGlyphStyle}" />
+            </Border>
+            <TextBlock VerticalAlignment="Center" Text="Исключения" />
+          </StackPanel>
         </ui:Button>
       </Grid>
 

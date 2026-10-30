@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
@@ -217,6 +217,7 @@ public enum PaneCommand
     SendToDownload,
     TransferToOther,
     TransferOptions,
+    Excludes,
 }
 
 /// <summary>Перетащили в панель: из соседней панели или из проводника Windows.</summary>
@@ -407,10 +408,15 @@ public partial class FilePane : UserControl
 
     private void OnTransferOptions(object sender, RoutedEventArgs e) => CommandRequested?.Invoke(this, PaneCommand.TransferOptions);
 
+    private void OnExcludes(object sender, RoutedEventArgs e) => CommandRequested?.Invoke(this, PaneCommand.Excludes);
+
     /// <summary>Открыта другая папка, сменился курсор или сортировка — страница сохраняет вкладку.</summary>
     public event Action<FilePane>? StateChanged;
 
     public IFileSource? Source => _source;
+
+    /// <summary>Вкладка «Проводника», в чей терминал ложатся строки действий панели; нет — в открытую.</summary>
+    public Workspace? Tab { get; set; }
 
     public bool IsRemote => _source?.IsRemote == true;
 
@@ -2302,7 +2308,8 @@ public partial class FilePane : UserControl
         {
             // по очереди за действиями с этой папкой: внутри неё, над ней — и своими же, если жмут быстро
             await PendingFs.RunAsync(source, [path], label, () => folder ? source.CreateFolderAsync(path) : source.CreateFileAsync(path));
-            Log($"{(folder ? "Создана папка" : "Создан файл")} {source.Display(path)}");
+            Log($"{(folder ? "Создана папка" : "Создан файл")} {source.Display(path)}",
+                details: [$"где: {source.Display(_current)}", $"имя: {name}"]);
         }
         catch (Exception ex)
         {
@@ -2339,8 +2346,8 @@ public partial class FilePane : UserControl
         }
     }
 
-    private void Warn(string text) =>
-        AppLog.Warn(text, _source is RemoteSource remote ? remote.Server.Display : LocalSource.ComputerTitle, AppSection.Explorer);
+    private void Warn(string text, IEnumerable<string>? details = null) =>
+        ActionLog.Warn(text, ActionLog.Where(_source), AppSection.Explorer, Tab, details);
 
     /// <summary>Сервер закончил действие: если эта папка открыта здесь — перечитать на месте.</summary>
     private void OnPendingSettled(string side, string dir)
@@ -2505,7 +2512,8 @@ public partial class FilePane : UserControl
             ReplaceEntry(row, renamed);
 
             await PendingFs.RunAsync(source, [before.FullPath, target], label, () => source.RenameAsync(before.FullPath, target));
-            Log($"Переименовано: {before.Name} → {name}");
+            Log($"Переименовано: {before.Name} → {name}",
+                details: [$"где: {source.Display(parent)}", $"было: {before.Name}", $"стало: {name}"]);
         }
         catch (Exception ex)
         {
@@ -2564,10 +2572,12 @@ public partial class FilePane : UserControl
             return;
         }
 
-        var index = List.SelectedIndex;
+        // куда встанет курсор: на место первой удаляемой строки (там курсор или первая галочка)
+        var paths = items.Select(i => i.FullPath).ToHashSet(StringComparer.Ordinal);
+        var index = _view is null ? -1
+            : _view.Cast<PaneRow>().Select((r, i) => (r, i)).Where(x => !x.r.IsParent && paths.Contains(x.r.FullPath)).Select(x => x.i).DefaultIfEmpty(-1).Min();
 
         // строки уходят сразу, как на компьютере; что сервер не удалит — вернёт перечитывание по окончании
-        var paths = items.Select(i => i.FullPath).ToHashSet(StringComparer.Ordinal);
         var pending = items.Select(i => PendingFs.Remove(source, source.Parent(i.FullPath) ?? _current, i.FullPath)).ToList();
 
         foreach (var gone in _rows.Where(r => !r.IsParent && paths.Contains(r.FullPath)).ToList())
@@ -2575,13 +2585,16 @@ public partial class FilePane : UserControl
             _rows.Remove(gone);
         }
 
-        // курсор — на соседнюю строку, как после удаления в проводнике
-        if (_view is not null && _view.Count > 0)
+        // курсор — на соседнюю строку, как после удаления в проводнике: рамкой, без галочки
+        // (галочка в панели — это выделение, а SelectedIndex выделял бы строку)
+        if (_view is { Count: > 0 } && _view.GetItemAt(Math.Clamp(index, 0, _view.Count - 1)) is PaneRow next)
         {
-            List.SelectedIndex = Math.Clamp(index, 0, _view.Count - 1);
+            MoveCursor(next);
         }
-
-        FocusList();
+        else
+        {
+            FocusList();
+        }
 
         var label = $"удаление: {what}";
 
@@ -2593,14 +2606,18 @@ public partial class FilePane : UserControl
             // по очереди: удалить только что созданное — после того, как сервер его создал
             await PendingFs.RunAsync(source, items.Select(i => i.FullPath), label, async () => problems = await source.DeleteAsync(items));
 
-            foreach (var line in problems)
-            {
-                Log(line, error: true);
-            }
+            // одной строкой: что именно удалено, по объекту на строку; не удалённое — с причиной
+            var listed = items.Select(i => (i.IsDirectory && !i.IsLink ? "папка " : "файл ") + i.Name).ToList();
+            var how = source.IsRemote ? "безвозвратно — корзины на сервере нет" : "в корзину Windows";
 
             if (problems.Count == 0)
             {
-                Log($"Удалено: {what} в {source.Display(_current)}");
+                Log($"Удалено: {what} в {source.Display(_current)}", details: listed.Prepend(how));
+            }
+            else
+            {
+                Log($"Удалено не всё: {what} в {source.Display(_current)}", error: true,
+                    details: problems.Prepend("не удалось:").Append("запрошено:").Concat(listed));
             }
         }
         catch (Exception ex)
@@ -2622,19 +2639,9 @@ public partial class FilePane : UserControl
             _ => many,
         };
 
-    private void Log(string text, bool error = false)
-    {
-        var where = _source is RemoteSource remote ? remote.Server.Display : LocalSource.ComputerTitle;
-
-        if (error)
-        {
-            AppLog.Error(text, where, AppSection.Explorer);
-        }
-        else
-        {
-            AppLog.Success(text, where, AppSection.Explorer);
-        }
-    }
+    /// <summary>Действие панели — в журнал и строкой в терминал: сервер или «Компьютер», суть и подробности.</summary>
+    private void Log(string text, bool error = false, IEnumerable<string>? details = null) =>
+        ActionLog.Write(error ? LogLevel.Error : LogLevel.Success, text, ActionLog.Where(_source), AppSection.Explorer, Tab, details);
 
     // ── контекстное меню ─────────────────────────────────────────────────────
 

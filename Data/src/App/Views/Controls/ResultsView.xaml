@@ -1,4 +1,4 @@
-<UserControl
+﻿<UserControl
   x:Class="MultiServerSync.Views.Controls.ResultsView"
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -160,15 +160,6 @@
             <ui:SymbolIcon FontSize="17" Symbol="Copy24" />
           </ui:Button.Icon>
         </ui:Button>
-        <CheckBox
-          MinWidth="0"
-          MinHeight="0"
-          Margin="0,0,4,0"
-          VerticalAlignment="Center"
-          Content="авто"
-          FontSize="11"
-          IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=AutoCopyAll, Mode=TwoWay}"
-          ToolTip="Операция закончилась на всех серверах — вывод всех серверов сам копируется в буфер обмена. У каждого раздела галочки свои. Буфер один, поэтому соседняя галочка при этом снимается" />
         <ui:Button
           Margin="0,0,4,0"
           Padding="9,2"
@@ -188,7 +179,7 @@
           Content="авто"
           FontSize="11"
           IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=AutoCopyCurrent, Mode=TwoWay}"
-          ToolTip="Операция закончилась — вывод сервера, выбранного в таблице слева, сам копируется в буфер обмена. У каждого раздела галочки свои. Буфер один, поэтому соседняя галочка при этом снимается" />
+          ToolTip="Операция закончилась — вывод всех её серверов сам копируется в буфер обмена. У каждой вкладки своя, новая вкладка начинает без неё" />
         <CheckBox
           MinWidth="0"
           MinHeight="0"
@@ -207,7 +198,18 @@
           FontSize="11"
           Icon="{ui:SymbolIcon ArrowClockwise24}"
           Visibility="{Binding CanRetry, Converter={StaticResource BoolToVis}}" />
-        <!--  последней: не сдвигается, когда «Повторить упавшие» появляется и пропадает  -->
+        <!--  «*.txt» и CopyPass — правее «Повторить упавшие»: не сдвигаются, когда она появляется и пропадает  -->
+        <CheckBox
+          MinWidth="0"
+          MinHeight="0"
+          Margin="0,0,4,0"
+          VerticalAlignment="Center"
+          Content="*.txt"
+          FontSize="11"
+          IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=LogAsFile, Mode=TwoWay}"
+          IsEnabled="{Binding Source={x:Static services:AppState.Current}, Path=CopyPassAvailable}"
+          ToolTip="Автокопия длиннее 1000 строк уходит в буфер файлом с полным логом — в чат он вставится вложением. Снята — лог обрезается: начало и конец остаются, середина вырезается. У каждой вкладки своя"
+          ToolTipService.ShowOnDisabled="True" />
         <CheckBox
           MinWidth="0"
           MinHeight="0"
@@ -216,7 +218,8 @@
           FontSize="11"
           IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=CopyPass, Mode=TwoWay}"
           IsEnabled="{Binding Source={x:Static services:AppState.Current}, Path=CopyPassAvailable}"
-          ToolTip="Лог, скопированный программой, сам вставится в первое поле ввода, куда вы перейдёте в другой программе, и уйдёт нажатием Enter. Один раз на копию; если в буфере уже другое — ничего не делает. Терминалы и поля паролей пропускает. Работает вместе с «авто», у каждого раздела своя"
+          Visibility="{Binding Source={x:Static services:AppState.Current}, Path=CopyPassVisibility}"
+          ToolTip="Лог, скопированный программой, сам вставится в первое поле ввода, куда вы перейдёте в другой программе, и уйдёт нажатием Enter. Один раз на копию; если в буфере уже другое — ничего не делает. Терминалы и поля паролей пропускает. Работает вместе с «авто», у каждой вкладки своя"
           ToolTipService.ShowOnDisabled="True" />
       </StackPanel>
     </Grid>
@@ -249,10 +252,20 @@
           ColumnHeaderHeight="{StaticResource IconButtonSize}"
           RowHeight="24"
           SelectionChanged="OnResultPicked"
-          RowStyle="{StaticResource AppDataGridRowStyle}"
           SelectionMode="Single"
           Style="{StaticResource AppDataGridStyle}"
           VerticalScrollBarVisibility="Auto">
+          <!--  свежий запуск сверху; между запусками — черта, как между серверами в панели слева  -->
+          <DataGrid.RowStyle>
+            <Style BasedOn="{StaticResource AppDataGridRowStyle}" TargetType="DataGridRow">
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding StartsRun}" Value="True">
+                  <Setter Property="BorderBrush" Value="{DynamicResource SurfaceStrokeColorDefaultBrush}" />
+                  <Setter Property="BorderThickness" Value="0,1,0,0" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </DataGrid.RowStyle>
           <DataGrid.CellStyle>
             <Style BasedOn="{StaticResource AppDataGridCellStyle}" TargetType="DataGridCell">
               <Setter Property="FontFamily" Value="Consolas" />

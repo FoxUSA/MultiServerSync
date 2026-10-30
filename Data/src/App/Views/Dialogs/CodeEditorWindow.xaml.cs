@@ -266,13 +266,14 @@ public partial class CodeEditorWindow : FluentWindow
             Editor.IsModified = false;
             UpdateTitle();
             Status($"Сохранено в {DateTime.Now:HH:mm:ss}, SHA-256 сверена");
-            AppLog.Success($"Изменён файл {_source.Display(_path)}", _where, AppSection.Explorer);
+            ActionLog.Success($"Изменён файл {_source.Display(_path)}", ActionLog.Where(_source), AppSection.Explorer, null,
+                ["сохранено из встроенного редактора", $"SHA-256 после записи сверена: {expected}"]);
             return true;
         }
         catch (Exception ex)
         {
             Status($"Не сохранено: {Reason(ex)}", error: true);
-            AppLog.Error($"Не сохранён файл {_source.Display(_path)}: {Reason(ex)}", _where, AppSection.Explorer);
+            ActionLog.Error($"Не сохранён файл {_source.Display(_path)}: {Reason(ex)}", ActionLog.Where(_source), AppSection.Explorer);
             return false;
         }
         finally

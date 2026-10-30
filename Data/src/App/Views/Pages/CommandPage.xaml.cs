@@ -69,7 +69,7 @@ public partial class CommandPage : Page, Controls.IToastHost
         Attach(Workspace);
 
         PasteToast.Large = true;
-        BarToast.Follow(EverywhereButton);
+        BarToast.Follow(EverywhereSwitch);
         Loaded += (_, _) => ListenClipboard();
 
         StepsScroll.SizeChanged += (_, _) => FitSteps();
@@ -216,7 +216,7 @@ public partial class CommandPage : Page, Controls.IToastHost
         }
 
         var step = workspace.AddStep(StepOf(sender));
-        AppLog.Hint($"Добавлено окно #{step.Number}. Окон: {workspace.Steps.Count}.");
+        ActionLog.Info($"Добавлено окно команды #{step.Number} · окон {workspace.Steps.Count}", null, AppSection.Command, workspace);
         FocusStep(step);
     }
 
@@ -228,10 +228,12 @@ public partial class CommandPage : Page, Controls.IToastHost
         }
 
         var number = step.Number;
+        var text = step.Text;
 
         if (workspace.RemoveStep(step))
         {
-            AppLog.Hint($"Окно #{number} убрано. Окон: {workspace.Steps.Count}.");
+            ActionLog.Info($"Убрано окно команды #{number} · окон {workspace.Steps.Count}", null, AppSection.Command, workspace,
+                string.IsNullOrWhiteSpace(text) ? ["окно было пустым"] : ["в нём было:", text.TrimEnd()]);
         }
     }
 
@@ -249,8 +251,10 @@ public partial class CommandPage : Page, Controls.IToastHost
             return;
         }
 
+        var was = step.Text.TrimEnd();
         step.Text = string.Empty;
-        AppLog.Hint(Workspace?.Steps.Count > 1 ? $"Окно #{step.Number} очищено." : "Поле команды очищено.");
+        ActionLog.Info(Workspace?.Steps.Count > 1 ? $"Очищено окно команды #{step.Number}" : "Поле команды очищено", null, AppSection.Command, Workspace,
+            ["было:", was]);
         HistoryBox.SelectedItem = null;
     }
 
@@ -334,7 +338,7 @@ public partial class CommandPage : Page, Controls.IToastHost
         if (e.AddedItems.Count > 0 && HistoryBox.SelectedItem is string text && ActiveStep is { } step)
         {
             step.Text = text;
-            AppLog.Hint("Подставлена команда из истории: " + OneLine(text));
+            ActionLog.Info("Подставлена команда из истории: " + OneLine(text), null, AppSection.Command, Workspace, [text.TrimEnd()]);
         }
     }
 
@@ -376,7 +380,7 @@ public partial class CommandPage : Page, Controls.IToastHost
         }
 
         step.Text = text.Replace("\r\n", "\n", StringComparison.Ordinal).Trim();
-        AppLog.Hint($"Вставлено из буфера ({step.Text.Length} символов): {OneLine(step.Text)}");
+        ActionLog.Info($"Вставлено из буфера ({step.Text.Length} символов): {OneLine(step.Text)}", null, AppSection.Command, Workspace, [step.Text.TrimEnd()]);
 
         _activeStep = step;
         FocusStep(step);
@@ -427,14 +431,15 @@ public partial class CommandPage : Page, Controls.IToastHost
         {
             workspace.SetSteps(snippet.AsSteps());
             _activeStep = workspace.Steps[0];
-            AppLog.Hint($"Из избранного раскрыто окон: {workspace.Steps.Count} — {snippet.Comment}");
+            ActionLog.Info($"Из избранного раскрыто окон: {workspace.Steps.Count} — {snippet.Comment}", null, AppSection.Command, workspace,
+                workspace.Steps.Select(s => $"#{s.Number}: {OneLine(s.Text)}"));
         }
         else
         {
             var sudo = ActiveStep?.UseSudo ?? false;
             workspace.SetSteps([new SavedCommandStep { Text = snippet.Command, UseSudo = sudo }]);
             _activeStep = workspace.Steps[0];
-            AppLog.Hint($"Подставлена команда из избранного: {snippet.Comment}");
+            ActionLog.Info($"Подставлена команда из избранного: {snippet.Comment}", null, AppSection.Command, Workspace);
         }
     }
 
@@ -500,12 +505,13 @@ public partial class CommandPage : Page, Controls.IToastHost
             existing = new CommandSnippet { Comment = comment };
             existing.SetSteps(steps);
             book.Add(existing);
-            AppLog.Hint(multi ? $"В избранное добавлен набор из {steps.Count} окон: {comment}" : $"В избранное добавлено: {comment}");
+            ActionLog.Info(multi ? $"В избранное добавлен набор из {steps.Count} окон: {comment}" : $"В избранное добавлено: {comment}",
+                null, AppSection.Command, Workspace, steps.Select(s => OneLine(s.Text)));
         }
         else
         {
             existing.SetSteps(steps);
-            AppLog.Hint($"Запись избранного обновлена: {comment}");
+            ActionLog.Info($"Запись избранного обновлена: {comment}", null, AppSection.Command, Workspace, steps.Select(s => OneLine(s.Text)));
         }
 
         AppState.Current.SaveSettings();
@@ -588,7 +594,7 @@ public partial class CommandPage : Page, Controls.IToastHost
         snippet.Comment = name;
         snippet.SetSteps(steps);
         AppState.Current.SaveSettings();
-        AppLog.Hint($"Запись избранного изменена: {name}");
+        ActionLog.Info($"Запись избранного изменена: {name}", null, AppSection.Command, Workspace, steps.Select(s => OneLine(s.Text)));
 
         EndEdit();
     }
@@ -634,7 +640,7 @@ public partial class CommandPage : Page, Controls.IToastHost
         }
 
         AppState.Current.SaveSettings();
-        AppLog.Hint($"Из избранного удалено: {snippet.Comment}");
+        ActionLog.Info($"Из избранного удалено: {snippet.Comment}", null, AppSection.Command, Workspace);
 
         BookBox.IsDropDownOpen = book.Count > 0;
     }
@@ -658,17 +664,29 @@ public partial class CommandPage : Page, Controls.IToastHost
         }
 
         AppState.Current.SaveSettings();
-        AppLog.Hint($"Из истории команд удалено: {value}");
+        ActionLog.Info($"Из истории команд удалено: {OneLine(value)}", null, AppSection.Command, Workspace, [value.TrimEnd()]);
 
         HistoryBox.IsDropDownOpen = history.Count > 0;
     }
 
     // ── запуск ──────────────────────────────────────────────────────────────
 
-    /// <summary>«Выполнить тут»: все окна вкладки по очереди на её отмеченных серверах.</summary>
+    /// <summary>
+    /// «Выполнить»: все окна вкладки по очереди на её отмеченных серверах; со свитчем «Везде» —
+    /// все командные вкладки. ▶ и Ctrl+Enter у окна — всегда только эта вкладка.
+    /// </summary>
     private async void OnRun(object sender, RoutedEventArgs e)
     {
-        if (Workspace is { } workspace)
+        if (Workspace is not { } workspace)
+        {
+            return;
+        }
+
+        if (AppState.Current.Everywhere)
+        {
+            await RunEverywhereAsync(workspace);
+        }
+        else
         {
             await RunGuardedAsync(workspace, null, onlyThis: false);
         }
@@ -693,17 +711,12 @@ public partial class CommandPage : Page, Controls.IToastHost
     }
 
     /// <summary>
-    /// «Выполнить везде» — команды запускаются во всех командных вкладках сразу, каждая со своими
-    /// окнами и серверами. Личные вкладки копирования не запускаются: у них свой момент —
+    /// «Выполнить» со свитчем «Везде» — команды запускаются во всех командных вкладках сразу, каждая
+    /// со своими окнами и серверами. Личные вкладки копирования не запускаются: у них свой момент —
     /// после удачного копирования. Сводка показывается на вкладке, с которой нажали.
     /// </summary>
-    private async void OnRunEverywhere(object sender, RoutedEventArgs e)
+    private async Task RunEverywhereAsync(Workspace workspace)
     {
-        if (Workspace is not { } workspace)
-        {
-            return;
-        }
-
         var all = AppState.Current.CommandTabs.Where(t => !t.IsPersonal).ToList();
 
         // широкое действие: команды уходят со всех вкладок сразу — сначала спросить.
@@ -714,7 +727,7 @@ public partial class CommandPage : Page, Controls.IToastHost
                 string.Empty,
                 "Выполнить везде"))
         {
-            AppLog.Hint("«Выполнить везде» отменено.");
+            AppLog.Hint("Запуск на всех вкладках отменён.");
             return;
         }
 
@@ -733,7 +746,7 @@ public partial class CommandPage : Page, Controls.IToastHost
 
         if (chosen.Count == 0)
         {
-            AppLog.Info("«Выполнить везде»: запускать нечего — все вкладки пропущены.");
+            AppLog.Info("Запуск на всех вкладках: запускать нечего — все вкладки пропущены.");
             return;
         }
 
@@ -743,7 +756,7 @@ public partial class CommandPage : Page, Controls.IToastHost
             return;
         }
 
-        AppLog.Info($"«Выполнить везде» — команды запускаются во всех вкладках: {chosen.Count}.");
+        AppLog.Info($"Везде: команды запускаются во всех вкладках: {chosen.Count}.");
 
         // операции стартуют синхронно, поэтому строки уже созданы и попадут в сводку
         var running = chosen.Select(w => w.RunCommandAsync(notify: false, approved: true)).ToList();

@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.IO;
@@ -86,7 +86,8 @@ public sealed class AppState : ObservableObject
         _section is AppSection.Command or AppSection.Download or AppSection.Explorer ? _section : AppSection.Files;
 
     private AppSection SectionOf(Workspace workspace) =>
-        CommandTabs.Contains(workspace) ? AppSection.Command
+        ReferenceEquals(workspace, _serversDesk) ? AppSection.Servers
+        : CommandTabs.Contains(workspace) ? AppSection.Command
         : DownloadTabs.Contains(workspace) ? AppSection.Download
         : ExplorerTabs.Contains(workspace) ? AppSection.Explorer
         : AppSection.Files;
@@ -118,6 +119,7 @@ public sealed class AppState : ObservableObject
 
             _activeSet = value;
             Raise();
+            RaiseMany(nameof(ServersLeft), nameof(ServersRight));
 
             foreach (var set in ServerSets)
             {
@@ -131,6 +133,75 @@ public sealed class AppState : ObservableObject
 
     public event Action<ServerSet>? ActiveServerSetChanged;
 
+    // ── две таблицы на странице «Серверы»: выбранная правится кнопками и ярлыками наверху ──
+
+    /// <summary>Набор невыбранной таблицы. Нет своего — первый другой набор.</summary>
+    private ServerSet? _otherSet;
+
+    /// <summary>Выбрана правая таблица.</summary>
+    private bool _serversRightActive;
+
+    private ServerSet OtherServerSet =>
+        _otherSet is { } other && ServerSets.Contains(other)
+            ? other
+            : ServerSets.FirstOrDefault(s => !ReferenceEquals(s, ActiveServerSet)) ?? ActiveServerSet;
+
+    public ServerSet ServersLeft => _serversRightActive ? OtherServerSet : ActiveServerSet;
+
+    public ServerSet ServersRight => _serversRightActive ? ActiveServerSet : OtherServerSet;
+
+    /// <summary>Какая таблица выбрана: ярлыки наверху и кнопки действуют на неё.</summary>
+    public bool ServersRightActive
+    {
+        get => _serversRightActive;
+        set
+        {
+            if (_serversRightActive == value)
+            {
+                return;
+            }
+
+            // наборы остаются на своих местах — меняется только то, какая таблица выбрана
+            var other = OtherServerSet;
+            _otherSet = ActiveServerSet;
+            _serversRightActive = value;
+            _activeSet = null;
+            ActiveServerSet = other;
+            Raise();
+            RaiseMany(nameof(ServersLeft), nameof(ServersRight), nameof(ActiveServerSet));
+
+            foreach (var set in ServerSets)
+            {
+                set.RaiseActive();
+            }
+
+            SaveServerSets();
+        }
+    }
+
+    /// <summary>
+    /// Набор другой таблицы — куда «Перенести» и «Скопировать» отправляют отмеченные. Совпадает с выбранным,
+    /// когда обе таблицы показывают один набор.
+    /// </summary>
+    public ServerSet ServersOther => _serversRightActive ? ServersLeft : ServersRight;
+
+    /// <summary>Серверы сменили набор («Перенести») — таблицы и вкладки перечитывают списки.</summary>
+    public void ServersRegrouped()
+    {
+        foreach (var set in ServerSets)
+        {
+            set.Sync(Servers);
+        }
+
+        foreach (var workspace in AllWorkspaces)
+        {
+            workspace.SyncServers(Servers);
+        }
+
+        SaveServers();
+        SaveWorkspaces();
+    }
+
     // ── панель «Целевые сервера»: набор, «Все» и одиночный выбор — у открытой вкладки ──
 
     /// <summary>
@@ -143,7 +214,20 @@ public sealed class AppState : ObservableObject
 
     /// <summary>Вкладка, чья панель сейчас на экране. Пока вкладки не загружены — нет.</summary>
     private Workspace? PaneOwner =>
-        Tabs.Count > 0 ? ActiveWorkspace : null;
+        _section == AppSection.Servers ? ServersDesk
+        : Tabs.Count > 0 ? ActiveWorkspace : null;
+
+    private Workspace? _serversDesk;
+
+    /// <summary>
+    /// Своя скрытая вкладка раздела «Серверы»: проверка связи и строки действий ложатся в её
+    /// терминал. Раньше раздел брал открытую вкладку копирования — ответ проверки оказывался
+    /// в «Копировании», а замок и галочки панели слева правили ту вкладку.
+    /// </summary>
+    public Workspace ServersDesk => _serversDesk ??= new Workspace("servers-desk", "Серверы", isMain: false);
+
+    /// <summary>Чей вывод в терминале внизу: на «Серверах» — своей вкладки раздела, иначе открытой.</summary>
+    public Workspace TerminalOwner => _section == AppSection.Servers ? ServersDesk : ActiveWorkspace;
 
     /// <summary>Набор серверов открытой вкладки — он стоит в панели «Целевые сервера».</summary>
     public ServerSet? PaneSet => PaneOwner?.PaneSet;
@@ -207,6 +291,7 @@ public sealed class AppState : ObservableObject
 
         PaneOwner?.RaiseSection();
         RaiseMany(nameof(PaneSet), nameof(PaneAllSets), nameof(PaneSetTitle), nameof(PaneShowIp), nameof(PaneShowUser));
+        RaiseTerminalChecks();
         RaiseSingleSelect();
     }
 
@@ -370,6 +455,11 @@ public sealed class AppState : ObservableObject
         }
     }
 
+    // ── «авто», «*.txt» и CopyPass в строке терминала — свои у вкладки ─────────
+    //
+    // Записи по разделам (…BySection) остались от версий, где галочки были у раздела:
+    // читаются один раз, когда вкладка из такого файла получает галочки своего раздела.
+
     /// <summary>У раздела до 3.0.9 были «авто» копирования, а не команд — запасное значение.</summary>
     private static bool UsesCopyingAutos(AppSection section) =>
         section is AppSection.Files or AppSection.Download or AppSection.Explorer;
@@ -385,76 +475,162 @@ public sealed class AppState : ObservableObject
         : UsesCopyingAutos(section) ? Settings.AutoCopyCurrentAfterCopy : Settings.AutoCopyCurrent;
 
     /// <summary>
-    /// Галочка «авто» у «Все логи» — у каждого раздела своя. Буфер обмена один, поэтому
-    /// из двух автокопий работает одна: отметка этой снимает соседнюю.
+    /// «Авто» раздела: по окончании вывод запуска сам уходит в буфер. Галочка одна на обе кнопки —
+    /// раньше их было две, и включённая любая из них считается включённой.
     /// </summary>
-    public bool AutoCopyAll
-    {
-        get => StoredAutoCopyAll(_section);
-        set => SetAutoCopy(_section, all: value, current: value ? false : AutoCopyCurrent);
-    }
+    public bool StoredAutoCopy(AppSection section) => StoredAutoCopyAll(section) || StoredAutoCopyCurrent(section);
 
-    /// <summary>Галочка «авто» у «Текущий лог» — у каждого раздела своя.</summary>
+    /// <summary>
+    /// Галочка «авто» в строке терминала — у каждой вкладки своя, одна на «Все логи» и «Текущий лог»:
+    /// по окончании копируется вывод всех серверов запуска (при одном сервере — он же текущий).
+    /// </summary>
     public bool AutoCopyCurrent
     {
-        get => StoredAutoCopyCurrent(_section);
-        set => SetAutoCopy(_section, all: value ? false : AutoCopyAll, current: value);
+        get => PaneOwner?.AutoCopy ?? false;
+        set
+        {
+            if (PaneOwner is not { } owner || !owner.SetAutoCopy(value))
+            {
+                return;
+            }
+
+            // сняли «авто» вкладки — её CopyPass вставлять нечего, снимается и она
+            if (!value && owner.SetCopyPass(false))
+            {
+                Services.CopyPass.Disarm();
+            }
+
+            RaiseTerminalChecks();
+        }
     }
 
-    private void SetAutoCopy(AppSection section, bool all, bool current)
+    /// <summary>Галочки строки терминала — у открытой вкладки: сменилась вкладка или раздел, они перечитываются.</summary>
+    private void RaiseTerminalChecks() =>
+        RaiseMany(nameof(AutoCopyCurrent), nameof(CopyPass), nameof(CopyPassAvailable), nameof(LogAsFile));
+
+    /// <summary>CopyPass и «*.txt» работают вместе с «авто»: без неё галочки гаснут.</summary>
+    public bool CopyPassAvailable => AutoCopyCurrent;
+
+    /// <summary>Вкладка, чья операция: её галочки решают, что делать с выводом по окончании.</summary>
+    public Workspace TabOfBatch(OperationBatch batch) => OwnerOf(batch) ?? ActiveWorkspace;
+
+    /// <summary>«*.txt» раздела из файла прежних версий — только для переноса во вкладки.</summary>
+    private bool LegacyLogAsFile(AppSection section) =>
+        Settings.LogAsFileBySection.TryGetValue(section.ToString(), out var on) && on;
+
+    /// <summary>Галочка «*.txt» в строке терминала — у каждой вкладки своя, погашена без «авто».</summary>
+    public bool LogAsFile
     {
-        if (StoredAutoCopyAll(section) == all && StoredAutoCopyCurrent(section) == current)
+        get => PaneOwner is { } owner && owner.LogAsFile && CopyPassAvailable;
+        set
         {
-            return;
-        }
+            if ((value && !CopyPassAvailable) || PaneOwner is not { } owner || !owner.SetLogAsFile(value))
+            {
+                return;
+            }
 
+            Raise();
+        }
+    }
+
+    /// <summary>
+    /// Свитч «Везде» рядом с «Выполнить»: включён — запуск идёт на всех вкладках раздела сразу,
+    /// после вопроса. «Сравнить» тоже идёт на всех, но без вопроса — оно ничего не меняет. Свой у раздела.
+    /// </summary>
+    public bool Everywhere
+    {
+        get => Settings.EverywhereBySection.TryGetValue(_section.ToString(), out var on) && on;
+        set
+        {
+            if (Everywhere == value)
+            {
+                return;
+            }
+
+            Settings.EverywhereBySection[_section.ToString()] = value;
+            Raise();
+            SaveSettings();
+            AppLog.Hint(EverywhereHint(_section, value));
+        }
+    }
+
+    /// <summary>Пояснение к свитчу «Везде»: что теперь делают кнопки раздела.</summary>
+    private static string EverywhereHint(AppSection section, bool on)
+    {
+        var run = section switch
+        {
+            AppSection.Files => "скопирует",
+            AppSection.Download => "скачает",
+            _ => "запустит команды",
+        };
+        var compare = section is AppSection.Files or AppSection.Download;
+
+        return on
+            ? $"Везде включено: «Выполнить» {run} во всех вкладках раздела, спросив перед запуском"
+              + (compare ? ", а «Сравнить» сверит все вкладки." : ".")
+            : compare
+                ? "Везде выключено: «Выполнить» и «Сравнить» работают только в открытой вкладке."
+                : "Везде выключено: «Выполнить» работает только в открытой вкладке.";
+    }
+
+    /// <summary>Куда писать разовые действия раздела; нет своей записи — всё включено.</summary>
+    public ActionOutputPrefs ActionOutputOf(AppSection section) =>
+        Settings.ActionOutputBySection.TryGetValue(section.ToString(), out var prefs) ? prefs : new ActionOutputPrefs();
+
+    /// <summary>Шестерёнка поменяла галочку раздела — запись появляется у раздела и сохраняется.</summary>
+    public void SetActionOutput(AppSection section, Action<ActionOutputPrefs> change)
+    {
         var key = section.ToString();
-        Settings.AutoCopyAllBySection[key] = all;
-        Settings.AutoCopyCurrentBySection[key] = current;
 
-        // сняли последнюю «авто» раздела — его CopyPass вставлять нечего, снимается и она
-        if (!all && !current && SetStoredCopyPass(section, false))
+        if (!Settings.ActionOutputBySection.TryGetValue(key, out var prefs))
         {
-            Services.CopyPass.Disarm();
+            prefs = new ActionOutputPrefs();
+            Settings.ActionOutputBySection[key] = prefs;
         }
 
-        RaiseMany(nameof(AutoCopyAll), nameof(AutoCopyCurrent), nameof(CopyPass), nameof(CopyPassAvailable));
+        change(prefs);
         SaveSettings();
     }
 
-    /// <summary>CopyPass работает вместе с «авто»: без неё галочка гаснет.</summary>
-    public bool CopyPassAvailable => AutoCopyAll || AutoCopyCurrent;
+    /// <summary>
+    /// CopyPass есть только там, где жмут «Выполнить»: «Команда», «Копирование», «Скачивание».
+    /// В «Проводнике» и на «Серверах» её нет — там нечего отправлять в чат.
+    /// </summary>
+    public static bool OffersCopyPass(AppSection section) =>
+        section is AppSection.Command or AppSection.Files or AppSection.Download;
 
-    /// <summary>CopyPass раздела, как сохранена. Раздел без своей записи берёт общую галочку прежних версий.</summary>
-    public bool StoredCopyPass(AppSection section) =>
-        Settings.CopyPassBySection.TryGetValue(section.ToString(), out var on) ? on : Settings.CopyPass;
+    public System.Windows.Visibility CopyPassVisibility =>
+        OffersCopyPass(_section) ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
 
-    /// <returns>Галочка изменилась.</returns>
-    private bool SetStoredCopyPass(AppSection section, bool value)
-    {
-        if (StoredCopyPass(section) == value)
-        {
-            return false;
-        }
+    /// <summary>CopyPass раздела из файла прежних версий — только для переноса во вкладки.</summary>
+    private bool LegacyCopyPass(AppSection section) =>
+        OffersCopyPass(section) && (Settings.CopyPassBySection.TryGetValue(section.ToString(), out var on) ? on : Settings.CopyPass);
 
-        Settings.CopyPassBySection[section.ToString()] = value;
-        return true;
-    }
-
-    /// <summary>Раздел, из которого операция: им выбирается CopyPass для автокопии её вывода.</summary>
-    public AppSection SectionOfBatch(OperationBatch batch) =>
-        batch.Section ?? (OwnerOf(batch) is { } owner ? SectionOf(owner) : _section);
+    /// <summary>CopyPass вкладки, как сохранена: в разделе без CopyPass её нет.</summary>
+    public bool CopyPassOf(Workspace tab) => OffersCopyPass(SectionOf(tab)) && tab.CopyPass;
 
     /// <summary>
-    /// Галочка CopyPass в строке терминала — у каждого раздела своя. В разделе, где «авто»
+    /// Вкладка из файла прежней версии, где «авто», «*.txt» и CopyPass были у раздела:
+    /// она получает галочки своего раздела — после обновления всё работает как раньше.
+    /// </summary>
+    private void InitLegacyTerminalChecks(Workspace tab, WorkspaceState state, AppSection section)
+    {
+        if (state.AutoCopy is null)
+        {
+            tab.InitTerminalChecks(StoredAutoCopy(section), LegacyLogAsFile(section), LegacyCopyPass(section));
+        }
+    }
+
+    /// <summary>
+    /// Галочка CopyPass в строке терминала — у каждой вкладки своя. Во вкладке, где «авто»
     /// не стоит, показывается снятой и погашенной.
     /// </summary>
     public bool CopyPass
     {
-        get => StoredCopyPass(_section) && CopyPassAvailable;
+        get => PaneOwner is { } owner && CopyPassOf(owner) && CopyPassAvailable;
         set
         {
-            if ((value && !CopyPassAvailable) || !SetStoredCopyPass(_section, value))
+            if ((value && !CopyPassAvailable) || PaneOwner is not { } owner || !owner.SetCopyPass(value))
             {
                 return;
             }
@@ -466,7 +642,6 @@ public sealed class AppState : ObservableObject
             }
 
             Raise();
-            SaveSettings();
         }
     }
 
@@ -490,9 +665,23 @@ public sealed class AppState : ObservableObject
         }
     }
 
-    /// <summary>Галочка «+ команды» есть только в разделе «Копирование».</summary>
+    /// <summary>
+    /// Галочка «+ команды» — только в «Копировании» и только у вкладки с включённым свитчем
+    /// команд после копирования: без него копировать вместе нечего.
+    /// </summary>
     public System.Windows.Visibility ChainCopyVisibility =>
-        _section == AppSection.Files ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+        _section == AppSection.Files && ActiveWorkspace is { AfterCopyEnabled: true }
+            ? System.Windows.Visibility.Visible
+            : System.Windows.Visibility.Collapsed;
+
+    /// <summary>
+    /// Отмеченные серверы в панели слева выделены рамкой и фоном — там, где по ним что-то запускается:
+    /// «Копирование», «Команда», «Скачивание». На «Серверах» галочки слева значат другое.
+    /// </summary>
+    public bool PaneHighlightsPicks => _section is AppSection.Files or AppSection.Command or AppSection.Download;
+
+    /// <summary>Свитч команд после копирования переключили — галочка «+ команды» появляется или прячется.</summary>
+    public void RaiseChainCopy() => Raise(nameof(ChainCopyVisibility));
 
     /// <summary>
     /// Личные команды строки копирования — для поля вывода, которое показывает их следом:
@@ -549,7 +738,8 @@ public sealed class AppState : ObservableObject
     /// </summary>
     public OperationBatch? ChainFor(OperationBatch copy)
     {
-        if (!Settings.CopyWithChain)
+        // у сравнения личные команды не идут — их прошлый вывод к его отчёту не клеится
+        if (!Settings.CopyWithChain || copy.OperationName.StartsWith(Workspace.CompareName, StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
@@ -579,7 +769,9 @@ public sealed class AppState : ObservableObject
         ReferenceEquals(w.CommandBatch, batch)
         || ReferenceEquals(w.CopyBatch, batch)
         || ReferenceEquals(w.SummaryBatch, batch)
-        || ReferenceEquals(w.CheckBatch, batch));
+        || ReferenceEquals(w.CheckBatch, batch))
+        ?? (_serversDesk is { } desk && (ReferenceEquals(desk.CheckBatch, batch) || ReferenceEquals(desk.CopyBatch, batch)
+            || ReferenceEquals(desk.CommandBatch, batch) || ReferenceEquals(desk.SummaryBatch, batch)) ? desk : null);
 
     /// <summary>
     /// Вкладка, которую пользователь видит сейчас: на «Команде» — открытая командная,
@@ -596,7 +788,7 @@ public sealed class AppState : ObservableObject
         };
         set
         {
-            if (value is null)
+            if (value is null || ReferenceEquals(value, _serversDesk))
             {
                 return;
             }
@@ -647,6 +839,7 @@ public sealed class AppState : ObservableObject
             }
 
             Raise();
+            Raise(nameof(TerminalOwner));
 
             // статус на ярлыке нужен, чтобы не бегать по вкладкам: зашли — он уже не нужен.
             // Метку идущей операции не трогаем: она гаснет сама по её окончании.
@@ -659,6 +852,7 @@ public sealed class AppState : ObservableObject
 
             // у вкладки свой набор и свой одиночный выбор — панель слева переключается на них
             RaisePane();
+            RaiseChainCopy();
             ActiveWorkspaceChanged?.Invoke(value);
             SaveWorkspaces();
         }
@@ -690,7 +884,8 @@ public sealed class AppState : ObservableObject
 
             // лента показывает вкладки открытого раздела — сначала список, потом выбор в нём
             RaiseMany(nameof(Section), nameof(Tabs), nameof(ShowsWorkspaceTabs), nameof(ShowsServerSetTabs), nameof(ShowsTabStrip),
-                nameof(AutoCopyAll), nameof(AutoCopyCurrent), nameof(CopyPass), nameof(CopyPassAvailable), nameof(ChainCopyVisibility),
+                nameof(AutoCopyCurrent), nameof(CopyPass), nameof(CopyPassAvailable), nameof(CopyPassVisibility), nameof(LogAsFile), nameof(ChainCopyVisibility), nameof(PaneHighlightsPicks),
+                nameof(Everywhere), nameof(TerminalOwner),
                 nameof(PaneShowIp), nameof(PaneShowUser));
             RaisePane();
             EnforceSingleSelect();
@@ -717,6 +912,7 @@ public sealed class AppState : ObservableObject
 
                 Raise(nameof(ActiveWorkspace));
                 RaiseDim();
+                RaiseChainCopy();
                 ActiveWorkspaceChanged?.Invoke(now);
             }
         }
@@ -759,7 +955,11 @@ public sealed class AppState : ObservableObject
         AppLog.Debug($"Загружено серверов: {Servers.Count}");
 
         LoadServerSets();
-        ServerSets.CollectionChanged += (_, _) => Raise(nameof(ShowsSetSwitcher));
+        ServerSets.CollectionChanged += (_, _) =>
+        {
+            RaiseMany(nameof(ShowsSetSwitcher), nameof(ServersLeft), nameof(ServersRight));
+            RaiseSetsCanClose();
+        };
         Servers.CollectionChanged += OnServersChanged;
 
         LoadWorkspaces();
@@ -772,15 +972,15 @@ public sealed class AppState : ObservableObject
 
     // ── наборы серверов ────────────────────────────────────────────────────────
 
-    public ServerSet AddServerSet()
+    public ServerSet AddServerSet(bool archived = false)
     {
-        var set = new ServerSet(Guid.NewGuid().ToString("N"), NextSetTitle(), isMain: ServerSets.Count == 0);
+        var set = new ServerSet(Guid.NewGuid().ToString("N"), NextSetTitle()) { IsArchived = archived };
 
         // новый набор пустой: серверы в него добавляются руками
         ServerSets.Add(set);
         SaveServerSets();
 
-        AppLog.Hint($"Добавлен набор серверов «{set.Title}». Всего наборов: {ServerSets.Count}.");
+        ActionLog.Info($"Добавлен набор серверов «{set.Title}» · всего наборов {ServerSets.Count}", null, AppSection.Servers);
         return set;
     }
 
@@ -790,9 +990,9 @@ public sealed class AppState : ObservableObject
     /// </summary>
     public bool RemoveServerSet(ServerSet set)
     {
-        if (set.IsMain)
+        if (!set.CanClose)
         {
-            AppLog.Hint("Первый набор серверов закрыть нельзя.", LogLevel.Warning);
+            AppLog.Hint("Последний набор в ленте закрыть нельзя.", LogLevel.Warning);
             return false;
         }
 
@@ -816,8 +1016,11 @@ public sealed class AppState : ObservableObject
 
         if (ReferenceEquals(_activeSet, set))
         {
-            ActiveServerSet = ServerSets[Math.Max(0, index - 1)];
+            ActiveServerSet = NeighborSet(index, set.IsArchived);
         }
+
+        // имена — до удаления: после него у набора серверов уже нет
+        var gone = doomed.Select(s => s.Display).ToList();
 
         foreach (var server in doomed)
         {
@@ -830,7 +1033,7 @@ public sealed class AppState : ObservableObject
         // вкладки, у которых был этот набор, переходят на первый
         RaisePane();
 
-        AppLog.Warn($"Набор серверов «{set.Title}» закрыт, удалено серверов: {doomed.Count}.");
+        ActionLog.Warn($"Набор серверов «{set.Title}» закрыт, удалено серверов: {gone.Count}", null, AppSection.Servers, null, gone);
         return true;
     }
 
@@ -844,6 +1047,8 @@ public sealed class AppState : ObservableObject
         WriteJson(AppPaths.ServerSetsFile, new ServerSetsFile
         {
             ActiveId = ActiveServerSet.Id,
+            OtherId = OtherServerSet.Id,
+            RightActive = _serversRightActive,
             Sets = ServerSets.Select(s => s.ToState()).ToList(),
         });
     }
@@ -868,11 +1073,17 @@ public sealed class AppState : ObservableObject
                 var state = states[i];
                 var set = new ServerSet(
                     string.IsNullOrWhiteSpace(state.Id) ? Guid.NewGuid().ToString("N") : state.Id,
-                    string.IsNullOrWhiteSpace(state.Title) ? (i == 0 ? "Основной" : $"Набор {i + 1}") : state.Title,
-                    isMain: i == 0);
+                    string.IsNullOrWhiteSpace(state.Title) ? (i == 0 ? "Основной" : $"Набор {i + 1}") : state.Title);
 
                 set.RestoreSingleSelect(state.SingleSelect ?? true, state.SingleSelectCopy);
+                set.IsArchived = state.Archived;
                 ServerSets.Add(set);
+            }
+
+            // в основной ленте всегда есть хоть один набор
+            if (ServerSets.All(s => s.IsArchived))
+            {
+                ServerSets[0].IsArchived = false;
             }
 
             // сервер без набора или из пропавшего набора не теряем — он уходит в первый
@@ -891,6 +1102,8 @@ public sealed class AppState : ObservableObject
             }
 
             _activeSet = ServerSets.FirstOrDefault(s => s.Id == file?.ActiveId) ?? ServerSets[0];
+            _otherSet = ServerSets.FirstOrDefault(s => s.Id == file?.OtherId);
+            _serversRightActive = file?.RightActive == true;
             _legacyAllSets = file?.LegacyShowAll == true;
             _legacyAllSingleSelect = file?.LegacyAllSingleSelect ?? true;
             _legacyAllSingleSelectCopy = file?.LegacyAllSingleSelectCopy == true;
@@ -951,6 +1164,7 @@ public sealed class AppState : ObservableObject
             VerifyChecksums = source?.VerifyChecksums ?? Settings.VerifyChecksums,
             ReplaceWithoutAsking = source?.ReplaceWithoutAsking ?? false,
             ExcludeMasks = source?.ExcludeMasks ?? string.Empty,
+            UseGlobalExcludes = source?.UseGlobalExcludes ?? true,
             MatchByDate = source?.MatchByDate ?? false,
 
             // первая вкладка раздела — «отличающиеся по контрольной сумме», как с чистой установки
@@ -980,9 +1194,9 @@ public sealed class AppState : ObservableObject
         tabs.Add(workspace);
         SaveWorkspaces();
 
-        AppLog.Hint(workspace.IsArchived
-            ? $"Добавлена вкладка «{workspace.Title}» — в архиве. Всего вкладок: {tabs.Count}."
-            : $"Добавлена вкладка «{workspace.Title}». Всего вкладок: {tabs.Count}.");
+        ActionLog.Info(workspace.IsArchived
+            ? $"Добавлена вкладка «{workspace.Title}» — в архиве · всего вкладок {tabs.Count}"
+            : $"Добавлена вкладка «{workspace.Title}» · всего вкладок {tabs.Count}", null, SectionOf(workspace), workspace);
         return workspace;
     }
 
@@ -1173,11 +1387,6 @@ public sealed class AppState : ObservableObject
     /// <summary>То же для наборов серверов: первый набор закреплён по той же причине.</summary>
     public bool MoveServerSet(ServerSet dragged, int to)
     {
-        if (dragged.IsMain)
-        {
-            return false;
-        }
-
         var from = ServerSets.IndexOf(dragged);
 
         if (from < 0)
@@ -1185,7 +1394,7 @@ public sealed class AppState : ObservableObject
             return false;
         }
 
-        to = Math.Clamp(to, 1, ServerSets.Count - 1);
+        to = Math.Clamp(to, 0, ServerSets.Count - 1);
 
         if (from == to)
         {
@@ -1301,7 +1510,7 @@ public sealed class AppState : ObservableObject
         }
 
         SaveWorkspaces();
-        AppLog.Hint($"Вкладка «{workspace.Title}» закрыта.");
+        ActionLog.Info($"Вкладка «{workspace.Title}» закрыта", null, SectionOf(workspace));
         return true;
     }
 
@@ -1340,15 +1549,74 @@ public sealed class AppState : ObservableObject
         workspace.IsArchived = archived;
 
         SaveWorkspaces();
-        AppLog.Hint(archived
-            ? $"«{workspace.Title}» — в архиве. Вкладка работает как прежде."
-            : $"«{workspace.Title}» — снова в основной ленте.");
+        ActionLog.Info(archived
+            ? $"Вкладка «{workspace.Title}» — в архиве, работает как прежде"
+            : $"Вкладка «{workspace.Title}» — снова в основной ленте", null, SectionOf(workspace), workspace);
         ArchiveChanged?.Invoke(workspace);
         return true;
     }
 
     /// <summary>Ярлык перешёл между основной лентой и архивом — окно перестраивает ленту.</summary>
     public event Action<Workspace>? ArchiveChanged;
+
+    /// <summary>
+    /// Набор серверов — в архив или обратно, как вкладка: работает как прежде, меняется только
+    /// лента, где виден ярлык. Последний набор основной ленты в архив не уходит.
+    /// </summary>
+    public bool SetArchived(ServerSet set, bool archived)
+    {
+        var index = ServerSets.IndexOf(set);
+
+        if (index < 0 || set.IsArchived == archived)
+        {
+            return false;
+        }
+
+        if (archived && ServerSets.Count(s => !s.IsArchived) <= 1)
+        {
+            AppLog.Hint("Последний набор в ленте в архив не убирается.", LogLevel.Warning);
+            return false;
+        }
+
+        // открытый набор уходит — выбранная таблица открывает соседа из той же ленты
+        if (ReferenceEquals(ActiveServerSet, set))
+        {
+            var next = NeighborSet(index, set.IsArchived);
+
+            if (!ReferenceEquals(next, set))
+            {
+                ActiveServerSet = next;
+            }
+        }
+
+        set.IsArchived = archived;
+        RaiseSetsCanClose();
+        SaveServerSets();
+
+        ActionLog.Info(archived
+            ? $"Набор «{set.Title}» — в архиве, работает как прежде"
+            : $"Набор «{set.Title}» — снова в основной ленте", null, AppSection.Servers);
+        SetArchiveChanged?.Invoke(set);
+        return true;
+    }
+
+    /// <summary>Набор ушёл в архив или вернулся — окно перестраивает ленту наборов.</summary>
+    public event Action<ServerSet>? SetArchiveChanged;
+
+    /// <summary>Сосед в той же ленте: слева, а нет — справа; нет и его — любой набор.</summary>
+    private ServerSet NeighborSet(int index, bool archived) =>
+        ServerSets.Take(index).LastOrDefault(s => s.IsArchived == archived)
+        ?? ServerSets.Skip(index + 1).FirstOrDefault(s => s.IsArchived == archived)
+        ?? ServerSets.FirstOrDefault(s => !s.IsArchived)
+        ?? ServerSets[0];
+
+    private void RaiseSetsCanClose()
+    {
+        foreach (var set in ServerSets)
+        {
+            set.RaiseCanClose();
+        }
+    }
 
     public void SaveWorkspaces()
     {
@@ -1397,6 +1665,32 @@ public sealed class AppState : ObservableObject
     }
 
     public void SaveSettings() => WriteJson(AppPaths.SettingsFile, Settings);
+
+    /// <summary>
+    /// Общие исключения — для всех вкладок «Копирования», «Проводника» и «Скачивания», вдобавок
+    /// к своим у вкладки. Сменились — каждая вкладка перекрашивает значок своей кнопки.
+    /// </summary>
+    public string GlobalExcludeMasks
+    {
+        get => Settings.GlobalExcludeMasks ?? string.Empty;
+        set
+        {
+            value ??= string.Empty;
+
+            if (value == GlobalExcludeMasks)
+            {
+                return;
+            }
+
+            Settings.GlobalExcludeMasks = value;
+            SaveSettings();
+
+            foreach (var tab in AllWorkspaces)
+            {
+                tab.RaiseGlobalExcludes();
+            }
+        }
+    }
 
     public void SaveAll()
     {
@@ -1447,6 +1741,7 @@ public sealed class AppState : ObservableObject
                 workspace.SelectCommandServers(state.CommandServerIds ?? state.SelectedServerIds);
                 workspace.Restore(state);
                 InitLegacyPane(workspace, state, copying: true);
+                InitLegacyTerminalChecks(workspace, state, AppSection.Files);
 
                 Workspaces.Add(workspace);
             }
@@ -1484,6 +1779,7 @@ public sealed class AppState : ObservableObject
                 tab.SelectCommandServers(state.CommandServerIds ?? new List<string>());
                 tab.Restore(state);
                 InitLegacyPane(tab, state, copying: false);
+                InitLegacyTerminalChecks(tab, state, AppSection.Command);
 
                 CommandTabs.Add(tab);
             }
@@ -1517,6 +1813,7 @@ public sealed class AppState : ObservableObject
                 tab.SelectServers(state.SelectedServerIds ?? new List<string>());
                 tab.Restore(state);
                 InitLegacyPane(tab, state, copying: true);
+                InitLegacyTerminalChecks(tab, state, AppSection.Download);
 
                 DownloadTabs.Add(tab);
             }
@@ -1551,6 +1848,7 @@ public sealed class AppState : ObservableObject
                 tab.SelectServers(state.SelectedServerIds ?? new List<string>());
                 tab.Restore(state);
                 InitLegacyPane(tab, state, copying: true);
+                InitLegacyTerminalChecks(tab, state, AppSection.Explorer);
 
                 ExplorerTabs.Add(tab);
             }

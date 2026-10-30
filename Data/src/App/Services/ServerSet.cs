@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using MultiServerSync.Core;
 using MultiServerSync.Models;
@@ -18,19 +18,33 @@ public sealed class ServerSet : ObservableObject
     private bool _singleSelect = true;
     private bool _singleSelectCopy;
 
-    public ServerSet(string id, string title, bool isMain)
+    public ServerSet(string id, string title)
     {
         Id = id;
-        IsMain = isMain;
         _title = title;
     }
 
     public string Id { get; }
 
-    /// <summary>Первый набор: его нельзя закрыть.</summary>
-    public bool IsMain { get; }
+    private bool _isArchived;
 
-    public bool CanClose => !IsMain;
+    /// <summary>
+    /// Ярлык в архиве под «+», а не в ленте. Набор работает как прежде: его видят вкладки,
+    /// его можно открыть в таблице. Сохраняет AppState.
+    /// </summary>
+    public bool IsArchived
+    {
+        get => _isArchived;
+        set => Set(ref _isArchived, value);
+    }
+
+    /// <summary>
+    /// Закрыть можно любой набор, кроме последнего в основной ленте: без наборов серверам
+    /// негде жить. Закреплённого «первого» нет — наборы переставляются мышью все.
+    /// </summary>
+    public bool CanClose => IsArchived || AppState.Current.ServerSets.Count(s => !s.IsArchived) > 1;
+
+    public void RaiseCanClose() => RaiseMany(nameof(CanClose), nameof(TabTooltip));
 
     public string Title
     {
@@ -91,9 +105,9 @@ public sealed class ServerSet : ObservableObject
 
     public string TabCounts => $"серверов {Rows.Count}";
 
-    public string TabTooltip => IsMain
-        ? $"{Title} — {TabCounts}. Первый набор: его нельзя закрыть"
-        : $"{Title} — {TabCounts}";
+    public string TabTooltip => CanClose
+        ? $"{Title} — {TabCounts}"
+        : $"{Title} — {TabCounts}. Последний набор в ленте: его нельзя закрыть";
 
     /// <summary>Открытый сейчас набор — ярлык подсвечен.</summary>
     public bool IsActive => ReferenceEquals(this, AppState.Current.ActiveServerSet);
@@ -155,7 +169,14 @@ public sealed class ServerSet : ObservableObject
         RaiseCounts();
     }
 
-    public ServerSetState ToState() => new() { Id = Id, Title = Title, SingleSelect = SingleSelect, SingleSelectCopy = SingleSelectCopy };
+    public ServerSetState ToState() => new()
+    {
+        Id = Id,
+        Title = Title,
+        SingleSelect = SingleSelect,
+        SingleSelectCopy = SingleSelectCopy,
+        Archived = IsArchived,
+    };
 
     private void OnRowChanged(object? sender, PropertyChangedEventArgs e)
     {

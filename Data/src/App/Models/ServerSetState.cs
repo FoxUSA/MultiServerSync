@@ -1,4 +1,4 @@
-namespace MultiServerSync.Models;
+﻿namespace MultiServerSync.Models;
 
 /// <summary>
 /// Вкладка раздела «Серверы» в том виде, в каком она лежит в UserData\serversets.json.
@@ -18,12 +18,21 @@ public sealed class ServerSetState
 
     /// <summary>«Одиночный выбор» на «Копировании» — свой, отдельный от командного.</summary>
     public bool SingleSelectCopy { get; set; }
+
+    /// <summary>Ярлык набора в архиве под «+».</summary>
+    public bool Archived { get; set; }
 }
 
 /// <summary>Файл наборов целиком.</summary>
 public sealed class ServerSetsFile
 {
     public string ActiveId { get; set; } = string.Empty;
+
+    /// <summary>Набор невыбранной таблицы на странице «Серверы».</summary>
+    public string? OtherId { get; set; }
+
+    /// <summary>Выбрана правая таблица.</summary>
+    public bool RightActive { get; set; }
 
     /// <summary>
     /// Прежние общие «Все» и одиночный выбор на «Всех». Теперь это своё у каждой вкладки

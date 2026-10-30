@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Automation;
@@ -41,12 +41,12 @@ public static class CopyPass
     };
 
     /// <summary>Лог скопирован галочкой «авто» — ждать поля ввода, если CopyPass стоит.</summary>
-    /// <param name="section">
-    /// Раздел операции. Она могла закончиться, пока открыт другой раздел, поэтому смотрится CopyPass её раздела.
+    /// <param name="tab">
+    /// Вкладка операции. Она могла закончиться, пока открыта другая, поэтому смотрится CopyPass её вкладки.
     /// </param>
-    public static void Arm(AppSection section)
+    public static void Arm(Workspace tab)
     {
-        if (!AppState.Current.StoredCopyPass(section))
+        if (!AppState.Current.CopyPassOf(tab))
         {
             return;
         }
@@ -345,20 +345,23 @@ public static class CopyPass
             return false;
         }
 
-        // буфер читается только из потока окна
-        var text = dispatcher.Invoke(() =>
+        // буфер читается только из потока окна; длинный лог лежит там файлом (галочка «*.txt»)
+        return dispatcher.Invoke(() =>
         {
             try
             {
-                return Clipboard.ContainsText() ? Clipboard.GetText() : null;
+                if (Clipboard.ContainsFileDropList())
+                {
+                    return ClipboardText.IsOurLogFile(Clipboard.GetFileDropList());
+                }
+
+                return ClipboardText.IsTerminalOutput(Clipboard.ContainsText() ? Clipboard.GetText() : null);
             }
             catch (Exception)
             {
-                return null;
+                return false;
             }
         });
-
-        return ClipboardText.IsTerminalOutput(text);
     }
 
     private const byte VkShift = 0x10;

@@ -293,7 +293,60 @@ public static class LocalPicker
             }
         }
 
-        private IShellItemArray? Selection()
+        /// <summary>
+        /// Что выделено в списке окна. GetSelectedItems строит выбор по полю «Имя файла», а папки
+        /// туда не попадают — из нескольких выделенных папок он отдаёт одну. Поэтому выделение
+        /// берётся у самого списка проводника внутри окна, а GetSelectedItems — запасной путь.
+        /// </summary>
+        private IShellItemArray? Selection() => ViewSelection() ?? DialogSelection();
+
+        private IShellItemArray? ViewSelection()
+        {
+            object? browser = null, view = null;
+
+            try
+            {
+                if (dialog is not IComServiceProvider provider)
+                {
+                    return null;
+                }
+
+                var service = TopLevelBrowser;
+                var iid = typeof(IShellBrowser).GUID;
+
+                if (provider.QueryService(ref service, ref iid, out browser) != 0 || browser is not IShellBrowser shell)
+                {
+                    return null;
+                }
+
+                shell.QueryActiveShellView(out view);
+
+                // ничего не выделено — пусто, а не открытая папка: её добавит OnButtonClicked сам
+                return view is IFolderView2 list && list.GetSelection(false, out var items) == 0 ? items : null;
+            }
+            catch (COMException)
+            {
+                return null;
+            }
+            catch (InvalidCastException)
+            {
+                return null;
+            }
+            finally
+            {
+                if (view is not null && Marshal.IsComObject(view))
+                {
+                    Marshal.ReleaseComObject(view);
+                }
+
+                if (browser is not null && Marshal.IsComObject(browser))
+                {
+                    Marshal.ReleaseComObject(browser);
+                }
+            }
+        }
+
+        private IShellItemArray? DialogSelection()
         {
             try
             {
@@ -532,6 +585,122 @@ public static class LocalPicker
         void OnCheckButtonToggled(IntPtr customize, uint control, bool state);
 
         void OnControlActivating(IntPtr customize, uint control);
+    }
+
+    /// <summary>SID_STopLevelBrowser — у окна выбора так зовут его проводник со списком файлов.</summary>
+    private static readonly Guid TopLevelBrowser = new("4C96BE40-915C-11CF-99D3-00AA004AE837");
+
+    [ComImport]
+    [Guid("6d5140c1-7436-11ce-8034-00aa006009fa")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IComServiceProvider
+    {
+        [PreserveSig]
+        int QueryService(ref Guid service, ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out object result);
+    }
+
+    /// <summary>Проводник внутри окна; методы после QueryActiveShellView не нужны и не объявлены.</summary>
+    [ComImport]
+    [Guid("000214E2-0000-0000-C000-000000000046")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IShellBrowser
+    {
+        void GetWindow(out IntPtr window);
+
+        void ContextSensitiveHelp(bool enterMode);
+
+        void InsertMenusSB(IntPtr shared, IntPtr widths);
+
+        void SetMenuSB(IntPtr shared, IntPtr oleMenu, IntPtr activeObject);
+
+        void RemoveMenusSB(IntPtr shared);
+
+        void SetStatusTextSB([MarshalAs(UnmanagedType.LPWStr)] string text);
+
+        void EnableModelessSB(bool enable);
+
+        void TranslateAcceleratorSB(IntPtr message, ushort id);
+
+        void BrowseObject(IntPtr pidl, uint flags);
+
+        void GetViewStateStream(uint mode, out IntPtr stream);
+
+        void GetControlWindow(uint id, out IntPtr window);
+
+        void SendControlMsg(uint id, uint message, IntPtr wParam, IntPtr lParam, out IntPtr result);
+
+        void QueryActiveShellView([MarshalAs(UnmanagedType.Interface)] out object view);
+    }
+
+    /// <summary>Список файлов окна; методы до GetSelection не вызываются, они здесь ради порядка.</summary>
+    [ComImport]
+    [Guid("1af3a467-214f-4298-908e-06b03e0b39f9")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IFolderView2
+    {
+        // IFolderView
+        void GetCurrentViewMode(out uint mode);
+
+        void SetCurrentViewMode(uint mode);
+
+        void GetFolder(ref Guid riid, out IntPtr folder);
+
+        void Item(int index, out IntPtr pidl);
+
+        void ItemCount(uint flags, out int count);
+
+        void Items(uint flags, ref Guid riid, out IntPtr items);
+
+        void GetSelectionMarkedItem(out int item);
+
+        void GetFocusedItem(out int item);
+
+        void GetItemPosition(IntPtr pidl, out long point);
+
+        void GetSpacing(out long point);
+
+        void GetDefaultSpacing(out long point);
+
+        void GetAutoArrange();
+
+        void SelectItem(int item, uint flags);
+
+        void SelectAndPositionItems(uint count, IntPtr pidls, IntPtr points, uint flags);
+
+        // IFolderView2
+        void SetGroupBy(IntPtr key, bool ascending);
+
+        void GetGroupBy(out IntPtr key, out bool ascending);
+
+        void SetViewProperty(IntPtr pidl, IntPtr key, IntPtr value);
+
+        void GetViewProperty(IntPtr pidl, IntPtr key, IntPtr value);
+
+        void SetTileViewProperties(IntPtr pidl, [MarshalAs(UnmanagedType.LPWStr)] string list);
+
+        void SetExtendedTileViewProperties(IntPtr pidl, [MarshalAs(UnmanagedType.LPWStr)] string list);
+
+        void SetText(int type, [MarshalAs(UnmanagedType.LPWStr)] string text);
+
+        void SetCurrentFolderFlags(uint mask, uint flags);
+
+        void GetCurrentFolderFlags(out uint flags);
+
+        void GetSortColumnCount(out int count);
+
+        void SetSortColumns(IntPtr columns, int count);
+
+        void GetSortColumns(IntPtr columns, int count);
+
+        void GetItem(int item, ref Guid riid, out IntPtr result);
+
+        void GetVisibleItem(int start, bool previous, out int item);
+
+        void GetSelectedItem(int start, out int item);
+
+        /// <summary>Всё выделенное в списке — и файлы, и папки.</summary>
+        [PreserveSig]
+        int GetSelection(bool noneImpliesFolder, out IShellItemArray items);
     }
 
     [ComImport]
