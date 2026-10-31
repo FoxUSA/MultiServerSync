@@ -60,6 +60,9 @@ public partial class App : Application
         // колесо мыши во всех окнах листает то, что под курсором
         WheelScroll.Register();
 
+        // щелчок по пустому месту снимает курсор с поля ввода
+        FocusDrop.Register();
+
         startup.Mark("подготовка");
         AppState.Current.Load();
         startup.Mark("загрузка серверов и вкладок");
@@ -84,6 +87,9 @@ public partial class App : Application
         }
 
         PasswordVault.OpenAll();
+
+        // память отмены начинается с открытых паролей: их расшифровка — не действие
+        UndoJournal.Start();
 
         // терминалы вкладок и журнал — какими их оставили
         TerminalStore.Load();
@@ -123,6 +129,8 @@ public partial class App : Application
         {
             // выходим в любом случае
         }
+
+        AtomicFile.Flush();
 
         base.OnExit(e);
     }

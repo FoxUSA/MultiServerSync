@@ -11,15 +11,20 @@ using MultiServerSync.Views.Dialogs;
 namespace MultiServerSync.Views.Pages;
 
 /// <summary>
-/// Страница скачивания — зеркало копирования: таблица файлов и папок, каждая строка со своего
-/// сервера, папка здесь, те же правила «что качать» и исключения. У каждой вкладки свои строки и папка.
+/// Страница скачивания — зеркало копирования: вкладка делится на окна, в каждом таблица файлов и папок,
+/// каждая строка со своего сервера, папка здесь, те же правила «что качать» и исключения.
+/// Панель кнопок и параметры показывают окно в фокусе.
 /// </summary>
-public partial class DownloadPage : Page, Controls.IToastHost
+public partial class DownloadPage : Page
 {
     public DownloadPage()
     {
         InitializeComponent();
-        BarToast.Follow(EverywhereSwitch);
+
+        Controls.CopyWindowLayout.Follow(WindowsScroll, WindowsList);
+        Controls.CopyWindowLayout.Reorder(WindowsScroll, WindowsList, () => Workspace);
+        Controls.CopyWindowLayout.WatchFailures(this, () => Workspace);
+        Controls.CopyWindowLayout.RestoreBand(BandRow, BandLeft);
 
         DataContext = AppState.Current.ActiveWorkspace;
         AppState.Current.ActiveWorkspaceChanged += workspace =>
@@ -50,6 +55,9 @@ public partial class DownloadPage : Page, Controls.IToastHost
 
     private readonly System.Windows.Threading.DispatcherTimer _checkTimer;
 
+    private void OnBandMoved(object sender, System.Windows.Controls.Primitives.DragCompletedEventArgs e) =>
+        Controls.CopyWindowLayout.SaveBand(BandRow, BandLeft);
+
     /// <summary>Размер, файлы и даты в списке — заново с серверов, если открыта вкладка скачивания.</summary>
     private void Check()
     {
@@ -63,12 +71,76 @@ public partial class DownloadPage : Page, Controls.IToastHost
 
     private Workspace? Workspace => DataContext as Workspace;
 
+    /// <summary>Щелчок в окне переводит на него панель и параметры — раньше, чем сработает его кнопка.</summary>
+    private void OnWindowMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        Core.FocusDrop.Leave(sender);
+        FocusWindowOf(sender);
+    }
+
+    private void OnWindowKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) => FocusWindowOf(sender);
+
+    private void FocusWindowOf(object sender)
+    {
+        if (sender is FrameworkElement { DataContext: CopyWindow window })
+        {
+            Workspace?.FocusWindow(window);
+        }
+    }
+
+    private void OnAddWindow(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: CopyWindow after } && Workspace is { } workspace && !workspace.BlockedByLock())
+        {
+            Controls.CopyWindowLayout.Show(WindowsList, workspace.AddCopyWindow(after));
+        }
+    }
+
+    private void OnRemoveWindow(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: CopyWindow window } && Workspace is { } workspace && !workspace.BlockedByLock())
+        {
+            workspace.RemoveCopyWindow(window);
+        }
+    }
+
+    /// <summary>Кнопка «Название»: плашки названий в окнах вкладки. Замок не держит: без плашек названия не сменить.</summary>
+    private void OnWindowNames(object sender, RoutedEventArgs e)
+    {
+        if (Workspace is { } workspace)
+        {
+            workspace.ShowWindowNames = !workspace.ShowWindowNames;
+        }
+    }
+
+    private void OnWindowNameDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount == 2 && sender is FrameworkElement plaque && Workspace is { } workspace)
+        {
+            e.Handled = true;
+            Controls.CopyWindowLayout.Rename(plaque, workspace);
+        }
+    }
+
+    private void OnWindowGridLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is DataGrid grid)
+        {
+            Controls.CopyWindowLayout.Arrange(grid, "downloads");
+        }
+    }
+
     /// <summary>
     /// Обзор сервера с выбором нескольких файлов и папок разом. Сервер меняется прямо в обзоре —
     /// строки встают с тем сервером, на котором их выбрали.
     /// </summary>
     private void OnBrowseAdd(object sender, RoutedEventArgs e)
     {
+        if (Workspace?.BlockedByLock() == true)
+        {
+            return;
+        }
+
         if (Workspace is not { } workspace)
         {
             return;
@@ -99,12 +171,31 @@ public partial class DownloadPage : Page, Controls.IToastHost
         Browse(workspace, server, start);
     }
 
-    /// <summary>Двойной щелчок по строке — обзор её сервера: папка открывается сама, у файла — его папка.</summary>
-    private void OnRowDoubleClick(object sender, MouseButtonEventArgs e)
+    /// <summary>Значок в поле «Куда скачать»: папка вкладки — в буфер обмена.</summary>
+    private void OnCopyLocalFolder(object sender, RoutedEventArgs e)
     {
-        if (Workspace is not { } workspace
-            || e.OriginalSource is not DependencyObject source
-            || ItemsControl.ContainerFromElement(PathsList, source) is not DataGridRow { Item: DownloadItem item })
+        var path = Workspace?.LocalFolder?.Trim();
+
+        if (string.IsNullOrEmpty(path))
+        {
+            AppLog.Hint("Папка для скачивания не указана — копировать нечего.", LogLevel.Warning);
+            return;
+        }
+
+        if (ClipboardText.Copy(path))
+        {
+            AppLog.Hint("Путь скопирован: " + path);
+        }
+    }
+
+    /// <summary>Двойной щелчок: мимо строк — как «Выбрать на сервере» для этого окна, по строке — другой адрес для неё.</summary>
+    private void OnGridDoubleClick(object sender, MouseButtonEventArgs e) =>
+        Controls.CopyWindowLayout.DoubleClick(e, () => OnBrowseAdd(sender, e), row => PickForRow((DownloadItem)row));
+
+    /// <summary>Тот же обзор, с папки этой строки и на её сервере: первое выбранное встаёт на её место, остальное — новыми строками.</summary>
+    private void PickForRow(DownloadItem item)
+    {
+        if (Workspace is not { } workspace || workspace.BlockedByLock())
         {
             return;
         }
@@ -115,39 +206,77 @@ public partial class DownloadPage : Page, Controls.IToastHost
             return;
         }
 
-        Browse(workspace, server, item.IsDirectory ? item.Path : SshService.ParentRemote(item.Path));
+        if (PickOnServer(server, SshService.ParentRemote(item.Path)) is not { } dialog)
+        {
+            return;
+        }
+
+        var first = dialog.SelectedItems[0];
+        var path = SshService.NormalizeRemote(first.FullPath);
+
+        // тот же адрес — ничего не меняется и в журнал не идёт
+        if (dialog.Server.Id != item.ServerId || path != item.Path)
+        {
+            if (workspace.ReplaceDownload(item, dialog.Server.Id, path, first.IsDirectory, first.Length, first.Modified) is { } problem)
+            {
+                AppLog.Hint("Путь не сменён: " + problem + ".", LogLevel.Warning);
+            }
+            else
+            {
+                LogReplaced(workspace, item, dialog.Server, path);
+            }
+        }
+
+        if (dialog.SelectedItems.Count > 1)
+        {
+            AddPicked(workspace, dialog.Server, dialog.SelectedItems.Skip(1).ToList());
+        }
+
+        Check();
     }
 
-    /// <summary>Обзор с выбором нескольких файлов и папок; выбранное встаёт строками с сервером обзора.</summary>
-    private void Browse(Workspace workspace, ServerEntry server, string start)
+    private RemoteBrowserWindow? PickOnServer(ServerEntry server, string start)
     {
         var dialog = new RemoteBrowserWindow(server, start, pickMany: true)
         {
             Owner = Window.GetWindow(this),
         };
 
-        if (dialog.ShowDialog() != true || dialog.SelectedItems.Count == 0)
+        return dialog.ShowDialog() == true && dialog.SelectedItems.Count > 0 ? dialog : null;
+    }
+
+    /// <summary>Обзор с выбором нескольких файлов и папок; выбранное встаёт строками с сервером обзора.</summary>
+    private void Browse(Workspace workspace, ServerEntry server, string start)
+    {
+        if (PickOnServer(server, start) is not { } dialog)
         {
             return;
         }
 
-        var added = workspace.AddDownloads(
-            dialog.Server,
-            dialog.SelectedItems.Select(i => (i.FullPath, i.IsDirectory, i.Length, i.Modified)));
+        AddPicked(workspace, dialog.Server, dialog.SelectedItems);
+
+        // у новых папок сразу видны число файлов и размер
+        Check();
+    }
+
+    private static void AddPicked(Workspace workspace, ServerEntry server, IReadOnlyList<FsEntry> picked)
+    {
+        var added = workspace.AddDownloads(server, picked.Select(i => (i.FullPath, i.IsDirectory, i.Length, i.Modified)));
 
         if (added > 0)
         {
-            ActionLog.Info($"Добавлено для скачивания: {added} · всего {workspace.Downloads.Count}", dialog.Server, AppSection.Download, workspace,
-                dialog.SelectedItems.Select(i => (i.IsDirectory ? "папка " : "файл ") + i.FullPath));
+            ActionLog.Info($"Добавлено для скачивания: {added} · всего {workspace.Downloads.Count}", server, AppSection.Download, workspace,
+                picked.Select(i => (i.IsDirectory ? "папка " : "файл ") + i.FullPath));
         }
         else
         {
             AppLog.Hint("Всё выбранное уже есть в списке.");
         }
-
-        // у новых папок сразу видны число файлов и размер
-        Check();
     }
+
+    private static void LogReplaced(Workspace workspace, DownloadItem item, ServerEntry? server, string path) =>
+        ActionLog.Info($"Путь строки сменён: {item.Name} → {path.TrimEnd('/').Split('/').Last()}", server, AppSection.Download, workspace,
+            [$"было: {item.Path}", $"стало: {path}"]);
 
     private void OnToggleAll(object sender, RoutedEventArgs e)
     {
@@ -160,6 +289,11 @@ public partial class DownloadPage : Page, Controls.IToastHost
 
     private void OnExcludes(object sender, RoutedEventArgs e)
     {
+        if (Workspace?.BlockedByLock() == true)
+        {
+            return;
+        }
+
         if (Workspace is { } workspace)
         {
             ExcludeDialog.Edit(Window.GetWindow(this), workspace, "скачивании");
@@ -178,6 +312,11 @@ public partial class DownloadPage : Page, Controls.IToastHost
     /// <summary>Значок в конце строки: вписать другой путь на том же сервере — строка встаёт на то же место.</summary>
     private void OnEditRowPath(object sender, RoutedEventArgs e)
     {
+        if (Workspace?.BlockedByLock() == true)
+        {
+            return;
+        }
+
         if (sender is not FrameworkElement { DataContext: DownloadItem item } || Workspace is not { } workspace)
         {
             return;
@@ -196,13 +335,17 @@ public partial class DownloadPage : Page, Controls.IToastHost
             return;
         }
 
-        ActionLog.Info($"Путь строки сменён: {item.Name} → {dialog.Value.TrimEnd('/').Split('/').Last()}", item.Server, AppSection.Download, workspace,
-            [$"было: {item.Path}", $"стало: {dialog.Value}"]);
+        LogReplaced(workspace, item, item.Server, dialog.Value);
     }
 
     /// <summary>Корзина в конце строки: строка уходит из списка, на сервере ничего не удаляется.</summary>
     private void OnRemoveRow(object sender, RoutedEventArgs e)
     {
+        if (Workspace?.BlockedByLock() == true)
+        {
+            return;
+        }
+
         if (sender is FrameworkElement { DataContext: DownloadItem item } && Workspace is { } workspace)
         {
             workspace.Downloads.Remove(item);
@@ -211,32 +354,13 @@ public partial class DownloadPage : Page, Controls.IToastHost
         }
     }
 
-    private void OnRemoveSelected(object sender, RoutedEventArgs e)
-    {
-        if (Workspace is not { } workspace)
-        {
-            return;
-        }
-
-        var picked = PathsList.SelectedItems.OfType<DownloadItem>().ToList();
-
-        if (picked.Count == 0)
-        {
-            AppLog.Hint("Выделите строки, которые убрать (Ctrl, Shift).");
-            return;
-        }
-
-        foreach (var item in picked)
-        {
-            workspace.Downloads.Remove(item);
-        }
-
-        ActionLog.Info($"Убрано строк: {picked.Count}", null, AppSection.Download, workspace,
-            picked.Select(i => $"{i.ServerLabel}: {i.Path}").Append($"в списке осталось: {workspace.Downloads.Count}"));
-    }
-
     private void OnClear(object sender, RoutedEventArgs e)
     {
+        if (Workspace?.BlockedByLock() == true)
+        {
+            return;
+        }
+
         if (Workspace is { Downloads.Count: > 0 } workspace)
         {
             var gone = workspace.Downloads.Select(i => $"{i.ServerLabel}: {i.Path}").ToList();
@@ -247,6 +371,11 @@ public partial class DownloadPage : Page, Controls.IToastHost
 
     private void OnPickFolder(object sender, RoutedEventArgs e)
     {
+        if (Workspace?.BlockedByLock() == true)
+        {
+            return;
+        }
+
         if (Workspace is not { } workspace)
         {
             return;
@@ -381,5 +510,4 @@ public partial class DownloadPage : Page, Controls.IToastHost
         AppState.Current.NotifyFinished(workspace.SummaryBatch);
     }
 
-    Controls.ActionToast Controls.IToastHost.PageToast => BarToast;
 }

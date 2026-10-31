@@ -259,4 +259,37 @@ public sealed class ServerEntry : ObservableObject
         ShowNotesInPane = ShowNotesInPane,
         IsSelected = IsSelected,
     };
+
+    /// <summary>Поля на этот момент — для отмены. Нерасшифрованный пароль тоже остаётся как был.</summary>
+    public ServerEntry Snapshot()
+    {
+        var copy = Clone();
+        copy.Id = Id;
+        copy._stored = _stored;
+        copy._storedKeyPassphrase = _storedKeyPassphrase;
+        return copy;
+    }
+
+    /// <summary>Вернуть поля снимка. Id у сервера тот же: его знают отметки вкладок.</summary>
+    public void RestoreFrom(ServerEntry saved)
+    {
+        SetId = saved.SetId;
+        Name = saved.Name;
+        Host = saved.Host;
+        Port = saved.Port;
+        User = saved.User;
+        Password = saved.Password;
+        _stored = saved._stored;
+        KeyPath = saved.KeyPath;
+        KeyPassphrase = saved.KeyPassphrase;
+        _storedKeyPassphrase = saved._storedKeyPassphrase;
+        JumpServerId = saved.JumpServerId;
+        Notes = saved.Notes;
+        ShowNotesInPane = saved.ShowNotesInPane;
+    }
+
+    /// <summary>Для сравнения снимков. Отметка и статус проверки сюда не входят: сами по себе это не правка сервера.</summary>
+    public string Signature() => string.Join(
+        '\u241E', Id, SetId, Name, Host, Port, User, Password, _stored ?? string.Empty, KeyPath, KeyPassphrase,
+        _storedKeyPassphrase ?? string.Empty, JumpServerId, Notes, ShowNotesInPane);
 }

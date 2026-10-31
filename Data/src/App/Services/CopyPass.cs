@@ -333,7 +333,7 @@ public static class CopyPass
         Thread.Sleep(80);
         Press(VkReturn);
 
-        AppLog.Hint("CopyPass: лог вставлен и отправлен.");
+        AppLog.Hint("CopyPass: лог вставлен и отправлен.", LogLevel.Success);
     }
 
     private static bool ClipboardHoldsOurLog()

@@ -1,0 +1,22 @@
+<UserControl
+  x:Class="MultiServerSync.Views.Controls.UndoButtons"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+
+  <!--  отменить и вернуть действие открытой вкладки: одни и те же на всех страницах с отменой  -->
+  <StackPanel Orientation="Horizontal">
+    <Button
+      x:Name="UndoButton"
+      Click="OnUndo"
+      Style="{StaticResource UndoButtonStyle}">
+      <ui:SymbolIcon FontSize="16" Symbol="ArrowUndo24" />
+    </Button>
+    <Button
+      x:Name="RedoButton"
+      Click="OnRedo"
+      Style="{StaticResource UndoButtonStyle}">
+      <ui:SymbolIcon FontSize="16" Symbol="ArrowRedo24" />
+    </Button>
+  </StackPanel>
+</UserControl>

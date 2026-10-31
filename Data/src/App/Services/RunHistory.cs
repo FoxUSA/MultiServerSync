@@ -596,9 +596,7 @@ public static class RunHistory
     {
         try
         {
-            var tmp = AppPaths.RunHistoryFile + ".tmp";
-            System.IO.File.WriteAllText(tmp, JsonSerializer.Serialize(File, JsonOptions));
-            System.IO.File.Move(tmp, AppPaths.RunHistoryFile, overwrite: true);
+            AtomicFile.Write(AppPaths.RunHistoryFile, JsonSerializer.Serialize(File, JsonOptions));
         }
         catch (Exception ex)
         {

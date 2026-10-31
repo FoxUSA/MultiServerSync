@@ -73,6 +73,7 @@
         Content="Скопировать"
         Icon="{ui:SymbolIcon ArrowRight24}"
         ToolTip="Копии отмеченных серверов выбранной таблицы — в набор другой таблицы, оригиналы остаются на месте" />
+      <controls:UndoButtons Margin="0,0,4,4" VerticalAlignment="Center" />
     </WrapPanel>
 
     <!--  два набора рядом, как панели «Проводника»: щелчок выбирает таблицу, ярлык наверху меняет её набор  -->
@@ -100,6 +101,7 @@
           <DataGrid.Columns>
             <DataGridTemplateColumn
               Width="44"
+              MinWidth="44"
               CellStyle="{StaticResource FirstColumnCellStyle}"
               CellTemplate="{StaticResource RowCheckTemplate}"
               HeaderStyle="{StaticResource FirstColumnHeaderStyle}">
@@ -169,6 +171,7 @@
           <DataGrid.Columns>
             <DataGridTemplateColumn
               Width="44"
+              MinWidth="44"
               CellStyle="{StaticResource FirstColumnCellStyle}"
               CellTemplate="{StaticResource RowCheckTemplate}"
               HeaderStyle="{StaticResource FirstColumnHeaderStyle}">
@@ -219,13 +222,5 @@
           Visibility="Collapsed" />
       </Grid>
     </Grid>
-
-    <!--  плашка о нажатии — внутри таблиц, у нижнего края: главной кнопки, за которой встать, тут нет  -->
-    <controls:ActionToast
-      x:Name="BarToast"
-      Grid.Row="1"
-      Margin="0,0,16,16"
-      HorizontalAlignment="Right"
-      VerticalAlignment="Bottom" />
   </Grid>
 </Page>

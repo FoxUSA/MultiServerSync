@@ -9,22 +9,77 @@
   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
   ScrollViewer.CanContentScroll="False">
 
+  <Page.Resources>
+    <!--  карточка на всю высоту строки таблицы: соседи в ряду одной высоты  -->
+    <Style
+      x:Key="SettingCardStyle"
+      BasedOn="{StaticResource {x:Type ui:CardControl}}"
+      TargetType="ui:CardControl">
+      <Setter Property="Margin" Value="0,0,0,4" />
+      <Setter Property="VerticalAlignment" Value="Stretch" />
+    </Style>
+
+    <Style x:Key="GroupTitleStyle" TargetType="TextBlock">
+      <Setter Property="Margin" Value="0,0,0,4" />
+      <Setter Property="FontSize" Value="18" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style x:Key="CardNoteStyle" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+  </Page.Resources>
+
   <ScrollViewer VerticalScrollBarVisibility="Auto">
-    <StackPanel Margin="12">
+    <!--  два ровных столбца: что про саму программу — слева, что про работу с серверами — справа.
+          Всё справа в карточках одной ширины, чтобы края кнопок и полей шли одной линией  -->
+    <Grid Margin="12">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="4" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
       <TextBlock
+        Grid.Row="0"
+        Grid.ColumnSpan="3"
         Margin="0,0,0,4"
         FontSize="24"
         FontWeight="SemiBold"
         Text="Настройки" />
 
-      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Info24}">
+      <TextBlock
+        Grid.Row="1"
+        Grid.Column="0"
+        Style="{StaticResource GroupTitleStyle}"
+        Text="Программа" />
+      <TextBlock
+        Grid.Row="1"
+        Grid.Column="2"
+        Style="{StaticResource GroupTitleStyle}"
+        Text="Подключения и запуск" />
+
+      <ui:CardControl
+        Grid.Row="2"
+        Grid.Column="0"
+        Icon="{ui:SymbolIcon Info24}"
+        Style="{StaticResource SettingCardStyle}">
         <ui:CardControl.Header>
           <StackPanel>
-            <TextBlock FontWeight="SemiBold" Text="Версия программы" />
-            <TextBlock
-              x:Name="ManifestPathText"
-              Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-              TextWrapping="Wrap" />
+            <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="Версия программы" />
+            <TextBlock x:Name="ManifestPathText" Style="{StaticResource CardNoteStyle}" />
           </StackPanel>
         </ui:CardControl.Header>
         <TextBlock
@@ -34,50 +89,56 @@
       </ui:CardControl>
 
       <!--  обновление: само окно с шагами и полосой — то же, что открывает кнопка в шапке  -->
-      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowDownload24}">
+      <ui:CardControl
+        Grid.Row="3"
+        Grid.Column="0"
+        Icon="{ui:SymbolIcon ArrowDownload24}"
+        Style="{StaticResource SettingCardStyle}">
         <ui:CardControl.Header>
           <StackPanel>
-            <TextBlock FontWeight="SemiBold" Text="Обновление программы" />
-            <TextBlock
-              Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-              Text="Проверяется при каждом запуске. Заменяются Data и MultiServerSync.exe, UserData не трогается"
-              TextWrapping="Wrap" />
+            <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="Обновление программы" />
+            <TextBlock Style="{StaticResource CardNoteStyle}" Text="Проверяется при каждом запуске. Заменяются Data и MultiServerSync.exe, UserData не трогается" />
           </StackPanel>
         </ui:CardControl.Header>
         <ui:Button
-          MinWidth="200"
+          Width="200"
           Click="OnUpdateClick"
           Content="Проверить обновления"
           Icon="{ui:SymbolIcon ArrowSync24}" />
       </ui:CardControl>
 
-      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Globe24}">
+      <ui:CardControl
+        Grid.Row="4"
+        Grid.Column="0"
+        Icon="{ui:SymbolIcon Globe24}"
+        Style="{StaticResource SettingCardStyle}">
         <ui:CardControl.Header>
           <StackPanel>
-            <TextBlock FontWeight="SemiBold" Text="Страница утилиты" />
-            <TextBlock
-              Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-              Text="https://byfox.dev/multiserversync/" />
+            <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="Страница утилиты" />
+            <TextBlock Style="{StaticResource CardNoteStyle}" Text="https://byfox.dev/multiserversync/" />
           </StackPanel>
         </ui:CardControl.Header>
         <ui:Button
-          MinWidth="200"
+          Width="200"
           Click="OnOpenSite"
-          Content="Открыть" />
+          Content="Открыть"
+          Icon="{ui:SymbolIcon Open24}" />
       </ui:CardControl>
 
-      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon DarkTheme24}">
+      <ui:CardControl
+        Grid.Row="5"
+        Grid.Column="0"
+        Icon="{ui:SymbolIcon DarkTheme24}"
+        Style="{StaticResource SettingCardStyle}">
         <ui:CardControl.Header>
           <StackPanel>
-            <TextBlock FontWeight="SemiBold" Text="Тема оформления" />
-            <TextBlock
-              Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-              Text="Светлая, тёмная или как в системе" />
+            <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="Тема оформления" />
+            <TextBlock Style="{StaticResource CardNoteStyle}" Text="Светлая, тёмная или как в системе" />
           </StackPanel>
         </ui:CardControl.Header>
         <ComboBox
           x:Name="ThemeBox"
-          Width="180"
+          Width="200"
           SelectionChanged="OnThemeChanged">
           <ComboBoxItem Content="Тёмная" Tag="Dark" />
           <ComboBoxItem Content="Светлая" Tag="Light" />
@@ -85,137 +146,153 @@
         </ComboBox>
       </ui:CardControl>
 
-      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Flash24}">
+      <ui:CardControl
+        Grid.Row="2"
+        Grid.Column="2"
+        Icon="{ui:SymbolIcon Flash24}"
+        Style="{StaticResource SettingCardStyle}">
         <ui:CardControl.Header>
           <StackPanel>
-            <TextBlock FontWeight="SemiBold" Text="Одновременных подключений" />
-            <TextBlock
-              Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-              Text="Сколько серверов обрабатывать параллельно" />
+            <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="Одновременных подключений" />
+            <TextBlock Style="{StaticResource CardNoteStyle}" Text="Сколько серверов обрабатывать параллельно" />
           </StackPanel>
         </ui:CardControl.Header>
         <ui:NumberBox
           x:Name="ParallelBox"
-          Width="140"
+          Width="200"
           ClearButtonEnabled="False"
           Maximum="64"
           Minimum="1"
           ValueChanged="OnNumbersChanged" />
       </ui:CardControl>
 
-      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Timer24}">
+      <ui:CardControl
+        Grid.Row="3"
+        Grid.Column="2"
+        Icon="{ui:SymbolIcon Timer24}"
+        Style="{StaticResource SettingCardStyle}">
         <ui:CardControl.Header>
           <StackPanel>
-            <TextBlock FontWeight="SemiBold" Text="Таймаут подключения, сек" />
-            <TextBlock
-              Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-              Text="Сколько ждать установления SSH-сессии" />
+            <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="Таймаут подключения, сек" />
+            <TextBlock Style="{StaticResource CardNoteStyle}" Text="Сколько ждать установления SSH-сессии" />
           </StackPanel>
         </ui:CardControl.Header>
         <ui:NumberBox
           x:Name="ConnectTimeoutBox"
-          Width="140"
+          Width="200"
           ClearButtonEnabled="False"
           Maximum="600"
           Minimum="5"
           ValueChanged="OnNumbersChanged" />
       </ui:CardControl>
 
-      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Clock24}">
+      <ui:CardControl
+        Grid.Row="4"
+        Grid.Column="2"
+        Icon="{ui:SymbolIcon Clock24}"
+        Style="{StaticResource SettingCardStyle}">
         <ui:CardControl.Header>
           <StackPanel>
-            <TextBlock FontWeight="SemiBold" Text="Таймаут команды, сек" />
-            <TextBlock
-              Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-              Text="Максимальное время выполнения одной команды" />
+            <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="Таймаут команды, сек" />
+            <TextBlock Style="{StaticResource CardNoteStyle}" Text="Максимальное время выполнения одной команды" />
           </StackPanel>
         </ui:CardControl.Header>
         <ui:NumberBox
           x:Name="CommandTimeoutBox"
-          Width="140"
+          Width="200"
           ClearButtonEnabled="False"
           Maximum="86400"
           Minimum="5"
           ValueChanged="OnNumbersChanged" />
       </ui:CardControl>
 
-      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ShieldCheckmark24}">
+      <ui:CardControl
+        Grid.Row="5"
+        Grid.Column="2"
+        Icon="{ui:SymbolIcon ShieldCheckmark24}"
+        Style="{StaticResource SettingCardStyle}">
         <ui:CardControl.Header>
           <StackPanel>
-            <TextBlock FontWeight="SemiBold" Text="Защита от двойного запуска команды" />
-            <TextBlock
-              Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-              Text="Ту же команду в течение 3 секунд после окончания — только повторным нажатием"
-              TextWrapping="Wrap" />
+            <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="Защита от двойного запуска команды" />
+            <TextBlock Style="{StaticResource CardNoteStyle}" Text="Ту же команду в течение 3 секунд после окончания — только повторным нажатием" />
           </StackPanel>
         </ui:CardControl.Header>
         <ui:ToggleSwitch x:Name="RepeatGuardSwitch" Click="OnRepeatGuardChanged" />
       </ui:CardControl>
 
       <TextBlock
-        Margin="0,0,0,4"
-        FontSize="18"
-        FontWeight="SemiBold"
+        Grid.Row="6"
+        Grid.Column="0"
+        Style="{StaticResource GroupTitleStyle}"
         Text="Расположение файлов" />
+      <TextBlock
+        Grid.Row="6"
+        Grid.Column="2"
+        Style="{StaticResource GroupTitleStyle}"
+        Text="Безопасность" />
 
-      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Folder24}">
+      <ui:CardControl
+        Grid.Row="7"
+        Grid.Column="0"
+        Icon="{ui:SymbolIcon Folder24}"
+        Style="{StaticResource SettingCardStyle}">
         <ui:CardControl.Header>
           <StackPanel>
-            <TextBlock FontWeight="SemiBold" Text="UserData — настройки, серверы, вкладки, логи" />
-            <TextBlock
-              x:Name="UserDataPathText"
-              Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-              TextWrapping="Wrap" />
+            <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="UserData — настройки, серверы, вкладки, логи" />
+            <TextBlock x:Name="UserDataPathText" Style="{StaticResource CardNoteStyle}" />
           </StackPanel>
         </ui:CardControl.Header>
         <ui:Button
+          Width="200"
           Click="OnOpenUserData"
           Content="Открыть"
           Icon="{ui:SymbolIcon FolderOpen24}" />
       </ui:CardControl>
 
-      <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Apps24}">
+      <ui:CardControl
+        Grid.Row="8"
+        Grid.Column="0"
+        Icon="{ui:SymbolIcon Apps24}"
+        Style="{StaticResource SettingCardStyle}">
         <ui:CardControl.Header>
           <StackPanel>
-            <TextBlock FontWeight="SemiBold" Text="Data — программа и библиотеки" />
-            <TextBlock
-              x:Name="DataPathText"
-              Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-              TextWrapping="Wrap" />
+            <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="Data — программа и библиотеки" />
+            <TextBlock x:Name="DataPathText" Style="{StaticResource CardNoteStyle}" />
           </StackPanel>
         </ui:CardControl.Header>
         <ui:Button
+          Width="200"
           Click="OnOpenData"
           Content="Открыть"
           Icon="{ui:SymbolIcon FolderOpen24}" />
       </ui:CardControl>
 
-      <!--  пароли в servers.json всегда зашифрованы; выбирается только чем  -->
-      <ui:CardControl Icon="{ui:SymbolIcon LockClosed24}">
+      <!--  пароли в servers.json всегда зашифрованы; выбирается только чем. Карточка на два ряда: поле и кнопка столбиком  -->
+      <ui:CardControl
+        Grid.Row="7"
+        Grid.RowSpan="2"
+        Grid.Column="2"
+        Icon="{ui:SymbolIcon LockClosed24}"
+        Style="{StaticResource SettingCardStyle}">
         <ui:CardControl.Header>
           <StackPanel>
-            <TextBlock FontWeight="SemiBold" Text="Пароли серверов" />
-            <TextBlock
-              x:Name="ProtectionText"
-              Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-              TextWrapping="Wrap" />
+            <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="Пароли серверов" />
+            <TextBlock x:Name="ProtectionText" Style="{StaticResource CardNoteStyle}" />
           </StackPanel>
         </ui:CardControl.Header>
-        <StackPanel Orientation="Horizontal">
-          <ui:Button
-            x:Name="ChangeMasterButton"
-            Margin="0,0,4,0"
-            Click="OnChangeMaster"
-            Content="Сменить пароль" />
-          <ComboBox
-            x:Name="ProtectionBox"
-            MinWidth="200"
-            SelectionChanged="OnProtectionChanged">
-            <ComboBoxItem Content="Учётная запись Windows" Tag="Windows" />
+        <StackPanel Width="200">
+          <ComboBox x:Name="ProtectionBox" SelectionChanged="OnProtectionChanged">
+            <ComboBoxItem Content="Вход в Windows" Tag="Windows" />
             <ComboBoxItem Content="Мастер-пароль" Tag="Master" />
           </ComboBox>
+          <ui:Button
+            x:Name="ChangeMasterButton"
+            Margin="0,4,0,0"
+            HorizontalAlignment="Stretch"
+            Click="OnChangeMaster"
+            Content="Сменить пароль" />
         </StackPanel>
       </ui:CardControl>
-    </StackPanel>
+    </Grid>
   </ScrollViewer>
 </Page>

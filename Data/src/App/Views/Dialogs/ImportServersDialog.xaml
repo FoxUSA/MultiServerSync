@@ -49,6 +49,7 @@
       <DataGrid.Columns>
         <DataGridTemplateColumn
           Width="40"
+          MinWidth="40"
           CellStyle="{StaticResource FirstColumnCellStyle}"
           HeaderStyle="{StaticResource FirstColumnHeaderStyle}">
           <DataGridTemplateColumn.CellTemplate>

@@ -128,6 +128,7 @@ public static class PasswordVault
             server.ForgetPassword();
         }
 
+        UndoJournal.ForgetServers();
         AppState.Current.SaveServers();
         ClearMasterSettings();
         AppLog.Warn("Мастер-пароль сброшен: пароли серверов стёрты, введите их заново.");

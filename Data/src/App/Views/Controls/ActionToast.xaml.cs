@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
@@ -7,28 +8,60 @@ using MultiServerSync.Services;
 
 namespace MultiServerSync.Views.Controls;
 
-/// <summary>Страница, у которой своя плашка о нажатии — у главной кнопки, а не в углу окна.</summary>
-public interface IToastHost
-{
-    ActionToast PageToast { get; }
-}
-
 /// <summary>
-/// Тихая плашка в правом нижнем углу: что сделано по последнему нажатию. Без неё кнопки
-/// вроде «Копировать» или «Удалить» выглядели так, будто ничего не произошло, — запись
-/// уходила только в журнал. Плашка повторяет запись журнала, держится несколько секунд
-/// и гаснет; новая запись заменяет прежнюю. Строки отдельных серверов по ходу операции
-/// сюда не идут — их десятки, итог операции и так придёт отдельной записью.
+/// Плашка: что сделано по последнему нажатию. Без неё кнопки вроде «Копировать» или «Удалить»
+/// выглядели так, будто ничего не произошло, — запись уходила только в журнал. Плашка повторяет
+/// запись журнала, держится несколько секунд и гаснет; новая запись заменяет прежнюю. Строки
+/// отдельных серверов по ходу операции сюда не идут — их десятки, итог операции и так придёт
+/// отдельной записью. Отказ встаёт под нажатой кнопкой, всё остальное — посередине окна.
 /// </summary>
 public partial class ActionToast : UserControl
 {
+    private const double EdgeGap = 8;
+    private const double ButtonGap = 4;
+
     private readonly DispatcherTimer _timer = new();
+
+    /// <summary>Плашка окна сама ищет себе место; плашка на месте стоит там, где её положила разметка.</summary>
+    private bool _floating;
+
+    /// <summary>Кнопка, которой отказано, в координатах окна. Null — посередине окна.</summary>
+    private Rect? _anchor;
+
+    private double _maxWidth = 460;
+
+    private Window? _window;
 
     public ActionToast()
     {
         InitializeComponent();
         _timer.Tick += (_, _) => Hide();
+
+        // щелчок в любом месте окна закрывает плашку: прочитано, ждать таймер незачем.
+        // Сквозь плашку щелчок проходит, поэтому и по ней самой тоже
+        Loaded += (_, _) =>
+        {
+            ReleaseWindow();
+            _window = Window.GetWindow(this);
+
+            if (_window is not null)
+            {
+                _window.PreviewMouseDown += OnWindowPress;
+            }
+        };
+        Unloaded += (_, _) => ReleaseWindow();
     }
+
+    private void ReleaseWindow()
+    {
+        if (_window is not null)
+        {
+            _window.PreviewMouseDown -= OnWindowPress;
+            _window = null;
+        }
+    }
+
+    private void OnWindowPress(object sender, MouseButtonEventArgs e) => HideNow();
 
     /// <summary>
     /// Крупная плашка — для той, что ставится посреди рабочего места (поля команды),
@@ -39,27 +72,44 @@ public partial class ActionToast : UserControl
         set
         {
             Message.FontSize = value ? 15 : 12;
-            Card.MaxWidth = value ? 820 : 460;
+            _maxWidth = value ? 820 : 460;
+            Card.MaxWidth = _maxWidth;
             Body.Padding = value ? new Thickness(18, 12, 18, 12) : new Thickness(12, 7, 12, 7);
             Dot.Width = Dot.Height = value ? 9 : 7;
             Dot.Margin = value ? new Thickness(0, 7, 11, 0) : new Thickness(0, 5, 9, 0);
         }
     }
 
-    /// <summary>Угловая плашка: повтор записи журнала. Записи, показанные на месте, она пропускает.</summary>
-    /// <returns>Плашка показала запись.</returns>
-    public bool Show(LogEntry entry)
+    /// <summary>Плашка окна: повтор записи журнала. Записи, показанные на месте, она пропускает.</summary>
+    /// <param name="anchor">Кнопка, которой отказано, в координатах окна; null — посередине окна.</param>
+    public void Show(LogEntry entry, Rect? anchor)
     {
         if (entry.ShownInPlace || entry.IsServerLine)
         {
-            return false;
+            return;
         }
 
+        if (!_floating)
+        {
+            _floating = true;
+
+            // пока плашка видна, окно может поменять размер
+            SizeChanged += (_, _) => Place();
+
+            if (Parent is FrameworkElement parent)
+            {
+                parent.SizeChanged += (_, _) => Place();
+            }
+        }
+
+        _anchor = anchor;
+
+        // посередине окна мелкое предупреждение глаза не находят
+        Large = anchor is null && entry.Level is LogLevel.Warning or LogLevel.Error;
         Display(entry);
-        return true;
     }
 
-    /// <summary>Погасить сразу, без угасания: новая запись встала в другую плашку или сменился раздел.</summary>
+    /// <summary>Погасить сразу, без угасания: щёлкнули по окну или сменился раздел.</summary>
     public void HideNow()
     {
         _timer.Stop();
@@ -71,50 +121,48 @@ public partial class ActionToast : UserControl
     /// <summary>Плашка на месте: показывает запись, сделанную <see cref="AppLog.WarnInPlace"/>.</summary>
     public void ShowInPlace(LogEntry entry) => Display(entry);
 
-    private FrameworkElement? _anchor;
-
-    /// <summary>
-    /// Плашка встаёт сразу справа от кнопки, по её середине. Сама плашка лежит в сетке страницы
-    /// поверх всех рядов: место пересчитывается, а раскладку она не раздвигает.
-    /// </summary>
-    public void Follow(FrameworkElement anchor)
-    {
-        _anchor = anchor;
-        HorizontalAlignment = HorizontalAlignment.Left;
-        VerticalAlignment = VerticalAlignment.Top;
-
-        anchor.SizeChanged += (_, _) => Place();
-        SizeChanged += (_, _) => Place();
-
-        if (Parent is FrameworkElement parent)
-        {
-            parent.SizeChanged += (_, _) => Place();
-        }
-    }
-
+    /// <summary>Под кнопкой, а не влезла снизу — над ней; посередине окна — по его нынешнему размеру. За край окна не выходит.</summary>
     private void Place()
     {
-        if (_anchor is not { IsVisible: true } anchor || Parent is not FrameworkElement parent)
+        if (!_floating || Parent is not FrameworkElement { ActualWidth: > 0 } parent)
         {
             return;
         }
 
-        Point spot;
+        var width = parent.ActualWidth;
+        var height = parent.ActualHeight;
 
-        try
+        Card.MaxWidth = Math.Min(_maxWidth, Math.Max(200, width - EdgeGap * 2));
+        Card.Measure(new Size(Card.MaxWidth, double.PositiveInfinity));
+
+        var size = Card.DesiredSize;
+        double left;
+        double top;
+
+        if (_anchor is { } button)
         {
-            spot = anchor.TranslatePoint(new Point(anchor.ActualWidth, anchor.ActualHeight / 2), parent);
+            left = button.Left;
+            top = button.Bottom + ButtonGap;
+
+            if (top + size.Height > height - EdgeGap)
+            {
+                top = button.Top - ButtonGap - size.Height;
+            }
         }
-        catch (InvalidOperationException)
+        else
         {
-            return;
+            left = (width - size.Width) / 2;
+
+            // не на самой середине, а выше: на трети окна сверху, ближе к тому, куда смотрят
+            top = height / 3 - size.Height / 2;
         }
 
-        var left = spot.X + 8;
-        Card.MaxWidth = Math.Max(200, Math.Min(460, parent.ActualWidth - left - 4));
-        // снизу запас с избытком: кнопка стоит у самого низа страницы, плашка чуть выше неё —
-        // без запаса сетка ужимала плашку под остаток места и у строки срезался низ (хвосты «у», «р», «д»)
-        Margin = new Thickness(left, Math.Max(0, spot.Y - ActualHeight / 2), 0, -1000);
+        left = Math.Clamp(left, EdgeGap, Math.Max(EdgeGap, width - size.Width - EdgeGap));
+        top = Math.Clamp(top, EdgeGap, Math.Max(EdgeGap, height - size.Height - EdgeGap));
+
+        // справа и снизу запас с избытком: у края окна сетка ужимала плашку под остаток места
+        // и у строки срезался низ (хвосты «у», «р», «д»)
+        Margin = new Thickness(left, top, -2000, -2000);
     }
 
     private void Display(LogEntry entry)
@@ -122,10 +170,8 @@ public partial class ActionToast : UserControl
         Message.Text = entry.Text;
         Dot.Fill = DotBrush(entry.Level);
 
-        // предупреждение — тусклой оранжевой рамкой, как истёкший «Хранить лог»; остальное — рамкой темы
-        // рамка всегда тусклая оранжевая — рамкой темы плашку было плохо видно; предупреждение
-        // ещё и на тусклом оранжевом фоне, ошибка — на тусклом красном и в красной рамке.
-        // Фон полупрозрачный поверх плашки под ним, поэтому тема остаётся видна
+        // рамка тусклая оранжевая — рамкой темы плашку было плохо видно; удача — в зелёной; ошибка — на тусклом
+        // красном и в красной рамке. Фон полупрозрачный поверх плашки под ним, поэтому тема остаётся видна
         switch (entry.Level)
         {
             case LogLevel.Error:
@@ -133,9 +179,9 @@ public partial class ActionToast : UserControl
                 Body.Background = ErrorFill;
                 break;
 
-            case LogLevel.Warning:
-                Body.BorderBrush = WarningStroke;
-                Body.Background = WarningFill;
+            case LogLevel.Success:
+                Body.BorderBrush = SuccessStroke;
+                Body.SetResourceReference(Border.BackgroundProperty, "SolidBackgroundFillColorTertiaryBrush");
                 break;
 
             default:
@@ -148,9 +194,11 @@ public partial class ActionToast : UserControl
         Place();
         BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(150)));
 
-        // длинную запись дольше читать
+        // длинную запись дольше читать; отказ у кнопки ждут и он короче держится, чем посередине окна
         _timer.Stop();
-        _timer.Interval = TimeSpan.FromSeconds(Math.Clamp(3 + entry.Text.Length / 40.0, 3, 8));
+        _timer.Interval = TimeSpan.FromSeconds(_anchor is null
+            ? Math.Clamp(3 + entry.Text.Length / 40.0, 3, 8)
+            : Math.Clamp(1.5 + entry.Text.Length / 50.0, 1.5, 4));
         _timer.Start();
     }
 
@@ -172,8 +220,8 @@ public partial class ActionToast : UserControl
     }
 
     private static readonly Brush WarningStroke = Freeze(new SolidColorBrush(Color.FromArgb(0x80, 0xE0, 0x7A, 0x1F)));
-    private static readonly Brush WarningFill = Freeze(new SolidColorBrush(Color.FromArgb(0x38, 0xE0, 0x7A, 0x1F)));
-    private static readonly Brush ErrorStroke = Freeze(new SolidColorBrush(Color.FromArgb(0x80, 0xE8, 0x5C, 0x5C)));
+    private static readonly Brush SuccessStroke = Freeze(new SolidColorBrush(Color.FromArgb(0x80, 0x6C, 0xCB, 0x5F)));
+    private static readonly Brush ErrorStroke =Freeze(new SolidColorBrush(Color.FromArgb(0x80, 0xE8, 0x5C, 0x5C)));
     private static readonly Brush ErrorFill = Freeze(new SolidColorBrush(Color.FromArgb(0x38, 0xE8, 0x5C, 0x5C)));
 
     private static Brush Freeze(Brush brush)

@@ -1,0 +1,207 @@
+<UserControl
+  x:Class="MultiServerSync.Views.Controls.MiniTerminal"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:controls="clr-namespace:MultiServerSync.Views.Controls"
+  xmlns:pages="clr-namespace:MultiServerSync.Views.Pages"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+
+  <!--
+    Мини-терминал на «Копировании» и «Скачивании»: своё окно вкладки, те же значки, что на «Команде», без
+    избранного и добавления окон. Над ним — серверы копирования: они отмечаются в панели слева, здесь только показ.
+  -->
+  <UserControl.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolToVis" />
+  </UserControl.Resources>
+
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <!--  всегда одна строка: что не влезло, уходит в плашку «ещё N»  -->
+    <controls:TagRowPanel
+      x:Name="TagRow"
+      Grid.Row="0"
+      ClipToBounds="True"
+      SizeChanged="OnTagRowSized" />
+
+    <ScrollViewer
+      x:Name="StepsScroll"
+      Grid.Row="1"
+      Focusable="False"
+      HorizontalScrollBarVisibility="Disabled"
+      VerticalScrollBarVisibility="Auto">
+      <ItemsControl
+        x:Name="StepsList"
+        VerticalAlignment="Top"
+        Focusable="False"
+        ItemsSource="{Binding Steps}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <UniformGrid Columns="1" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate>
+            <Grid Margin="0,4,0,0">
+              <ui:TextBox
+                x:Name="Box"
+                AcceptsReturn="True"
+                AcceptsTab="True"
+                ClearButtonEnabled="False"
+                DataObject.Pasting="OnBoxPasting"
+                FontFamily="Consolas"
+                HorizontalScrollBarVisibility="Auto"
+                Loaded="OnBoxLoaded"
+                Padding="10,8,160,34"
+                PlaceholderText="Можно вставлять многострочные скрипты любой длины — они уходят на сервер целиком."
+                PreviewKeyDown="OnBoxKeyDown"
+                Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}"
+                TextWrapping="NoWrap"
+                VerticalContentAlignment="Top"
+                VerticalScrollBarVisibility="Auto" />
+
+              <!--  мигает тусклым оранжевым, когда жмут кнопку, которой нечего делать  -->
+              <Border
+                x:Name="Flash"
+                Background="#14E07A1F"
+                BorderBrush="#A0E07A1F"
+                BorderThickness="2"
+                CornerRadius="4"
+                IsHitTestVisible="False"
+                Opacity="0" />
+
+              <StackPanel
+                Margin="0,4,8,0"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                Orientation="Horizontal"
+                SizeChanged="OnIconsResized">
+                <Button
+                  x:Name="Paste"
+                  Click="OnPaste"
+                  Style="{StaticResource EditorIconStyle}"
+                  ToolTip="Вставить из буфера — заменяет всё окно, чтобы вставка не приклеилась к прошлой команде">
+                  <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="ClipboardPaste24" />
+                </Button>
+                <!--  на одном месте запуск и остановка: пока команда идёт, ▶ становится ■  -->
+                <Button
+                  x:Name="RunOne"
+                  Click="OnRun"
+                  Style="{StaticResource EditorIconStyle}"
+                  ToolTip="Выполнить на серверах над окном, без копирования"
+                  Visibility="{Binding DataContext.CommandBatch.IsIdle, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolToVis}}">
+                  <ui:SymbolIcon
+                    FontSize="{StaticResource IconGlyphSize}"
+                    Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
+                    Symbol="Play24" />
+                </Button>
+                <Button
+                  Click="OnStop"
+                  Style="{StaticResource EditorIconStyle}"
+                  ToolTip="{x:Static controls:StopButton.Hint}"
+                  Visibility="{Binding DataContext.CommandBatch.IsRunning, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolToVis}}">
+                  <ui:SymbolIcon
+                    FontSize="{StaticResource IconGlyphSize}"
+                    Foreground="#E0574A"
+                    Symbol="Stop24" />
+                </Button>
+                <Button
+                  x:Name="CopyOut"
+                  Click="OnCopyOutput"
+                  Style="{StaticResource EditorIconStyle}"
+                  ToolTip="Копировать вывод (Ctrl+Shift+C) — то же, что «Текущий лог» в терминале">
+                  <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Copy24" />
+                </Button>
+                <Border
+                  Width="1"
+                  Height="20"
+                  Margin="3,0,1,0"
+                  VerticalAlignment="Center"
+                  Background="{DynamicResource ControlStrokeColorDefaultBrush}" />
+                <Button
+                  x:Name="Clear"
+                  Click="OnClear"
+                  Style="{StaticResource EditorIconStyle}"
+                  ToolTip="Очистить окно">
+                  <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Delete24" />
+                </Button>
+              </StackPanel>
+
+              <!--  низ справа: статус и секундомер  -->
+              <StackPanel
+                Margin="0,0,12,6"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom"
+                Orientation="Horizontal">
+                <TextBlock
+                  Margin="0,0,10,0"
+                  VerticalAlignment="Center"
+                  FontSize="12"
+                  FontWeight="Bold"
+                  Text="{Binding StatusText}" />
+                <TextBlock
+                  VerticalAlignment="Center"
+                  FontFamily="Consolas"
+                  FontSize="12"
+                  Text="{Binding ClockText}" />
+              </StackPanel>
+
+              <!--  низ слева: sudo и переход к командам после копирования  -->
+              <StackPanel
+                Margin="12,0,0,6"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Bottom"
+                Orientation="Horizontal">
+                <CheckBox
+                  MinWidth="0"
+                  Padding="4,0,0,0"
+                  VerticalAlignment="Center"
+                  Content="sudo"
+                  FontSize="12"
+                  IsChecked="{Binding UseSudo, Mode=TwoWay}"
+                  ToolTip="Это окно выполняется как sudo -S -p '' bash -s, пароль сервера подаётся на stdin" />
+                <ui:Button
+                  x:Name="GoPersonal"
+                  Height="24"
+                  Margin="8,0,0,0"
+                  Padding="8,0"
+                  Click="OnGoPersonal"
+                  Content="{Binding DataContext.PersonalButtonText, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                  FontSize="12"
+                  Icon="{ui:SymbolIcon ArrowRight24}"
+                  ToolTip="Личная вкладка в разделе «Команды»: выполняется после копирования, когда включён свитч на ярлыке" />
+              </StackPanel>
+            </Grid>
+
+            <DataTemplate.Triggers>
+              <DataTrigger Binding="{Binding IsEmpty}" Value="True">
+                <Setter TargetName="RunOne" Property="pages:CommandPage.Idle" Value="True" />
+                <Setter TargetName="Clear" Property="pages:CommandPage.Idle" Value="True" />
+              </DataTrigger>
+              <DataTrigger Binding="{Binding DataContext.CommandBatch.HasResults, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="False">
+                <Setter TargetName="CopyOut" Property="pages:CommandPage.Idle" Value="True" />
+              </DataTrigger>
+              <DataTrigger Binding="{Binding HasClipboardText, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="False">
+                <Setter TargetName="Paste" Property="pages:CommandPage.Idle" Value="True" />
+              </DataTrigger>
+              <!--  после скачивания команды сами не идут  -->
+              <DataTrigger Binding="{Binding DataContext.IsCopyTab, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="False">
+                <Setter TargetName="GoPersonal" Property="Visibility" Value="Collapsed" />
+              </DataTrigger>
+            </DataTemplate.Triggers>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </ScrollViewer>
+
+    <controls:ActionToast
+      x:Name="Toast"
+      Grid.Row="1"
+      Margin="20"
+      HorizontalAlignment="Center"
+      VerticalAlignment="Center" />
+  </Grid>
+</UserControl>

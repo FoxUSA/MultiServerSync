@@ -17,9 +17,9 @@ namespace MultiServerSync.Views.Controls;
 /// Escape или потеря мыши — всё возвращается как было.
 ///
 /// Один метод на всё, что переставляется: ярлыки вкладок и наборов, кнопки разделов,
-/// серверы в панели слева. Элементы в один ряд или столбик (StackPanel) могут быть разного
+/// серверы в панели слева, окна «Копирования» и «Скачивания». Элементы в один ряд или столбик (StackPanel) могут быть разного
 /// размера — соседи сдвигаются ровно на размер перетаскиваемого. В остальных раскладках
-/// (краткие кирпичики в два ряда, личные вкладки у правого края) размер у всех одинаковый:
+/// (краткие кирпичики в два ряда) размер у всех одинаковый:
 /// элемент встаёт ровно на место того, кого сменил.
 /// Если элементы внутри ScrollViewer, у его края список подкручивается сам.
 /// Первые <c>fixedCount</c> элементов закреплены: их не двигают и никого перед ними не пускают.
@@ -192,6 +192,9 @@ public sealed class TabReorder
     /// </summary>
     public FrameworkElement? OutTarget { get; set; }
 
+    /// <summary>За какое место элемента можно схватить; не задано — за любое.</summary>
+    public Func<DependencyObject, bool>? GrabPlace { get; init; }
+
     public Action<object>? DroppedOut { get; set; }
 
     /// <summary>Мышь с элементом над <see cref="OutTarget"/> или ушла с него — подсветить цель.</summary>
@@ -235,7 +238,7 @@ public sealed class TabReorder
 
         var source = e.OriginalSource as DependencyObject;
 
-        if (_containerOf(source) is not { } container)
+        if (_containerOf(source) is not { } container || (GrabPlace is { } place && !place(source!)))
         {
             return;
         }
@@ -722,6 +725,7 @@ public sealed class TabReorder
         Workspace workspace => workspace.Title,
         ServerSet set => set.Title,
         ServerCheck check => check.Server.Display,
+        CopyWindow window => $"окно {window.NumberText}",
         FrameworkElement element => element.Name,
         _ => item?.ToString() ?? "?",
     };

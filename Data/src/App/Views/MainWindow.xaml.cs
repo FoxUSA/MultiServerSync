@@ -93,6 +93,12 @@ public partial class MainWindow : FluentWindow
             new Core.RelayCommand(_ => AddTab()), Key.T, ModifierKeys.Control));
         InputBindings.Add(new KeyBinding(
             new Core.RelayCommand(_ => CloseCurrentTab()), Key.W, ModifierKeys.Control));
+        InputBindings.Add(new KeyBinding(
+            new Core.RelayCommand(_ => UndoKey(undo: true)), Key.Z, ModifierKeys.Control));
+        InputBindings.Add(new KeyBinding(
+            new Core.RelayCommand(_ => UndoKey(undo: false)), Key.Y, ModifierKeys.Control));
+        InputBindings.Add(new KeyBinding(
+            new Core.RelayCommand(_ => UndoKey(undo: false)), Key.Z, ModifierKeys.Control | ModifierKeys.Shift));
 
         // ярлык вкладки ведут от состояния, а не наоборот: двусторонняя привязка SelectedItem
         // умеет записать в ActiveWorkspace свой null при перестроении списка, и тогда текущей
@@ -100,9 +106,15 @@ public partial class MainWindow : FluentWindow
         AppState.Current.ActiveWorkspaceChanged += workspace =>
         {
             // открыли вкладку из архива (или из основной ленты) — лента показывает её сторону
-            (workspace.IsArchived ? _lastArchived : _lastMain)[State.TabsOf(workspace)] = workspace;
+            if (!workspace.IsPersonal)
+            {
+                (workspace.IsArchived ? _lastArchived : _lastMain)[State.TabsOf(workspace)] = workspace;
+            }
+
             FollowActive();
             TabStrip.SelectedItem = workspace;
+            WatchSeenFailure();
+            ShowUndo();
         };
         AppState.Current.ArchiveChanged += _ => FollowActive();
 
@@ -138,6 +150,10 @@ public partial class MainWindow : FluentWindow
             if (e.PropertyName == nameof(AppState.Section))
             {
                 ShowSection();
+            }
+            else if (e.PropertyName == nameof(AppState.ActiveServerSet))
+            {
+                ShowUndo();
             }
         };
         ShowSection();
@@ -179,6 +195,18 @@ public partial class MainWindow : FluentWindow
 
             // записи загрузки плашкой не показываем — только то, что сделано после открытия окна
             AppLog.Written += ShowToast;
+            PreviewMouseLeftButtonUp += RememberPressedButton;
+
+            UndoJournal.Changed += ShowUndo;
+            ShowUndo();
+
+            _seenFailureTimer.Tick += (_, _) =>
+            {
+                _seenFailureTimer.Stop();
+                SeenFailure()?.ClearStatus();
+            };
+            Activated += (_, _) => WatchSeenFailure();
+            WatchSeenFailure();
 
             // файл длинного лога в буфере живёт, пока буфер не сменится
             ClipboardText.Watch(this);
@@ -229,7 +257,7 @@ public partial class MainWindow : FluentWindow
         }
 
         // сменили раздел — прежняя плашка уже не про то, что на экране
-        HideToasts();
+        Toast.HideNow();
         PageFrame.Navigate(page);
     }
 
@@ -262,6 +290,12 @@ public partial class MainWindow : FluentWindow
     {
         if (sender is FrameworkElement { Tag: Type page })
         {
+            // личная вкладка открыта только переходом; кнопка раздела — всегда обычный вид
+            if (page == typeof(CommandPage))
+            {
+                State.LeaveJump();
+            }
+
             Navigate(page);
         }
     }
@@ -282,10 +316,67 @@ public partial class MainWindow : FluentWindow
         // в раздел пришли — его ошибки увидены
         _unseenFailures.RemoveWhere(tab => State.SectionOfTab(tab) == section);
         ShowSectionMarks();
+        WatchSeenFailure();
+        ShowUndo();
+    }
+
+    /// <summary>Значок в ряду разделов: виден, пока в открытом разделе есть закрытая или переименованная вкладка.</summary>
+    private void ShowUndo()
+    {
+        var action = UndoJournal.TabActionName();
+
+        TabActionButton.Visibility = action is null ? Visibility.Collapsed : Visibility.Visible;
+        TabActionButton.ToolTip = $"Отменить: {action}";
+    }
+
+    private void OnUndoTabAction(object sender, RoutedEventArgs e) => UndoJournal.UndoTabAction();
+
+    /// <summary>В поле ввода клавиши отменяют его собственный набор, а не действие вкладки.</summary>
+    private void UndoKey(bool undo)
+    {
+        if (Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase || !UndoJournal.Covers(State.Section))
+        {
+            return;
+        }
+
+        if (undo)
+        {
+            UndoJournal.Undo();
+        }
+        else
+        {
+            UndoJournal.Redo();
+        }
     }
 
     /// <summary>Вкладки, кончившие ошибкой, пока их раздел был не на экране. Гаснут, когда в раздел заходят.</summary>
     private readonly HashSet<Workspace> _unseenFailures = new();
+
+    private readonly System.Windows.Threading.DispatcherTimer _seenFailureTimer = new() { Interval = TimeSpan.FromSeconds(2) };
+
+    /// <summary>Открытая вкладка с красной рамкой, если человек сейчас в программе и видит её.</summary>
+    private Workspace? SeenFailure()
+    {
+        var tab = State.ActiveWorkspace;
+
+        return IsActive && tab.Status is WorkspaceStatus.Failed or WorkspaceStatus.Partial && State.SectionOfTab(tab) == State.Section
+            ? tab
+            : null;
+    }
+
+    /// <summary>
+    /// Красная рамка нужна, чтобы человек узнал об ошибке: на вкладке перед глазами она быстро гаснет,
+    /// а на той, куда он ещё не перешёл, или пока он в другой программе — стоит и ждёт.
+    /// </summary>
+    private void WatchSeenFailure()
+    {
+        _seenFailureTimer.Stop();
+
+        if (SeenFailure() is not null)
+        {
+            _seenFailureTimer.Start();
+        }
+    }
 
     /// <summary>Кнопки разделов следят за статусами вкладок всех разделов, и уже открытых, и новых.</summary>
     private void SetupSectionMarks()
@@ -334,6 +425,11 @@ public partial class MainWindow : FluentWindow
         }
 
         ShowSectionMarks();
+
+        if (ReferenceEquals(tab, State.ActiveWorkspace))
+        {
+            WatchSeenFailure();
+        }
     }
 
     /// <summary>
@@ -343,7 +439,7 @@ public partial class MainWindow : FluentWindow
     private void ShowSectionMarks()
     {
         Mark(ExplorerSection, AppSection.Explorer, State.ExplorerTabs);
-        Mark(CommandSection, AppSection.Command, State.CommandTabs);
+        Mark(CommandSection, AppSection.Command, State.CommandTabs.Where(t => !t.IsPersonal));
         Mark(FilesSection, AppSection.Files, State.Workspaces);
         Mark(DownloadSection, AppSection.Download, State.DownloadTabs);
 
@@ -503,6 +599,12 @@ public partial class MainWindow : FluentWindow
     /// <summary>Плюс и Ctrl+T добавляют вкладку того раздела, который открыт, — в ту ленту, что на экране.</summary>
     private void AddTab()
     {
+        // на ленте только личная вкладка, «+» и архива нет
+        if (_personalShown is not null)
+        {
+            return;
+        }
+
         if (State.ShowsServerSetTabs)
         {
             State.ActiveServerSet = State.AddServerSet(archived: _setArchiveMode);
@@ -528,13 +630,13 @@ public partial class MainWindow : FluentWindow
 
     /// <summary>
     /// Вкладка закрывается только с подтверждением: крестик рядом с переключателями, промахнуться легко.
-    /// Первую и занятую не спрашиваем — их закрыть и так нельзя, об этом скажет журнал.
+    /// Первую, запертую и занятую не спрашиваем — их закрыть и так нельзя, об этом скажет журнал.
     /// </summary>
     internal static bool CloseWorkspace(Window owner, Workspace workspace)
     {
         var state = AppState.Current;
 
-        if (!workspace.IsMain && !workspace.IsBusy && workspace.Personal is not { IsBusy: true })
+        if (!workspace.IsMain && !workspace.IsContentLocked && !workspace.IsBusy && workspace.Personal is not { IsBusy: true })
         {
             var detail = workspace.Personal is { } personal
                 ? $"Вместе с ней закроется её личная вкладка команд «{personal.Title}»."
@@ -894,10 +996,11 @@ public partial class MainWindow : FluentWindow
     /// <summary>
     /// Карточки «Целевые сервера» нет у «Проводника» (сервер выбирается в самой правой панели)
     /// и у «Серверов»: там правят сами наборы, а целевые серверы — дело вкладок других разделов.
+    /// В «Настройках» серверы не при чём.
     /// </summary>
     private void ApplyServerPane()
     {
-        var hidden = State.Section is AppSection.Explorer or AppSection.Servers;
+        var hidden = State.Section is AppSection.Explorer or AppSection.Servers or AppSection.Settings;
         PaneCard.Visibility = hidden ? Visibility.Collapsed : Visibility.Visible;
         PaneColumn.Width = new GridLength(hidden ? 0 : 220);
     }
@@ -953,13 +1056,42 @@ public partial class MainWindow : FluentWindow
             : picked.Count > 1
                 ? "Отмечены: " + string.Join(", ", picked.Select(s => s.PaneLabel)) + ". Щелчок — список серверов"
                 : "Целевой сервер вкладки — щелчок открывает список серверов";
+        ExplorerServerLock.Visibility = picked.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ExplorerServerLockIcon.Symbol = tab.IsPaneLocked ? SymbolRegular.LockClosed24 : SymbolRegular.LockOpen24;
+        ExplorerServerLock.ToolTip = tab.IsPaneLocked
+            ? "Вкладка закреплена за сервером — щелчок снимает замок"
+            : tab.LockTip;
         ExplorerServerTag.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>Замок на плашке — тот же, что в строке сервера слева.</summary>
+    private void OnExplorerServerLock(object sender, RoutedEventArgs e)
+    {
+        // щелчок не должен дойти до плашки: она открывает список серверов
+        e.Handled = true;
+
+        if (_explorerTagTab is not { } tab)
+        {
+            return;
+        }
+
+        if (State.Section == AppSection.Explorer)
+        {
+            if (tab.ExplorerServer is { } current)
+            {
+                Controls.ServerMenu.Locks.ForExplorer(tab).Toggle(current);
+            }
+        }
+        else if (tab.SelectedServers.FirstOrDefault() is { } first)
+        {
+            Controls.ServerMenu.Locks.For(tab).Toggle(first);
+        }
     }
 
     private void OnExplorerTagTabChanged(object? sender, PropertyChangedEventArgs e)
     {
         // отметки серверов поднимают и то и другое — подпись перечитывается по любому
-        if (e.PropertyName is nameof(Workspace.ExplorerServer) or nameof(Workspace.SelectionInfo))
+        if (e.PropertyName is nameof(Workspace.ExplorerServer) or nameof(Workspace.SelectionInfo) or nameof(Workspace.IsPaneLocked))
         {
             ShowExplorerServer();
         }
@@ -974,12 +1106,23 @@ public partial class MainWindow : FluentWindow
 
         if (State.Section == AppSection.Explorer)
         {
-            Controls.ServerMenu.Show(ExplorerServerTag, tab.ExplorerServer, tab.PickExplorerServer);
+            // сервер читается заново: замок на другом сервере сначала открывает его в правой панели
+            Controls.ServerMenu.Show(
+                ExplorerServerTag,
+                s => ReferenceEquals(s, tab.ExplorerServer),
+                tab.PickExplorerServer,
+                Controls.ServerMenu.Locks.ForExplorer(tab),
+                alignRight: true);
             return;
         }
 
-        var picked = tab.SelectedServers;
-        Controls.ServerMenu.Show(ExplorerServerTag, s => picked.Contains(s), tab.PickTargetServer);
+        // замки — те же, что в строках панели слева; отметки читаются заново: замок отмечает сервер
+        Controls.ServerMenu.Show(
+            ExplorerServerTag,
+            s => tab.SelectedServers.Contains(s),
+            tab.PickTargetServer,
+            Controls.ServerMenu.Locks.For(tab),
+            alignRight: true);
     }
 
     /// <summary>Высота ленты ярлыков сейчас и самая низкая за сеанс — в один ряд.</summary>
@@ -1057,6 +1200,12 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        if (workspace.IsPersonal)
+        {
+            AppLog.Hint("Личная вкладка в архив не убирается.", LogLevel.Warning);
+            return;
+        }
+
         // снимок ярлыка — до того, как он уйдёт из ленты
         var flight = FlyToArchive(container);
 
@@ -1079,6 +1228,9 @@ public partial class MainWindow : FluentWindow
     /// <summary>Лента показывает архив, а не основные вкладки.</summary>
     private bool _archiveMode;
 
+    /// <summary>На ленте «Команд» одна личная вкладка — на неё перешли с «Копирования». Null — лента обычная, личных на ней нет.</summary>
+    private Workspace? _personalShown;
+
     /// <summary>Над значком держат перетаскиваемый ярлык.</summary>
     private bool _dropOver;
 
@@ -1094,7 +1246,10 @@ public partial class MainWindow : FluentWindow
         {
             view = new ListCollectionView(tabs)
             {
-                Filter = item => item is Workspace workspace && workspace.IsArchived == _archiveMode,
+                Filter = item => item is Workspace workspace
+                    && (_personalShown is { } only
+                        ? ReferenceEquals(workspace, only)
+                        : !workspace.IsPersonal && workspace.IsArchived == _archiveMode),
                 IsLiveFiltering = true,
             };
             view.LiveFilteringProperties.Add(nameof(Workspace.IsArchived));
@@ -1103,6 +1258,7 @@ public partial class MainWindow : FluentWindow
         }
 
         _archiveMode = State.ShowsWorkspaceTabs && State.ActiveWorkspace.IsArchived;
+        _personalShown = State.PersonalShown;
         view.Refresh();
 
         if (!ReferenceEquals(TabStrip.ItemsSource, view))
@@ -1161,10 +1317,12 @@ public partial class MainWindow : FluentWindow
     private void FollowActive()
     {
         var archive = State.ShowsWorkspaceTabs && State.ActiveWorkspace.IsArchived;
+        var personal = State.PersonalShown;
 
-        if (archive != _archiveMode)
+        if (archive != _archiveMode || !ReferenceEquals(personal, _personalShown))
         {
             _archiveMode = archive;
+            _personalShown = personal;
 
             if (_tabViews.TryGetValue(State.Tabs, out var view))
             {
@@ -1204,6 +1362,8 @@ public partial class MainWindow : FluentWindow
             : shown ? State.Tabs.Count(t => t.IsArchived) : 0;
         var what = sets ? "набор" : "вкладку";
 
+        TabButtons.Visibility = _personalShown is null ? Visibility.Visible : Visibility.Collapsed;
+        shown &= _personalShown is null;
         ArchiveButton.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
         ArchiveRow.Height = shown ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
         ArchiveIcon.Symbol = mode ? SymbolRegular.TabArrowLeft24 : SymbolRegular.Archive24;
@@ -1214,8 +1374,47 @@ public partial class MainWindow : FluentWindow
             : mode ? ControlAppearance.Primary
             : ControlAppearance.Secondary;
         ArchiveButton.ToolTip = mode
-            ? $"Открыт архив. Щелчок — назад к основной ленте. Правый щелчок по ярлыку или перетаскивание сюда — вернуть {what} в основную ленту"
-            : $"Архив: щелчок — открыть. Убрать сюда {what} — правый щелчок по ярлыку или перетащить ярлык на этот значок";
+            ? $"Открыт архив. Щелчок здесь или двойной щелчок по пустому месту ряда разделов — назад к основной ленте. Правый щелчок по ярлыку или перетаскивание сюда — вернуть {what} в основную ленту"
+            : $"Архив: щелчок здесь или двойной щелчок по пустому месту ряда разделов — открыть. Убрать сюда {what} — правый щелчок по ярлыку или перетащить ярлык на этот значок";
+    }
+
+    /// <summary>
+    /// Ряд разделов: двойной щелчок по пустому месту за кнопками — то же, что значок архива.
+    /// У плашки сервера справа зазор, чтобы промах мимо неё не листал ленту.
+    /// </summary>
+    private void OnSectionRowDown(object sender, MouseButtonEventArgs e)
+    {
+        if (ArchiveButton.Visibility != Visibility.Visible
+            || (ExplorerServerTag.IsVisible && e.GetPosition(ExplorerServerTag).X > -12)
+            || !IsEmptyDoubleClick(e))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        OnArchiveClick(ArchiveButton, e);
+    }
+
+    /// <summary>Двойной щелчок по пустому месту ленты — новая вкладка, как «+».</summary>
+    private void OnTabStripAreaDown(object sender, MouseButtonEventArgs e)
+    {
+        if (!IsEmptyDoubleClick(e))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        AddTab();
+    }
+
+    /// <summary>Второй щелчок мимо ярлыков и кнопок.</summary>
+    private static bool IsEmptyDoubleClick(MouseButtonEventArgs e)
+    {
+        var source = e.OriginalSource as DependencyObject;
+
+        return e.ClickCount == 2
+            && FindAncestor<System.Windows.Controls.ListBoxItem>(source) is null
+            && FindAncestor<System.Windows.Controls.Primitives.ButtonBase>(source) is null;
     }
 
     /// <summary>Значок переключает ленту: основная ↔ архив. Открывается вкладка, что была открыта там последней.</summary>
@@ -1241,7 +1440,7 @@ public partial class MainWindow : FluentWindow
 
         if (archived.Count == 0)
         {
-            AppLog.Hint("Архив пуст. Сюда вкладку убирает правый щелчок по ярлыку или перетаскивание на этот значок.");
+            AppLog.Hint("Архив пуст. Сюда вкладку убирает правый щелчок по ярлыку или перетаскивание на этот значок.", LogLevel.Warning);
             return;
         }
 
@@ -1267,7 +1466,7 @@ public partial class MainWindow : FluentWindow
 
         if (archived.Count == 0)
         {
-            AppLog.Hint("Архив пуст. Сюда набор убирает правый щелчок по ярлыку или перетаскивание на этот значок.");
+            AppLog.Hint("Архив пуст. Сюда набор убирает правый щелчок по ярлыку или перетаскивание на этот значок.", LogLevel.Warning);
             return;
         }
 
@@ -1333,31 +1532,74 @@ public partial class MainWindow : FluentWindow
         return () => FxLayer.Children.Remove(image);
     }
 
-    /// <summary>Плашка о нажатии: у главной кнопки открытой страницы, а где своей нет — в правом нижнем углу.</summary>
-    private void ShowToast(LogEntry entry)
-    {
-        var target = PageFrame.Content is Controls.IToastHost host and FrameworkElement { IsVisible: true }
-            ? host.PageToast
-            : Toast;
+    /// <summary>Сколько после нажатия плашка считается ответом на эту кнопку: дальше это уже итог долгой работы.</summary>
+    private static readonly TimeSpan PressedButtonLife = TimeSpan.FromSeconds(1);
 
-        // плашка одна на окно: новая гасит прежнюю, где бы та ни стояла
-        if (target.Show(entry))
+    private Rect? _pressedButton;
+    private DateTime _pressedAt;
+
+    /// <summary>
+    /// Запомнить место кнопки до её щелчка: обработчик может её убрать (корзина в строке), а плашке нужно,
+    /// где она была. Туннельное событие приходит раньше щелчка.
+    /// </summary>
+    private void RememberPressedButton(object sender, MouseButtonEventArgs e)
+    {
+        _pressedButton = null;
+
+        FrameworkElement? button = FindAncestor<System.Windows.Controls.Primitives.ButtonBase>(e.OriginalSource as DependencyObject);
+        var refused = false;
+
+        // отключённое под замком щелчка не получает, событие приходит от того, что под ним: ищем по координатам
+        if (button is null && VisualTreeHelper.HitTest(this, e.GetPosition(this))?.VisualHit is { } hit)
         {
-            HideToasts(except: target);
+            button = LockedControl(hit);
+            refused = button is not null;
+        }
+
+        if (button is null || Toast.Parent is not Visual root)
+        {
+            return;
+        }
+
+        try
+        {
+            _pressedButton = button.TransformToVisual(root).TransformBounds(new Rect(0, 0, button.ActualWidth, button.ActualHeight));
+            _pressedAt = DateTime.UtcNow;
+        }
+        catch (InvalidOperationException)
+        {
+            // кнопка в выпадающем списке: у него своё окно, координаты не сравнить
+        }
+
+        if (refused)
+        {
+            State.ActiveWorkspace.BlockedByLock();
         }
     }
 
-    /// <summary>Погасить плашки — угловую и плашки страниц, кроме указанной.</summary>
-    private void HideToasts(Controls.ActionToast? except = null)
+    /// <summary>Элемент, отключённый замком, под точкой щелчка. Подписи и пустое место между элементами — не он.</summary>
+    private static System.Windows.Controls.Control? LockedControl(DependencyObject hit)
     {
-        foreach (var toast in _pages.Values.OfType<Controls.IToastHost>().Select(h => h.PageToast).Append(Toast))
+        System.Windows.Controls.Control? control = null;
+
+        for (DependencyObject? node = hit; node is not null; node = VisualTreeHelper.GetParent(node))
         {
-            if (!ReferenceEquals(toast, except))
+            control ??= node as System.Windows.Controls.Control;
+
+            if (node is UIElement { IsEnabled: false } element && Controls.LockMute.GetIsOn(element))
             {
-                toast.HideNow();
+                return control;
             }
         }
+
+        return null;
     }
+
+    /// <summary>Плашка о нажатии: отказ — под нажатой кнопкой, всё остальное посередине окна.</summary>
+    private void ShowToast(LogEntry entry) =>
+        Toast.Show(entry, entry.Level is LogLevel.Warning or LogLevel.Error && DateTime.UtcNow - _pressedAt < PressedButtonLife
+            ? _pressedButton
+            : null);
 
     /// <summary>Запуск без отмеченных серверов: строки целевых серверов мигают тусклым оранжевым.</summary>
     public void FlashTargets()
@@ -1447,7 +1689,7 @@ public partial class MainWindow : FluentWindow
 
         if (sender is FrameworkElement { DataContext: Workspace { Owner: { } owner } })
         {
-            ShowTab(owner, typeof(FilesPage));
+            ShowTab(owner, State.DownloadTabs.Contains(owner) ? typeof(DownloadPage) : typeof(FilesPage));
         }
     }
 
@@ -1515,7 +1757,13 @@ public partial class MainWindow : FluentWindow
     {
         if (workspace.IsPersonal)
         {
-            AppLog.Hint("Личная вкладка называется как её вкладка копирования — переименуйте ту.");
+            AppLog.Hint("Личная вкладка называется как её вкладка копирования — переименуйте ту.", LogLevel.Warning);
+            return;
+        }
+
+        // первая вкладка раздела называется всегда одинаково; у наборов серверов первой нет
+        if (workspace.IsMain)
+        {
             return;
         }
 

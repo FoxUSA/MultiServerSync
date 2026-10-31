@@ -227,7 +227,7 @@
     <!--  поровну: слева таблица серверов, справа вывод; границу двигает разделитель  -->
     <Grid Grid.Row="1">
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="1*" MinWidth="220" />
+        <ColumnDefinition Width="1*" MinWidth="320" />
         <ColumnDefinition Width="4" />
         <ColumnDefinition Width="1*" MinWidth="260" />
       </Grid.ColumnDefinitions>
@@ -274,6 +274,7 @@
           <DataGrid.Columns>
             <DataGridTemplateColumn
               Width="30"
+              MinWidth="30"
               CellStyle="{StaticResource IconCellStyle}"
               HeaderStyle="{StaticResource FirstColumnHeaderStyle}">
               <DataGridTemplateColumn.CellTemplate>
@@ -289,7 +290,8 @@
             </DataGridTemplateColumn>
 
             <!--  сервер по содержимому; «Прошло» и «Время» постоянной ширины, чтобы чч:мм:сс
-                  влезало всегда и столбцы не прыгали; остаток ширины забирает статус  -->
+                  влезало всегда и столбцы не прыгали; остаток ширины забирает статус.
+                  MinWidth как у Width: без него таблица ужимает такой столбец до 20 и не отдаёт обратно  -->
             <DataGridTextColumn
               x:Name="ServerColumn"
               Width="Auto"
@@ -307,6 +309,7 @@
             <!--  сколько времени назад сервер закончил: видно, свежий ли результат  -->
             <DataGridTextColumn
               Width="74"
+              MinWidth="74"
               Binding="{Binding AgoText}"
               Header="Прошло">
               <DataGridTextColumn.ElementStyle>
@@ -318,6 +321,7 @@
 
             <DataGridTextColumn
               Width="74"
+              MinWidth="74"
               Binding="{Binding DurationText}"
               Header="Время">
               <DataGridTextColumn.ElementStyle>
@@ -342,7 +346,7 @@
             </DataGridTextColumn>
 
             <!--  стоп одной строки: только у ждущих и идущих; общий «Остановить» — всё сразу  -->
-            <DataGridTemplateColumn Width="30" CellStyle="{StaticResource IconCellStyle}">
+            <DataGridTemplateColumn Width="30" MinWidth="30" CellStyle="{StaticResource IconCellStyle}">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate>
                   <Button

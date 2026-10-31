@@ -39,6 +39,18 @@ public sealed class WorkspaceState
 
     public List<SavedTransferItem> CopyList { get; set; } = new();
 
+    /// <summary>Окна «Копирования» после первого; первое — верхние поля файла, как в прежних версиях.</summary>
+    public List<SavedCopyWindow>? ExtraCopyWindows { get; set; }
+
+    /// <summary>Какое окно было в фокусе.</summary>
+    public int FocusedCopyWindow { get; set; }
+
+    /// <summary>Название первого окна: его поля лежат наверху файла.</summary>
+    public string CopyWindowName { get; set; } = string.Empty;
+
+    /// <summary>Кнопка «Название» включена: в окнах вкладки видны плашки названий.</summary>
+    public bool ShowWindowNames { get; set; }
+
     public string RemotePath { get; set; } = "/";
 
     /// <summary>Папка, из которой в эту вкладку последний раз добавляли файлы.</summary>

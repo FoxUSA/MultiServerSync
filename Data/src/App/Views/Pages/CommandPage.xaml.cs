@@ -1,9 +1,7 @@
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows;
-using System.Runtime.InteropServices;
 using System.Windows.Controls;
-using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
@@ -18,7 +16,7 @@ namespace MultiServerSync.Views.Pages;
 /// и избранные команды общие для всех вкладок. Окон может быть несколько — они идут
 /// цепочкой, у каждого свой запуск, номер, секундомер и статус.
 /// </summary>
-public partial class CommandPage : Page, Controls.IToastHost
+public partial class CommandPage : Page
 {
     /// <summary>Кнопке сейчас нечего делать: она тусклая, но жмётся — нажатие мигает рамкой окна.</summary>
     public static readonly DependencyProperty IdleProperty = DependencyProperty.RegisterAttached(
@@ -38,16 +36,12 @@ public partial class CommandPage : Page, Controls.IToastHost
         private set => SetValue(HasClipboardTextProperty, value);
     }
 
-    Controls.ActionToast Controls.IToastHost.PageToast => BarToast;
 
     public static readonly DependencyProperty IsNotEditingSnippetProperty = DependencyProperty.Register(
         nameof(IsNotEditingSnippet), typeof(bool), typeof(CommandPage), new PropertyMetadata(true));
 
     /// <summary>Тик секундомеров окон — один на страницу, а не по таймеру на окно.</summary>
     private readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromMilliseconds(250) };
-
-    /// <summary>Окно, в котором стоял курсор: туда подставляется история.</summary>
-    private CommandStep? _activeStep;
 
     // ── правка избранного ──
     private CommandSnippet? _editing;
@@ -69,8 +63,8 @@ public partial class CommandPage : Page, Controls.IToastHost
         Attach(Workspace);
 
         PasteToast.Large = true;
-        BarToast.Follow(EverywhereSwitch);
         Loaded += (_, _) => ListenClipboard();
+        ClipboardWatch.Changed += () => HasClipboardText = ClipboardWatch.HasText;
 
         StepsScroll.SizeChanged += (_, _) => FitSteps();
         ((INotifyCollectionChanged)StepsList.Items).CollectionChanged += (_, _) => FitSteps();
@@ -109,9 +103,8 @@ public partial class CommandPage : Page, Controls.IToastHost
 
     private Workspace? Workspace => DataContext as Workspace;
 
-    /// <summary>Окно, куда подставлять: последнее с курсором, если оно ещё есть, иначе первое.</summary>
-    private CommandStep? ActiveStep =>
-        _activeStep is { } step && Workspace?.Steps.Contains(step) == true ? step : Workspace?.Steps.FirstOrDefault();
+    /// <summary>Окно, куда подставлять: окно в фокусе.</summary>
+    private CommandStep? ActiveStep => Workspace?.Steps.FirstOrDefault(s => s.IsFocused);
 
     private static CommandStep? StepOf(object sender) => (sender as FrameworkElement)?.DataContext as CommandStep;
 
@@ -148,7 +141,7 @@ public partial class CommandPage : Page, Controls.IToastHost
     {
         if (StepOf(sender) is { } step)
         {
-            _activeStep = step;
+            Workspace?.FocusStep(step);
             SyncPickers();
         }
     }
@@ -247,7 +240,7 @@ public partial class CommandPage : Page, Controls.IToastHost
         if (string.IsNullOrWhiteSpace(step.Text))
         {
             FlashSteps([step]);
-            AppLog.Hint("Окно и так пустое.");
+            AppLog.Hint("Окно и так пустое.", LogLevel.Warning);
             return;
         }
 
@@ -273,7 +266,6 @@ public partial class CommandPage : Page, Controls.IToastHost
             old.PropertyChanged -= OnWorkspaceProperty;
         }
 
-        _activeStep = null;
         Attach(e.NewValue as Workspace);
     }
 
@@ -382,7 +374,7 @@ public partial class CommandPage : Page, Controls.IToastHost
         step.Text = text.Replace("\r\n", "\n", StringComparison.Ordinal).Trim();
         ActionLog.Info($"Вставлено из буфера ({step.Text.Length} символов): {OneLine(step.Text)}", null, AppSection.Command, Workspace, [step.Text.TrimEnd()]);
 
-        _activeStep = step;
+        Workspace?.FocusStep(step);
         FocusStep(step);
     }
 
@@ -401,7 +393,7 @@ public partial class CommandPage : Page, Controls.IToastHost
     }
 
     /// <summary>Первая строка команды и не длиннее сотни знаков — для журнала и плашки.</summary>
-    private static string OneLine(string text)
+    internal static string OneLine(string text)
     {
         var lines = text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
         var first = lines[0].Trim();
@@ -430,7 +422,6 @@ public partial class CommandPage : Page, Controls.IToastHost
         if (snippet.IsMulti)
         {
             workspace.SetSteps(snippet.AsSteps());
-            _activeStep = workspace.Steps[0];
             ActionLog.Info($"Из избранного раскрыто окон: {workspace.Steps.Count} — {snippet.Comment}", null, AppSection.Command, workspace,
                 workspace.Steps.Select(s => $"#{s.Number}: {OneLine(s.Text)}"));
         }
@@ -438,7 +429,6 @@ public partial class CommandPage : Page, Controls.IToastHost
         {
             var sudo = ActiveStep?.UseSudo ?? false;
             workspace.SetSteps([new SavedCommandStep { Text = snippet.Command, UseSudo = sudo }]);
-            _activeStep = workspace.Steps[0];
             ActionLog.Info($"Подставлена команда из избранного: {snippet.Comment}", null, AppSection.Command, Workspace);
         }
     }
@@ -928,48 +918,10 @@ public partial class CommandPage : Page, Controls.IToastHost
         }
     }
 
-    private bool _listening;
-
-    /// <summary>Значок «Вставить» тусклый, пока в буфере нет текста: Windows сама сообщает о каждой смене буфера.</summary>
+    /// <summary>Значок «Вставить» тусклый, пока в буфере нет текста.</summary>
     private void ListenClipboard()
     {
-        RefreshClipboard();
-
-        if (_listening || PresentationSource.FromVisual(this) is not HwndSource source)
-        {
-            return;
-        }
-
-        _listening = true;
-        AddClipboardFormatListener(source.Handle);
-        source.AddHook(OnWindowMessage);
+        HasClipboardText = ClipboardWatch.HasText;
+        ClipboardWatch.Attach(this);
     }
-
-    private const int WmClipboardUpdate = 0x031D;
-
-    private IntPtr OnWindowMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
-    {
-        if (msg == WmClipboardUpdate)
-        {
-            RefreshClipboard();
-        }
-
-        return IntPtr.Zero;
-    }
-
-    private void RefreshClipboard()
-    {
-        try
-        {
-            HasClipboardText = Clipboard.ContainsText();
-        }
-        catch (Exception)
-        {
-            // буфер занят другой программой — не гасить значок зря
-            HasClipboardText = true;
-        }
-    }
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool AddClipboardFormatListener(IntPtr hwnd);
 }

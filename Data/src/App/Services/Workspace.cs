@@ -32,7 +32,6 @@ public sealed class Workspace : ObservableObject
     private readonly ConcurrentDictionary<string, string> _localHashes = new();
 
     private string _title;
-    private string _remotePath = "/";
     private string _lastLocalFolder = string.Empty;
     private bool _overwrite = true;
     private bool _preserveTimestamps = true;
@@ -63,12 +62,13 @@ public sealed class Workspace : ObservableObject
         IsMain = isMain;
         _title = title;
 
-        Items.CollectionChanged += OnItemsChanged;
+        // окно есть всегда; у остальных разделов оно одно и в разметке не показывается
+        _focusedWindow = NewCopyWindow("/");
+        _focusedWindow.IsFocused = true;
+        CopyWindows.Add(_focusedWindow);
 
         Steps.CollectionChanged += OnStepsChanged;
         Steps.Add(new CommandStep());
-
-        Downloads.CollectionChanged += OnDownloadsChanged;
 
         // у прогонов вкладки — её галочка «Сохранять лог»
         foreach (var batch in OwnBatches)
@@ -247,6 +247,12 @@ public sealed class Workspace : ObservableObject
     /// </summary>
     public void PickExplorerServer(ServerEntry server)
     {
+        // под замком правая панель держит закреплённый сервер; он сам — не смена, плашка не нужна
+        if (IsServerLocked(server) || BlockedByLock())
+        {
+            return;
+        }
+
         if (!_paneAllSets && PaneSet is { } current && !current.Contains(server)
             && AppState.Current.ServerSets.FirstOrDefault(s => s.Contains(server)) is { } owner)
         {
@@ -295,6 +301,27 @@ public sealed class Workspace : ObservableObject
         }
 
         Save();
+    }
+
+    /// <summary>Закреплена ли вкладка за этим сервером — для замков в списке у подписи сервера.</summary>
+    public bool IsServerLocked(ServerEntry server) => _lockedIds?.Contains(server.Id) == true;
+
+    /// <summary>
+    /// Замок из списка у подписи сервера — тот же, что в строке панели слева. Сервер из другого
+    /// набора сначала переводит вкладку на его набор, как и выбор из этого списка.
+    /// </summary>
+    public void TogglePaneLock(ServerEntry server)
+    {
+        if (_lockedIds is null && !_paneAllSets && PaneSet is { } current && !current.Contains(server)
+            && AppState.Current.ServerSets.FirstOrDefault(s => s.Contains(server)) is { } owner)
+        {
+            PickPaneSet(owner);
+        }
+
+        if (VisibleChecks().FirstOrDefault(c => c.Server.Id == server.Id) is { } check)
+        {
+            TogglePaneLock(check);
+        }
     }
 
     /// <summary>
@@ -445,7 +472,224 @@ public sealed class Workspace : ObservableObject
         Save();
     }
 
-    public ObservableCollection<TransferItem> Items { get; } = new();
+    /// <summary>Список файлов окна в фокусе: с ним работают панель кнопок и таблица.</summary>
+    public ObservableCollection<TransferItem> Items => _focusedWindow.Items;
+
+    /// <summary>Окна «Копирования» или «Скачивания» сверху вниз — минимум одно.</summary>
+    public ObservableCollection<CopyWindow> CopyWindows { get; } = new();
+
+    private CopyWindow _focusedWindow;
+
+    public CopyWindow FocusedWindow => _focusedWindow;
+
+    /// <summary>Файлы всех окон — для счётчиков, наблюдателей и перечитывания.</summary>
+    private IEnumerable<TransferItem> AllItems => CopyWindows.SelectMany(w => w.Items);
+
+    private CopyWindow NewCopyWindow(string remotePath)
+    {
+        var window = new CopyWindow(this, remotePath);
+        window.Items.CollectionChanged += OnItemsChanged;
+        window.Downloads.CollectionChanged += OnDownloadsChanged;
+        return window;
+    }
+
+    /// <summary>Правка в окне: сохранить вкладку. Само окно вкладку не знает — только просит.</summary>
+    public void SaveWindow() => Save();
+
+    /// <summary>Значения окна в фокусе лежат в полях вкладки, которые показывают панель и параметры.</summary>
+    private CopyOptions CurrentCopyOptions => new(
+        _overwrite, _preserveTimestamps, _verifyChecksums, _matchByDate, _matchByHash, _excludeMasks, _useGlobalExcludes);
+
+    private CopyOptions OptionsOf(CopyWindow window) =>
+        ReferenceEquals(window, _focusedWindow) ? CurrentCopyOptions : window.Options ?? CurrentCopyOptions;
+
+    private void LoadCopyOptions(CopyOptions options)
+    {
+        _overwrite = options.Overwrite;
+        _preserveTimestamps = options.PreserveTimestamps;
+        _verifyChecksums = options.VerifyChecksums;
+        _matchByDate = options.MatchByDate;
+        _matchByHash = options.MatchByHash;
+        _excludeMasks = options.ExcludeMasks;
+        _useGlobalExcludes = options.UseGlobalExcludes;
+    }
+
+    /// <summary>Щелчок в окне: панель кнопок и параметры переходят на него.</summary>
+    public void FocusWindow(CopyWindow window)
+    {
+        if (ReferenceEquals(window, _focusedWindow) || !CopyWindows.Contains(window))
+        {
+            return;
+        }
+
+        _focusedWindow.Options = CurrentCopyOptions;
+        _focusedWindow.IsFocused = false;
+        _focusedWindow = window;
+        window.IsFocused = true;
+        LoadCopyOptions(window.Options ?? CurrentCopyOptions);
+
+        RaiseCopyOptions();
+        RaiseCopyInfo();
+        Save();
+    }
+
+    private void RaiseCopyOptions() => RaiseMany(
+        nameof(RemotePath),
+        nameof(Items),
+        nameof(Downloads),
+        nameof(LocalFolder),
+        nameof(DownloadInfo),
+        nameof(AllDownloadsSelected),
+        nameof(OverwriteFiles),
+        nameof(PreserveTimestamps),
+        nameof(VerifyChecksums),
+        nameof(ExcludeMasks),
+        nameof(HasExcludes),
+        nameof(HasGlobalExcludes),
+        nameof(UseGlobalExcludes),
+        nameof(MatchByDate),
+        nameof(MatchByHash),
+        nameof(SendEverything),
+        nameof(SendMissingOnly),
+        nameof(SendByDate),
+        nameof(SendByHash));
+
+    private bool IsDownloadTab => AppState.Current.DownloadTabs.Contains(this);
+
+    /// <summary>Новое пустое окно под <paramref name="after"/>: параметры как у него, список, путь и свои исключения пустые.</summary>
+    public CopyWindow AddCopyWindow(CopyWindow after)
+    {
+        var options = OptionsOf(after);
+        var window = NewCopyWindow(string.Empty);
+        window.Options = options with { ExcludeMasks = string.Empty };
+
+        CopyWindows.Insert(CopyWindows.IndexOf(after) + 1, window);
+        RenumberWindows();
+        FocusWindow(window);
+        Save();
+
+        ActionLog.Info($"Добавлено окно {(IsDownloadTab ? "скачивания" : "копирования")} #{window.Number} · окон {CopyWindows.Count}",
+            null, IsDownloadTab ? AppSection.Download : AppSection.Files, this);
+        return window;
+    }
+
+    /// <summary>Убрать окно; последнее остаётся. Фокус — на соседа.</summary>
+    public void RemoveCopyWindow(CopyWindow window)
+    {
+        var index = CopyWindows.IndexOf(window);
+
+        if (index < 0 || CopyWindows.Count == 1)
+        {
+            return;
+        }
+
+        var number = window.Number;
+        var gone = window.Items.Select(i => i.FullPath)
+            .Concat(window.Downloads.Select(d => $"{d.ServerLabel}: {d.Path}"))
+            .ToList();
+
+        if (ReferenceEquals(window, _focusedWindow))
+        {
+            FocusWindow(CopyWindows[index == CopyWindows.Count - 1 ? index - 1 : index + 1]);
+        }
+
+        window.Items.Clear();
+        window.Items.CollectionChanged -= OnItemsChanged;
+        window.Downloads.Clear();
+        window.Downloads.CollectionChanged -= OnDownloadsChanged;
+        window.Detach();
+        CopyWindows.Remove(window);
+        RenumberWindows();
+        RaiseCopyInfo();
+        RaiseDownloadInfo();
+        Save();
+
+        ActionLog.Info($"Убрано окно {(IsDownloadTab ? "скачивания" : "копирования")} #{number} · окон {CopyWindows.Count}",
+            null, IsDownloadTab ? AppSection.Download : AppSection.Files, this, gone);
+    }
+
+    /// <summary>Окно перетащили: номера идут заново, а по ним и порядок запуска.</summary>
+    public void MoveCopyWindow(CopyWindow window, int to)
+    {
+        var from = CopyWindows.IndexOf(window);
+
+        if (from < 0 || from == to || to < 0 || to >= CopyWindows.Count)
+        {
+            return;
+        }
+
+        CopyWindows.Move(from, to);
+        RenumberWindows();
+        RaiseCopyInfo();
+        RaiseDownloadInfo();
+        Save();
+
+        ActionLog.Info($"Окно {(IsDownloadTab ? "скачивания" : "копирования")} переставлено: #{from + 1} → #{to + 1}",
+            null, IsDownloadTab ? AppSection.Download : AppSection.Files, this);
+    }
+
+    private void RenumberWindows()
+    {
+        for (var i = 0; i < CopyWindows.Count; i++)
+        {
+            var window = CopyWindows[i];
+            window.Number = i + 1;
+            window.IsMulti = CopyWindows.Count > 1;
+            window.IsLast = i == CopyWindows.Count - 1;
+        }
+
+        Raise(nameof(IsMultiWindow));
+    }
+
+    private bool _showWindowNames;
+
+    /// <summary>Окон больше одного: на панели видна кнопка «Название».</summary>
+    public bool IsMultiWindow => CopyWindows.Count > 1;
+
+    /// <summary>Кнопка «Название»: в окнах вкладки видны плашки названий.</summary>
+    public bool ShowWindowNames
+    {
+        get => _showWindowNames;
+        set { if (Set(ref _showWindowNames, value)) { Save(); } }
+    }
+
+    private const int WindowNameLimit = 30;
+
+    /// <summary>Двойной щелчок по плашке. Дальше предела шрифт уже не ужать, не обрезав надпись.</summary>
+    public void RenameWindow(CopyWindow window, string raw)
+    {
+        var name = raw.Trim();
+
+        if (name == window.Name)
+        {
+            return;
+        }
+
+        if (name.Length > WindowNameLimit)
+        {
+            AppLog.Hint($"Название длиннее {WindowNameLimit} символов не поместится на плашке.", LogLevel.Warning);
+            return;
+        }
+
+        window.Name = name;
+        ActionLog.Info($"Окно {window.NumberText}: название «{window.NameText}»", null, IsDownloadTab ? AppSection.Download : AppSection.Files, this);
+    }
+
+    /// <summary>
+    /// История путей поменялась: выпадающий список чистит поле, когда из него пропадает выбранная
+    /// строка, а поле у каждого окна своё. Пути окон ставятся обратно после правки истории.
+    /// </summary>
+    public void KeepWindowPaths(Action change)
+    {
+        var paths = CopyWindows.Select(w => (Window: w, w.RemotePath)).ToList();
+
+        change();
+
+        foreach (var (window, path) in paths)
+        {
+            window.RemotePath = path;
+        }
+    }
 
     public OperationBatch CopyBatch { get; } = new();
 
@@ -615,8 +859,8 @@ public sealed class Workspace : ObservableObject
 
     public string RemotePath
     {
-        get => _remotePath;
-        set { if (Set(ref _remotePath, value)) { Save(); } }
+        get => _focusedWindow.RemotePath;
+        set => _focusedWindow.RemotePath = value;
     }
 
     /// <summary>Откуда в эту вкладку последний раз добавляли файлы — там и откроется проводник.</summary>
@@ -762,7 +1006,7 @@ public sealed class Workspace : ObservableObject
 
     /// <summary>Вкладка копирования, чья это личная вкладка.</summary>
     public Workspace? Owner => IsPersonal
-        ? AppState.Current.Workspaces.FirstOrDefault(w => w.Id == OwnerCopyTabId)
+        ? AppState.Current.Workspaces.Concat(AppState.Current.DownloadTabs).FirstOrDefault(w => w.Id == OwnerCopyTabId)
         : null;
 
     /// <summary>Название личной вкладки — всегда как у родителя, руками не меняется.</summary>
@@ -776,15 +1020,16 @@ public sealed class Workspace : ObservableObject
 
     // ── скачивание ─────────────────────────────────────────────────────────────
 
-    private string _localFolder = string.Empty;
-
     /// <summary>
-    /// Что скачивать: файлы и папки, каждая строка со своего сервера — их выбирают обзором сервера.
-    /// Качаются строки с галочкой; отметки серверов слева здесь не нужны.
+    /// Что скачивать в окне в фокусе: файлы и папки, каждая строка со своего сервера — их выбирают
+    /// обзором сервера. Качаются строки с галочкой; отметки серверов слева здесь не нужны.
     /// </summary>
-    public ObservableCollection<DownloadItem> Downloads { get; } = new();
+    public ObservableCollection<DownloadItem> Downloads => _focusedWindow.Downloads;
 
-    private IEnumerable<DownloadItem> PickedDownloads => Downloads.Where(d => d.IsSelected);
+    /// <summary>Строки всех окон — для счётчиков и проверки списка.</summary>
+    private IEnumerable<DownloadItem> AllDownloads => CopyWindows.SelectMany(w => w.Downloads);
+
+    private IEnumerable<DownloadItem> PickedDownloads => AllDownloads.Where(d => d.IsSelected);
 
     private void OnDownloadsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
@@ -811,6 +1056,11 @@ public sealed class Workspace : ObservableObject
 
     private void RaiseDownloadInfo()
     {
+        foreach (var window in CopyWindows)
+        {
+            window.RaiseDownloads();
+        }
+
         RaiseMany(nameof(DownloadInfo), nameof(AllDownloadsSelected), nameof(TabCounts), nameof(TabTooltip));
 
         if (!_restoring)
@@ -830,29 +1080,23 @@ public sealed class Workspace : ObservableObject
         }
     }
 
-    /// <summary>Куда скачивать. С нескольких серверов — каждый в свою подпапку по имени сервера.</summary>
+    /// <summary>Куда скачивать из окна в фокусе. С нескольких серверов — каждый в свою подпапку по имени сервера.</summary>
     public string LocalFolder
     {
-        get => _localFolder;
-        set
-        {
-            if (Set(ref _localFolder, value ?? string.Empty))
-            {
-                Raise(nameof(DownloadInfo));
-                Save();
-            }
-        }
+        get => _focusedWindow.LocalFolder;
+        set => _focusedWindow.LocalFolder = value;
     }
 
     public string DownloadInfo
     {
         get
         {
-            var picked = PickedDownloads.ToList();
+            var picked = Downloads.Where(d => d.IsSelected).ToList();
             var servers = picked.Select(d => d.ServerId).Distinct().Count();
             var where = servers > 1 ? " · каждый сервер — в свою папку" : string.Empty;
+            var window = CopyWindows.Count > 1 ? $"Окно {_focusedWindow.NumberText} · " : string.Empty;
 
-            return $"Будет скачано отмеченных объектов: {picked.Count} из {Downloads.Count} · с серверов: {servers}{where}.";
+            return $"{window}Будет скачано отмеченных объектов: {picked.Count} из {Downloads.Count} · с серверов: {servers}{where}.";
         }
     }
 
@@ -881,12 +1125,17 @@ public sealed class Workspace : ObservableObject
     /// Строке скачивания вписали другой путь на том же сервере: она встаёт на то же место заново,
     /// размер и дата — после проверки списка. Вернёт причину отказа или null.
     /// </summary>
-    public string? ReplaceDownloadPath(DownloadItem item, string raw)
+    public string? ReplaceDownloadPath(DownloadItem item, string raw) =>
+        ReplaceDownload(item, item.ServerId, raw, item.IsDirectory, -1, default);
+
+    /// <summary>То же для адреса из обзора: там могли выбрать и другой сервер, а вид, размер и дата уже известны.</summary>
+    public string? ReplaceDownload(DownloadItem item, string serverId, string raw, bool isDirectory, long size, DateTime modified)
     {
         var path = SshService.NormalizeRemote(raw.Trim().Trim('"'));
-        var index = Downloads.IndexOf(item);
+        var list = CopyWindows.FirstOrDefault(w => w.Downloads.Contains(item))?.Downloads ?? Downloads;
+        var index = list.IndexOf(item);
 
-        if (index < 0 || path == item.Path)
+        if (index < 0 || (serverId == item.ServerId && path == item.Path))
         {
             return null;
         }
@@ -896,12 +1145,12 @@ public sealed class Workspace : ObservableObject
             return "корень «/» целиком не скачивается — укажите папку";
         }
 
-        if (Downloads.Any(d => !ReferenceEquals(d, item) && d.ServerId == item.ServerId && d.Path == path))
+        if (list.Any(d => !ReferenceEquals(d, item) && d.ServerId == serverId && d.Path == path))
         {
             return "этот путь уже есть в списке";
         }
 
-        Downloads[index] = new DownloadItem(item.ServerId, path, item.IsDirectory, -1, default) { IsSelected = item.IsSelected };
+        list[index] = new DownloadItem(serverId, path, isDirectory, size, modified) { IsSelected = item.IsSelected };
         _ = RefreshDownloadsAsync();
         return null;
     }
@@ -914,7 +1163,7 @@ public sealed class Workspace : ObservableObject
     /// </summary>
     public async Task RefreshDownloadsAsync()
     {
-        if (_checkingDownloads || CopyBatch.IsRunning || Downloads.Count == 0)
+        if (_checkingDownloads || CopyBatch.IsRunning || !AllDownloads.Any())
         {
             return;
         }
@@ -925,7 +1174,7 @@ public sealed class Workspace : ObservableObject
         {
             var settings = AppState.Current.Settings;
 
-            await Task.WhenAll(Downloads
+            await Task.WhenAll(AllDownloads
                 .GroupBy(d => d.ServerId)
                 .Select(g => (Server: AppState.Current.Servers.FirstOrDefault(s => s.Id == g.Key), Items: g.ToList()))
                 .Where(g => g.Server is not null)
@@ -1008,12 +1257,12 @@ public sealed class Workspace : ObservableObject
             return false;
         }
 
-        if (DownloadInputs("скачивание", "скачивать", create: true) is not (var plan, var folder))
+        if (DownloadInputs("скачивание", "скачивать", create: true) is not { } jobs)
         {
             return false;
         }
 
-        await DownloadCoreAsync(plan, folder, CurrentOptions, VerifyChecksums);
+        await DownloadJobsAsync(jobs);
 
         if (notify)
         {
@@ -1028,87 +1277,128 @@ public sealed class Workspace : ObservableObject
     /// Null — делать нечего, причина уже показана.
     /// </summary>
     /// <param name="create">Создать папку, если её нет: сравнению она не нужна — без неё просто ничего нет здесь.</param>
-    private (Dictionary<ServerEntry, List<string>> Plan, string Folder)? DownloadInputs(string what, string verb, bool create)
+    private List<DownloadJob>? DownloadInputs(string what, string verb, bool create)
     {
-        var picked = PickedDownloads.ToList();
+        // окна без отмеченных строк просто пропускаются, как при копировании
+        var windows = CopyWindows.Where(w => w.Downloads.Any(d => d.IsSelected)).ToList();
 
-        if (picked.Count == 0)
+        if (windows.Count == 0)
         {
-            Refuse(what, Downloads.Count == 0
+            Refuse(what, !AllDownloads.Any()
                 ? "Список пуст — выберите файлы и папки кнопкой «Выбрать на сервере»."
                 : $"Ни одна строка не отмечена — {verb} нечего.");
             return null;
         }
 
-        var gone = picked.Where(d => d.Server is null).ToList();
+        var gone = PickedDownloads.Where(d => d.Server is null).ToList();
 
         if (gone.Count > 0)
         {
             AppLog.Warn($"Строк, чей сервер удалён из списка, — {gone.Count}: они пропущены.", Title);
         }
 
-        // по серверам; путь внутри другого из списка того же сервера скачался бы дважды
-        var plan = picked
-            .Where(d => d.Server is not null)
-            .GroupBy(d => d.Server!)
-            .ToDictionary(
-                g => g.Key,
-                g =>
-                {
-                    var paths = g.Select(d => d.Path.TrimEnd('/')).Where(p => p.Length > 0).Distinct().ToList();
-                    return paths.Where(p => !paths.Any(q => q != p && p.StartsWith(q + "/", StringComparison.Ordinal))).ToList();
-                });
+        var jobs = new List<DownloadJob>();
 
-        if (plan.Count == 0)
+        foreach (var window in windows)
+        {
+            // по серверам; путь внутри другого из списка того же сервера скачался бы дважды
+            var plan = window.Downloads
+                .Where(d => d.IsSelected && d.Server is not null)
+                .GroupBy(d => d.Server!)
+                .ToDictionary(
+                    g => g.Key,
+                    g =>
+                    {
+                        var paths = g.Select(d => d.Path.TrimEnd('/')).Where(p => p.Length > 0).Distinct().ToList();
+                        return paths.Where(p => !paths.Any(q => q != p && p.StartsWith(q + "/", StringComparison.Ordinal))).ToList();
+                    });
+
+            if (plan.Count == 0)
+            {
+                continue;
+            }
+
+            var folder = window.LocalFolder.Trim();
+
+            if (folder.Length == 0)
+            {
+                Refuse(what, (CopyWindows.Count > 1 ? $"Окно {window.LogName}: не" : "Не") + " указана папка здесь, на компьютере.");
+                return null;
+            }
+
+            jobs.Add(new DownloadJob(window, plan, folder, UploadOptionsOf(window), OptionsOf(window).VerifyChecksums));
+        }
+
+        if (jobs.Count == 0)
         {
             Refuse(what, $"Серверы отмеченных строк удалены из списка — {verb} не с чем.");
             return null;
         }
 
-        var folder = LocalFolder.Trim();
-
-        if (folder.Length == 0)
-        {
-            Refuse(what, "Не указана папка здесь, на компьютере.");
-            return null;
-        }
-
         if (create)
         {
-            try
+            foreach (var folder in jobs.Select(j => j.Folder).Distinct())
             {
-                Directory.CreateDirectory(folder);
-            }
-            catch (Exception ex)
-            {
-                Refuse(what, $"Папку «{folder}» не создать: {ex.Message}");
-                return null;
+                try
+                {
+                    Directory.CreateDirectory(folder);
+                }
+                catch (Exception ex)
+                {
+                    Refuse(what, $"Папку «{folder}» не создать: {ex.Message}");
+                    return null;
+                }
             }
         }
 
-        return (plan, folder);
+        return jobs;
     }
+
+    /// <summary>Что скачивает одно окно. У «Проводника» окна нет — там задание одно и без номера.</summary>
+    public sealed record DownloadJob(
+        CopyWindow? Window,
+        IReadOnlyDictionary<ServerEntry, List<string>> Plan,
+        string Folder,
+        UploadOptions Options,
+        bool Verify);
 
     /// <summary>
     /// Скачивание — одно на всю программу: его зовут и «Скачивание», и «Проводник». С одного
     /// сервера — прямо в папку, с нескольких — каждый в свою подпапку.
     /// </summary>
-    public async Task DownloadCoreAsync(
+    public Task DownloadCoreAsync(
         IReadOnlyDictionary<ServerEntry, List<string>> plan,
         string folder,
         UploadOptions options,
         bool verify,
         ConfirmReplace? confirmReplace = null,
+        bool concurrent = false) =>
+        DownloadJobsAsync([new DownloadJob(null, plan, folder, options, verify)], confirmReplace, concurrent);
+
+    /// <summary>
+    /// Задания идут на каждом сервере по порядку: следующее окно — после успешного предыдущего,
+    /// не дожидаясь остальных серверов. Встало на сервере — дальше на нём не идёт.
+    /// </summary>
+    private async Task DownloadJobsAsync(
+        IReadOnlyList<DownloadJob> jobs,
+        ConfirmReplace? confirmReplace = null,
         bool concurrent = false)
     {
-        var targets = plan.Keys.ToList();
+        var rows = jobs.SelectMany(j => j.Plan.Keys).Distinct()
+            .SelectMany(server => jobs.Where(j => j.Plan.ContainsKey(server)).Select(job => (Server: server, Job: job)))
+            .ToList();
         var settings = AppState.Current.Settings;
-        var perServer = targets.Count > 1;
         var gate = new Lock();
         var receivedMax = 0;
         var consideredMax = 0;
+        var receivedOn = new Dictionary<ServerEntry, int>();
+        var consideredOn = new Dictionary<ServerEntry, int>();
 
-        AppLog.Info($"Скачивание: путей {plan.Values.Sum(p => p.Count)} с {targets.Count} сервер(ов) в {folder}.", Title);
+        foreach (var job in jobs)
+        {
+            AppLog.Info((CopyWindows.Count > 1 ? $"Окно {job.Window?.LogName}: скачивание" : "Скачивание")
+                + $": путей {job.Plan.Values.Sum(p => p.Count)} с {job.Plan.Count} сервер(ов) в {job.Folder}.", Title);
+        }
 
         SetScope();
         ShowStatus("выполняется", string.Empty, WorkspaceStatus.Running);
@@ -1117,32 +1407,38 @@ public sealed class Workspace : ObservableObject
 
         await CopyBatch.RunAsync(
             Operation("Скачивание"),
-            targets,
+            rows.Select(r => r.Server).ToList(),
             async (server, result, ct) =>
             {
+                var job = (DownloadJob)result.Job!;
+
                 result.Message = "скачивание…";
 
-                var root = perServer ? Path.Combine(folder, FolderName(server)) : folder;
+                var root = job.Plan.Count > 1 ? Path.Combine(job.Folder, FolderName(server)) : job.Folder;
                 result.Append("куда: " + root);
 
                 var stats = await DownloadService.DownloadAsync(
-                    server, settings, plan[server], root, options, verify, line => result.Append(line), ct, result.SetTransfer, confirmReplace);
+                    server, settings, job.Plan[server], root, job.Options, job.Verify, line => result.Append(line), ct, result.SetTransfer, confirmReplace);
 
                 result.Append(
                     $"итог: получено {stats.Received} ({TransferItem.Format(stats.Bytes)}) · такие же {stats.UpToDate}"
                     + (stats.Skipped > 0 ? $" · уже были, не тронуты {stats.Skipped}" : string.Empty)
                     + (stats.Dirs > 0 ? $" · папок создано {stats.Dirs}" : string.Empty));
 
+                // на ярлыке — итог самого загруженного сервера по всем его окнам
                 lock (gate)
                 {
-                    receivedMax = Math.Max(receivedMax, stats.Received);
-                    consideredMax = Math.Max(consideredMax, stats.Received + stats.UpToDate + stats.Skipped);
+                    receivedOn[server] = receivedOn.GetValueOrDefault(server) + stats.Received;
+                    consideredOn[server] = consideredOn.GetValueOrDefault(server) + stats.Received + stats.UpToDate + stats.Skipped;
+                    receivedMax = Math.Max(receivedMax, receivedOn[server]);
+                    consideredMax = Math.Max(consideredMax, consideredOn[server]);
                 }
 
                 if (stats.Mismatches > 0)
                 {
                     result.Message = $"расхождений сумм: {stats.Mismatches}";
                     result.Status = OperationStatus.Failed;
+                    FlashFailure(job.Window);
                     return;
                 }
 
@@ -1159,7 +1455,8 @@ public sealed class Workspace : ObservableObject
                 result.Status = OperationStatus.Success;
             },
             settings.MaxParallel,
-            concurrent: concurrent);
+            concurrent: concurrent,
+            prepare: WindowRows(rows, j => j.Window, null, chained: true));
 
         // запуски «Проводника» идут рядом — итог на ярлыке, когда закончился последний
         if (CopyBatch.IsRunning)
@@ -1224,6 +1521,15 @@ public sealed class Workspace : ObservableObject
     }
 
     /// <summary>Личную вкладку закрыли: свитч гаснет, следующее включение создаст новую.</summary>
+    /// <summary>Закрытую вкладку вернули: связь с личной вкладкой — какой была.</summary>
+    public void LinkPersonal(string tabId, bool enabled)
+    {
+        _afterCopyTabId = tabId;
+        _afterCopyEnabled = enabled;
+        RaiseChain();
+        Save();
+    }
+
     public void UnlinkPersonal()
     {
         _afterCopyTabId = string.Empty;
@@ -1236,7 +1542,7 @@ public sealed class Workspace : ObservableObject
     {
         RaiseMany(
             nameof(AfterCopyEnabled), nameof(Personal), nameof(HasPersonal), nameof(IsCopyTab),
-            nameof(Notices), nameof(HasNotices));
+            nameof(Notices), nameof(HasNotices), nameof(PersonalButtonText));
 
         // галочка «+ команды» в терминале видна, только пока свитч включён. Current ещё нет,
         // пока вкладки читаются при запуске — тогда и показывать нечего
@@ -1257,30 +1563,16 @@ public sealed class Workspace : ObservableObject
                 return [];
             }
 
-            if (personal.RunnableSteps(null, onlyThis: false).Count == 0)
-            {
-                return ["Вкладка команд пустая — после копирования выполнять нечего."];
-            }
-
-            var theirs = personal.CommandTargets;
-
-            if (theirs.Count == 0)
-            {
-                return ["На вкладке команд не выбран сервер — команды после копирования не выполнятся."];
-            }
-
-            var mine = CopyTargets;
-
-            if (!theirs.ToHashSet().SetEquals(mine))
-            {
-                return [$"Отличается выбор серверов у вкладки команд: там {string.Join(", ", theirs.Select(s => s.PaneLabel))}."];
-            }
-
-            return [];
+            return personal.RunnableSteps(null, onlyThis: false).Count == 0
+                ? ["Вкладка команд пустая — после копирования выполнять нечего."]
+                : [];
         }
     }
 
     public bool HasNotices => Notices.Count > 0;
+
+    /// <summary>Кнопка в мини-терминале: ведёт к личной вкладке, а её нет — создаёт.</summary>
+    public string PersonalButtonText => Personal is null ? "Создать команды после копирования" : "Команды после копирования";
 
     /// <summary>Плашку пересчитать: у вкладки копирования — свою, у личной — её владельца.</summary>
     private void RaiseNotices()
@@ -1317,6 +1609,15 @@ public sealed class Workspace : ObservableObject
 
     /// <summary>Убрать окно. Последнее оставшееся не убирается.</summary>
     public bool RemoveStep(CommandStep step) => Steps.Count > 1 && Steps.Remove(step);
+
+    /// <summary>Курсор встал в окно команды: рамка у него, и сюда подставляются история и избранное.</summary>
+    public void FocusStep(CommandStep step)
+    {
+        foreach (var each in Steps)
+        {
+            each.IsFocused = ReferenceEquals(each, step);
+        }
+    }
 
     /// <summary>Заменить все окна набором — из избранного или из файла.</summary>
     public void SetSteps(IEnumerable<SavedCommandStep> saved)
@@ -1396,6 +1697,12 @@ public sealed class Workspace : ObservableObject
 
         if (Steps.Count > 0)
         {
+            // окно в фокусе убрали или заменили всё сразу — фокус у первого
+            if (!Steps.Any(s => s.IsFocused))
+            {
+                Steps[0].IsFocused = true;
+            }
+
             OnStepChanged();
         }
     }
@@ -1470,7 +1777,8 @@ public sealed class Workspace : ObservableObject
             }
 
             var picked = Items.Count(i => i.IsSelected);
-            return $"Будет скопировано отмеченных объектов: {picked} из {Items.Count} · на серверов: {servers}.";
+            var window = CopyWindows.Count > 1 ? $"Окно {_focusedWindow.NumberText} · " : string.Empty;
+            return $"{window}Будет скопировано отмеченных объектов: {picked} из {Items.Count} · на серверов: {servers}.";
         }
     }
 
@@ -1552,7 +1860,7 @@ public sealed class Workspace : ObservableObject
                 // «файлов» здесь врало: в списке и папки тоже, а считаются они поштучно,
                 // а не по содержимому — поэтому нейтральное «отмечено»
                 AppSection.Files =>
-                    $"Отмечено: {Items.Count(i => i.IsSelected)} · Серверов: {SelectedServers.Count}",
+                    $"Отмечено: {AllItems.Count(i => i.IsSelected)} · Серверов: {SelectedServers.Count}",
                 AppSection.Download =>
                     $"Отмечено: {PickedDownloads.Count()} · Серверов: {PickedDownloads.Select(d => d.ServerId).Distinct().Count()}",
                 AppSection.Explorer => ExplorerServer?.PaneLabel ?? "сервер не выбран",
@@ -1616,7 +1924,7 @@ public sealed class Workspace : ObservableObject
         : IsPersonal
             ? $"{Title} — команды после копирования этой вкладки. {TabCounts}"
         : IsMain
-            ? $"{Title} — {TabSummary}. Первая вкладка: её нельзя закрыть и переставить"
+            ? $"{Title} — {TabSummary}. Первая вкладка: её нельзя закрыть, переставить и переименовать"
             : $"{Title} — {TabSummary}. Перетащите мышью, чтобы поменять вкладки местами";
 
     /// <summary>Строки ярлыка целиком — у проводника с полным путём, который на ярлык не влез.</summary>
@@ -1833,7 +2141,7 @@ public sealed class Workspace : ObservableObject
     {
         foreach (var item in items.ToList())
         {
-            Items.Remove(item);
+            CopyWindows.FirstOrDefault(w => w.Items.Contains(item))?.Items.Remove(item);
         }
     }
 
@@ -1855,7 +2163,7 @@ public sealed class Workspace : ObservableObject
     /// </summary>
     public async Task RefreshItemsInfoAsync()
     {
-        if (_refreshingInfo || Items.Count == 0)
+        if (_refreshingInfo || !AllItems.Any())
         {
             return;
         }
@@ -1864,7 +2172,7 @@ public sealed class Workspace : ObservableObject
 
         try
         {
-            var snapshot = Items.ToList();
+            var snapshot = AllItems.ToList();
 
             await Task.Run(() =>
             {
@@ -1914,7 +2222,7 @@ public sealed class Workspace : ObservableObject
             return false;
         }
 
-        if (CopyInputs("копирование", "копировать") is not (var payload, var remotePath, var targets))
+        if (CopyInputs("копирование", "копировать") is not (var jobs, var targets))
         {
             return false;
         }
@@ -1934,13 +2242,10 @@ public sealed class Workspace : ObservableObject
         }
 
         var settings = AppState.Current.Settings;
-        var options = new UploadOptions(
-            OverwriteFiles, PreserveTimestamps, MatchByDate, MatchByHash, ExcludeMasks, GlobalExcludeMasks);
-        var verify = VerifyChecksums;
 
         // без переноса даты у файла на сервере стоит время заливки, а не оригинала, — тогда
         // «другая дата» будет у всего подряд и отправляться будет всё. Молчать об этом нельзя
-        if (options.MatchByDate && !options.MatchByHash && !options.PreserveTimestamps)
+        if (jobs.Any(j => j.Options.MatchByDate && !j.Options.MatchByHash && !j.Options.PreserveTimestamps))
         {
             AppLog.Warn(
                 "Замена по дате изменения без переноса даты на сервер ничего не отсеет: "
@@ -1948,24 +2253,38 @@ public sealed class Workspace : ObservableObject
                 Title);
         }
 
-        settings.LastRemotePath = remotePath;
-        settings.PushHistory(settings.RemotePathHistory, remotePath);
-        AppState.Current.SaveSettings();
-
         // путь ставим после правки истории: выпадающий список чистит поле ввода, когда из него
-        // пропадает выбранная строка, и пустое поле уходит во вкладку — так путь и терялся
-        RemotePath = remotePath;
+        // пропадает выбранная строка, и пустое поле уходит в окно — так путь и терялся
+        KeepWindowPaths(() =>
+        {
+            foreach (var job in jobs)
+            {
+                settings.LastRemotePath = job.RemotePath;
+                settings.PushHistory(settings.RemotePathHistory, job.RemotePath);
+            }
+
+            AppState.Current.SaveSettings();
+        });
+
+        foreach (var job in jobs)
+        {
+            job.Window!.RemotePath = job.RemotePath;
+        }
 
         // файлы могли измениться с прошлого раза — считаем хеши заново и обновляем таблицу
         _localHashes.Clear();
         _ = RefreshItemsInfoAsync();
 
-        AppLog.Info($"Копирование {payload.Count} объект(ов) в {remotePath}"
-            + (options.MatchByHash ? ", только отличающиеся по контрольной сумме" : string.Empty)
-            + (options.MatchByDate && !options.MatchByHash ? ", только отличающиеся по дате" : string.Empty)
-            + (verify ? ", с проверкой копий" : string.Empty), Title);
+        foreach (var job in jobs)
+        {
+            AppLog.Info((CopyWindows.Count > 1 ? $"Окно {job.Window?.LogName}: копирование " : "Копирование ")
+                + $"{job.Payload.Count} объект(ов) в {job.RemotePath}"
+                + (job.Options.MatchByHash ? ", только отличающиеся по контрольной сумме" : string.Empty)
+                + (job.Options.MatchByDate && !job.Options.MatchByHash ? ", только отличающиеся по дате" : string.Empty)
+                + (job.Verify ? ", с проверкой копий" : string.Empty), Title);
+        }
 
-        await UploadCoreAsync(payload, remotePath, targets, options, verify, prepare: ChainPlan());
+        await UploadJobsAsync(jobs, targets, prepare: ChainPlan());
 
         // с галочкой «+ команды» автокопия ждёт личные команды: отчёт один, копирование и команды
         var together = _afterCopyEnabled && Personal is not null && AppState.Current.Settings.CopyWithChain;
@@ -1991,24 +2310,38 @@ public sealed class Workspace : ObservableObject
     /// </summary>
     /// <param name="what">Название действия для метки на ярлыке: «копирование», «сравнение».</param>
     /// <param name="verb">Глагол для причины: «копировать нечего», «сравнивать нечего».</param>
-    private (List<TransferItem> Payload, string RemotePath, IReadOnlyList<ServerEntry> Targets)? CopyInputs(string what, string verb)
+    private (List<UploadJob> Jobs, IReadOnlyList<ServerEntry> Targets)? CopyInputs(string what, string verb)
     {
-        var payload = Items.Where(i => i.IsSelected).ToList();
+        // окна без отмеченных файлов просто пропускаются, как пустые окна команд
+        var windows = CopyWindows.Where(w => w.Items.Any(i => i.IsSelected)).ToList();
 
-        if (payload.Count == 0)
+        if (windows.Count == 0)
         {
-            Refuse(what, Items.Count == 0
+            Refuse(what, !AllItems.Any()
                 ? $"Список файлов пуст — {verb} нечего."
                 : $"Ни один объект не отмечен галочкой — {verb} нечего.");
             return null;
         }
 
-        var remotePath = SshService.NormalizeRemote(RemotePath);
+        var jobs = new List<UploadJob>();
 
-        if (string.IsNullOrWhiteSpace(remotePath) || remotePath == "/")
+        foreach (var window in windows)
         {
-            Refuse(what, "Не указан путь на сервере — укажите каталог, корень «/» не принимается.");
-            return null;
+            var remotePath = SshService.NormalizeRemote(window.RemotePath);
+
+            if (string.IsNullOrWhiteSpace(remotePath) || remotePath == "/")
+            {
+                var where = CopyWindows.Count > 1 ? $"Окно {window.LogName}: не" : "Не";
+                Refuse(what, $"{where} указан путь на сервере — укажите каталог, корень «/» не принимается.");
+                return null;
+            }
+
+            jobs.Add(new UploadJob(
+                window,
+                window.Items.Where(i => i.IsSelected).ToList(),
+                remotePath,
+                UploadOptionsOf(window),
+                OptionsOf(window).VerifyChecksums));
         }
 
         var targets = CopyTargets;
@@ -2019,8 +2352,77 @@ public sealed class Workspace : ObservableObject
             return null;
         }
 
-        return (payload, remotePath, targets);
+        return (jobs, targets);
     }
+
+    /// <summary>
+    /// Строки запуска по порядку: на каждом сервере у каждого окна своя. Окно ниже на том же сервере идёт
+    /// после окна выше, если <paramref name="chained"/>. Команды после копирования встают под последним окном сервера.
+    /// </summary>
+    private Action<OperationResult> WindowRows<T>(
+        List<(ServerEntry Server, T Job)> rows,
+        Func<T, CopyWindow?> windowOf,
+        Action<OperationResult>? prepare,
+        bool chained)
+    {
+        var index = 0;
+        var last = new Dictionary<ServerEntry, OperationResult>();
+
+        return row =>
+        {
+            var at = index++;
+            var (server, job) = rows[at];
+
+            row.Job = job;
+
+            if (CopyWindows.Count > 1 && windowOf(job) is { } window)
+            {
+                row.WindowLabel = window.LogName;
+                window.IsFailed = false;
+            }
+
+            if (chained)
+            {
+                row.PreviousWindow = last.GetValueOrDefault(server);
+                last[server] = row;
+            }
+
+            if (rows.FindLastIndex(r => ReferenceEquals(r.Server, server)) == at)
+            {
+                prepare?.Invoke(row);
+            }
+        };
+    }
+
+    /// <summary>Окно встало на суммах. Работа идёт не в потоке окна.</summary>
+    private static void FlashFailure(CopyWindow? window)
+    {
+        if (window is not null)
+        {
+            Application.Current?.Dispatcher.BeginInvoke(() => window.IsFailed = true);
+        }
+    }
+
+    private UploadOptions UploadOptionsOf(CopyWindow window)
+    {
+        var options = OptionsOf(window);
+
+        return new UploadOptions(
+            options.Overwrite,
+            options.PreserveTimestamps,
+            options.MatchByDate,
+            options.MatchByHash,
+            options.ExcludeMasks,
+            options.UseGlobalExcludes ? AppState.Current.GlobalExcludeMasks : string.Empty);
+    }
+
+    /// <summary>Что копирует одно окно. У «Проводника» окна нет — там задание одно и без номера.</summary>
+    public sealed record UploadJob(
+        CopyWindow? Window,
+        IReadOnlyList<TransferItem> Payload,
+        string RemotePath,
+        UploadOptions Options,
+        bool Verify);
 
     /// <summary>Начало названия операции сравнения — по нему окончание отличают от копирования.</summary>
     public const string CompareName = "Сравнение";
@@ -2039,40 +2441,51 @@ public sealed class Workspace : ObservableObject
             return false;
         }
 
-        if (CopyInputs("сравнение", "сравнивать") is not (var payload, var remotePath, var targets))
+        if (CopyInputs("сравнение", "сравнивать") is not (var jobs, var targets))
         {
             return false;
         }
 
         var settings = AppState.Current.Settings;
-        var options = CurrentOptions;
 
         // файлы могли измениться с прошлого раза — суммы заново, как перед копированием
         _localHashes.Clear();
         _ = RefreshItemsInfoAsync();
 
-        AppLog.Info($"Сравнение {payload.Count} объект(ов) с {remotePath} — ничего не копируется.", Title);
-
-        await CompareCoreAsync(targets, (server, result, ct) =>
+        foreach (var job in jobs)
         {
-            result.Append($"Сравнение с {remotePath} — ничего не копируется");
+            AppLog.Info((CopyWindows.Count > 1 ? $"Окно {job.Window?.LogName}: сравнение " : "Сравнение ")
+                + $"{job.Payload.Count} объект(ов) с {job.RemotePath} — ничего не копируется.", Title);
+        }
 
-            return SshService.CompareUploadAsync(
-                server,
-                settings,
-                payload,
-                remotePath,
-                options,
-                _localHashes,
-                line => result.Append(line),
-                ct,
-                step => result.Message = (step switch
-                {
-                    UploadStep.CheckingHashes => StepCheckingHashes,
-                    UploadStep.CheckingDates => StepCheckingDates,
-                    _ => StepConnecting,
-                }) + "…");
-        }, "на сервере");
+        var rows = targets.SelectMany(server => jobs.Select(job => (Server: server, Job: job))).ToList();
+
+        await CompareCoreAsync(
+            rows.Select(r => r.Server).ToList(),
+            (server, result, ct) =>
+            {
+                var job = (UploadJob)result.Job!;
+
+                result.Append($"Сравнение с {job.RemotePath} — ничего не копируется");
+
+                return SshService.CompareUploadAsync(
+                    server,
+                    settings,
+                    job.Payload,
+                    job.RemotePath,
+                    job.Options,
+                    _localHashes,
+                    line => result.Append(line),
+                    ct,
+                    step => result.Message = (step switch
+                    {
+                        UploadStep.CheckingHashes => StepCheckingHashes,
+                        UploadStep.CheckingDates => StepCheckingDates,
+                        _ => StepConnecting,
+                    }) + "…");
+            },
+            "на сервере",
+            WindowRows(rows, j => j.Window, null, chained: false));
 
         if (notify)
         {
@@ -2095,24 +2508,36 @@ public sealed class Workspace : ObservableObject
             return false;
         }
 
-        if (DownloadInputs("сравнение", "сравнивать", create: false) is not (var plan, var folder))
+        if (DownloadInputs("сравнение", "сравнивать", create: false) is not { } jobs)
         {
             return false;
         }
 
         var settings = AppState.Current.Settings;
-        var options = CurrentOptions;
-        var perServer = plan.Count > 1;
 
-        AppLog.Info($"Сравнение: путей {plan.Values.Sum(p => p.Count)} с {plan.Count} сервер(ов) и папки {folder} — ничего не скачивается.", Title);
-
-        await CompareCoreAsync(plan.Keys.ToList(), (server, result, ct) =>
+        foreach (var job in jobs)
         {
-            var root = perServer ? Path.Combine(folder, FolderName(server)) : folder;
-            result.Append($"Сравнение с {root} — ничего не скачивается");
+            AppLog.Info((CopyWindows.Count > 1 ? $"Окно {job.Window?.LogName}: сравнение" : "Сравнение")
+                + $": путей {job.Plan.Values.Sum(p => p.Count)} с {job.Plan.Count} сервер(ов) и папки {job.Folder} — ничего не скачивается.", Title);
+        }
 
-            return DownloadService.CompareAsync(server, settings, plan[server], root, options, line => result.Append(line), ct);
-        }, "здесь");
+        var rows = jobs.SelectMany(j => j.Plan.Keys).Distinct()
+            .SelectMany(server => jobs.Where(j => j.Plan.ContainsKey(server)).Select(job => (Server: server, Job: job)))
+            .ToList();
+
+        await CompareCoreAsync(
+            rows.Select(r => r.Server).ToList(),
+            (server, result, ct) =>
+            {
+                var job = (DownloadJob)result.Job!;
+                var root = job.Plan.Count > 1 ? Path.Combine(job.Folder, FolderName(server)) : job.Folder;
+
+                result.Append($"Сравнение с {root} — ничего не скачивается");
+
+                return DownloadService.CompareAsync(server, settings, job.Plan[server], root, job.Options, line => result.Append(line), ct);
+            },
+            "здесь",
+            WindowRows(rows, j => j.Window, null, chained: false));
 
         if (notify)
         {
@@ -2130,11 +2555,13 @@ public sealed class Workspace : ObservableObject
     private async Task CompareCoreAsync(
         IReadOnlyList<ServerEntry> targets,
         Func<ServerEntry, OperationResult, CancellationToken, Task<CompareStats>> compare,
-        string where)
+        string where,
+        Action<OperationResult> prepare)
     {
         var settings = AppState.Current.Settings;
         var gate = new Lock();
         var worst = 0;
+        var worstOn = new Dictionary<ServerEntry, int>();
 
         SetScope();
         ShowStatus("сравнение", string.Empty, WorkspaceStatus.Running);
@@ -2150,14 +2577,17 @@ public sealed class Workspace : ObservableObject
 
                 var stats = await compare(server, result, ct);
 
+                // окна сервера складываются: на ярлыке — все его отличия
                 lock (gate)
                 {
-                    worst = Math.Max(worst, stats.Mismatches);
+                    worstOn[server] = worstOn.GetValueOrDefault(server) + stats.Mismatches;
+                    worst = Math.Max(worst, worstOn[server]);
                 }
 
                 ReportCompare(result, stats, where);
             },
-            settings.MaxParallel);
+            settings.MaxParallel,
+            prepare: prepare);
 
         if (CopyBatch.IsRunning)
         {
@@ -2265,7 +2695,7 @@ public sealed class Workspace : ObservableObject
     /// к каждому серверу, отправка, сверка, строка времени, полоса передачи, статус на ярлыке.
     /// Всё, что улучшается в копировании, достаётся обоим разделам сразу.
     /// </summary>
-    public async Task UploadCoreAsync(
+    public Task UploadCoreAsync(
         IReadOnlyList<TransferItem> payload,
         string remotePath,
         IReadOnlyList<ServerEntry> targets,
@@ -2273,9 +2703,22 @@ public sealed class Workspace : ObservableObject
         bool verify,
         ConfirmReplace? confirmReplace = null,
         bool concurrent = false,
+        Action<OperationResult>? prepare = null) =>
+        UploadJobsAsync([new UploadJob(null, payload, remotePath, options, verify)], targets, confirmReplace, concurrent, prepare);
+
+    /// <summary>
+    /// Задания идут на каждом сервере по порядку: следующее окно — после успешного предыдущего,
+    /// не дожидаясь остальных серверов. Встало на сервере — дальше на нём не идёт.
+    /// </summary>
+    private async Task UploadJobsAsync(
+        IReadOnlyList<UploadJob> jobs,
+        IReadOnlyList<ServerEntry> targets,
+        ConfirmReplace? confirmReplace = null,
+        bool concurrent = false,
         Action<OperationResult>? prepare = null)
     {
         var settings = AppState.Current.Settings;
+        var rows = targets.SelectMany(server => jobs.Select(job => (Server: server, Job: job))).ToList();
 
         SetScope();
         ShowStatus(StepConnecting, string.Empty, WorkspaceStatus.Running);
@@ -2308,12 +2751,30 @@ public sealed class Workspace : ObservableObject
         var numbersLock = new object();
         var sentMax = 0;
         var seenMax = 0;
+        var sentOn = new Dictionary<ServerEntry, int>();
+        var seenOn = new Dictionary<ServerEntry, int>();
 
         await CopyBatch.RunAsync(
             Operation("Копирование"),
-            targets,
+            rows.Select(r => r.Server).ToList(),
             async (server, result, ct) =>
             {
+                var job = (UploadJob)result.Job!;
+                var (_, payload, remotePath, options, verify) = job;
+
+                var sentTotal = 0;
+                var seenTotal = 0;
+                var upToDateTotal = 0;
+                var skippedTotal = 0;
+                var bytesTotal = 0L;
+                var verified = false;
+
+                string Summary() =>
+                    $"отправлено {sentTotal}, {TransferItem.Format(bytesTotal)}"
+                    + (upToDateTotal > 0 ? $" · без изменений {upToDateTotal}" : string.Empty)
+                    + (skippedTotal > 0 ? $" · уже есть {skippedTotal}" : string.Empty)
+                    + (verified ? ", суммы сошлись" : string.Empty);
+
                 result.Message = StepConnecting + "…";
                 result.Append($"Назначение: {remotePath}");
 
@@ -2342,12 +2803,19 @@ public sealed class Workspace : ObservableObject
                     result.SetTransfer,
                     confirmReplace);
 
-                var seen = stats.FilesSent + stats.FilesUpToDate + stats.FilesSkipped;
+                sentTotal += stats.FilesSent;
+                seenTotal += stats.FilesSent + stats.FilesUpToDate + stats.FilesSkipped;
+                upToDateTotal += stats.FilesUpToDate;
+                skippedTotal += stats.FilesSkipped;
+                bytesTotal += stats.BytesSent;
 
+                // на ярлыке — итог самого загруженного сервера по всем его окнам
                 lock (numbersLock)
                 {
-                    sentMax = Math.Max(sentMax, stats.FilesSent);
-                    seenMax = Math.Max(seenMax, seen);
+                    sentOn[server] = sentOn.GetValueOrDefault(server) + stats.FilesSent;
+                    seenOn[server] = seenOn.GetValueOrDefault(server) + stats.FilesSent + stats.FilesUpToDate + stats.FilesSkipped;
+                    sentMax = Math.Max(sentMax, sentOn[server]);
+                    seenMax = Math.Max(seenMax, seenOn[server]);
                 }
 
                 // подробный разбор — в вывод, коротко — в строку сервера
@@ -2402,11 +2870,6 @@ public sealed class Workspace : ObservableObject
                     }
                 }
 
-                var summary =
-                    $"отправлено {stats.FilesSent}, {TransferItem.Format(stats.BytesSent)}"
-                    + (stats.FilesUpToDate > 0 ? $" · без изменений {stats.FilesUpToDate}" : string.Empty)
-                    + (stats.FilesSkipped > 0 ? $" · уже есть {stats.FilesSkipped}" : string.Empty);
-
                 if (verify && stats.Files.Count > 0)
                 {
                     result.Message = StepVerifying + "…";
@@ -2425,13 +2888,14 @@ public sealed class Workspace : ObservableObject
                     if (mismatches > 0)
                     {
                         AppendFiles();
-                        result.Message = summary + $", РАСХОЖДЕНИЙ: {mismatches}";
+                        result.Message = Summary() + $", РАСХОЖДЕНИЙ: {mismatches}";
                         result.Status = OperationStatus.Failed;
+                        FlashFailure(job.Window);
                         return;
                     }
 
                     result.Append($"контрольные суммы совпали: {stats.Files.Count} файл(ов)");
-                    summary += ", суммы сошлись";
+                    verified = true;
                 }
                 else
                 {
@@ -2439,12 +2903,13 @@ public sealed class Workspace : ObservableObject
                 }
 
                 AppendFiles();
-                result.Message = summary;
+
+                result.Message = Summary();
                 result.Status = OperationStatus.Success;
             },
             settings.MaxParallel,
             concurrent: concurrent,
-            prepare: prepare);
+            prepare: WindowRows(rows, j => j.Window, prepare, chained: true));
 
         // запуски «Проводника» идут рядом — итог на ярлыке, когда закончился последний
         if (CopyBatch.IsRunning)
@@ -2454,7 +2919,7 @@ public sealed class Workspace : ObservableObject
 
         // итог задачи, а не число серверов: по «0 из 5» сразу видно, что ничего не ушло.
         // Слово «скопировано» не пишем — на узкой плашке оно не влезает, а смысл и так ясен
-        var considered = seenMax > 0 ? seenMax : payload.Count;
+        var considered = seenMax > 0 ? seenMax : jobs.Sum(j => j.Payload.Count);
 
         FinishStatus(
             CopyBatch,
@@ -2474,8 +2939,7 @@ public sealed class Workspace : ObservableObject
         }
 
         var steps = personal.RunnableSteps(null, onlyThis: false);
-        var servers = personal.CommandTargets;
-        return steps.Count == 0 || servers.Count == 0 ? null : RunHistory.CheckCommands(personal, personal.Numbered(steps), servers);
+        return steps.Count == 0 || targets.Count == 0 ? null : RunHistory.CheckCommands(personal, personal.Numbered(steps), targets);
     }
 
     /// <summary>
@@ -2491,25 +2955,19 @@ public sealed class Workspace : ObservableObject
         }
 
         var steps = personal.RunnableSteps(null, onlyThis: false).Select(s => (s.Number, s.Text)).ToList();
-        var servers = personal.CommandTargets;
 
-        if (steps.Count == 0 || servers.Count == 0)
+        if (steps.Count == 0)
         {
             return null;
         }
 
-        return row =>
-        {
-            if (servers.Contains(row.Server))
-            {
-                row.PlanSteps(steps);
-            }
-        };
+        return row => row.PlanSteps(steps);
     }
 
     /// <summary>
-    /// Личные команды после копирования — только на тех серверах, где копирование
-    /// (и сверка сумм, если она включена) прошло. Умный режим уже спросил до копирования.
+    /// Личные команды после копирования — на серверах этого копирования, отметки личной вкладки
+    /// здесь не действуют; только там, где копирование (и сверка сумм, если она включена) прошло.
+    /// Умный режим уже спросил до копирования.
     /// Команды, остановленные заранее в строке терминала, не пойдут — ни они, ни нижние.
     /// </summary>
     /// <param name="notifyCommands">Сообщить об окончании команд отдельно (иначе — вместе с копированием).</param>
@@ -2527,15 +2985,9 @@ public sealed class Workspace : ObservableObject
         }
 
         // свитч включён не просто так: чего не хватает, говорим прямо там, где идёт вывод копирования
-        var missing = personal.RunnableSteps(null, onlyThis: false).Count == 0
-            ? "в личной вкладке команд нет ни одной команды — впишите её"
-            : personal.CommandTargets.Count == 0
-                ? "в личной вкладке команд не отмечен ни один сервер — отметьте его в панели «Целевые сервера»"
-                : null;
-
-        if (missing is not null)
+        if (personal.RunnableSteps(null, onlyThis: false).Count == 0)
         {
-            ChainSkipped($"{missing} (или выключите свитч на ярлыке «{Title}»)");
+            ChainSkipped($"в личной вкладке команд нет ни одной команды — впишите её (или выключите свитч на ярлыке «{Title}»)");
             return;
         }
 
@@ -2555,8 +3007,8 @@ public sealed class Workspace : ObservableObject
         var copyRows = CopyBatch.LastRun.GroupBy(r => r.Server).ToDictionary(g => g.Key, g => g.Last());
         var stopped = copyRows.Values.Where(r => r.StepsStopped).Select(r => r.Server).ToHashSet();
 
-        // у личной вкладки свои отметки; сервер, где копирование не прошло, из них выпадает
-        var targets = personal.CommandTargets.Where(s => !failed.Contains(s) && !stopped.Contains(s)).ToList();
+        // серверы этого копирования; где оно не прошло, команды не пойдут
+        var targets = copyRows.Keys.Where(s => !failed.Contains(s) && !stopped.Contains(s)).ToList();
 
         // команды остановили сами — не сбой, объяснять нечего
         if (CopyBatch.RunSuccess > 0 && targets.Count == 0 && stopped.Count > 0)
@@ -2571,9 +3023,7 @@ public sealed class Workspace : ObservableObject
 
         if (CopyBatch.RunSuccess == 0 || targets.Count == 0)
         {
-            ChainSkipped(CopyBatch.RunSuccess == 0
-                ? "копирование не прошло ни на одном сервере"
-                : "на отмеченных серверах личной вкладки копирование не прошло");
+            ChainSkipped("копирование не прошло ни на одном сервере");
 
             foreach (var step in personal.Steps)
             {
@@ -2658,7 +3108,7 @@ public sealed class Workspace : ObservableObject
     {
         var targets = CopyTargets;
 
-        return !Items.Any(i => i.IsSelected) || targets.Count == 0 || CopyBatch.IsRunning
+        return !AllItems.Any(i => i.IsSelected) || targets.Count == 0 || CopyBatch.IsRunning
             ? null
             : RunHistory.CheckCopy(this, targets).With(ChainCheck(targets));
     }
@@ -3088,7 +3538,7 @@ public sealed class Workspace : ObservableObject
         StatusTooltip = tooltip ?? $"{caption}: {badge}";
         Status = kind;
 
-        // сам по себе статус не гаснет: итог висит на ярлыке до следующей операции
+        // сам по себе статус не гаснет: его гасит окно, когда человек увидел вкладку
     }
 
     public void ClearStatus()
@@ -3106,8 +3556,10 @@ public sealed class Workspace : ObservableObject
         AfterCopyTabId = _afterCopyTabId,
         AfterCopyEnabled = _afterCopyEnabled,
         OwnerCopyTabId = OwnerCopyTabId,
-        Downloads = Downloads.Select(d => d.ToSaved()).ToList(),
-        LocalFolder = LocalFolder,
+        CopyWindowName = CopyWindows[0].Name,
+        ShowWindowNames = _showWindowNames,
+        Downloads = CopyWindows[0].Downloads.Select(d => d.ToSaved()).ToList(),
+        LocalFolder = CopyWindows[0].LocalFolder,
         Explorer = Explorer.Clone(),
         IsMain = IsMain,
         IsArchived = IsArchived,
@@ -3117,17 +3569,19 @@ public sealed class Workspace : ObservableObject
         CopyPass = _copyPass,
         SelectedServerIds = CopyServers.Where(c => c.IsSelected).Select(c => c.Server.Id).ToList(),
         CommandServerIds = CommandServers.Where(c => c.IsSelected).Select(c => c.Server.Id).ToList(),
-        CopyList = Items.Select(i => new SavedTransferItem { Path = i.FullPath, IsSelected = i.IsSelected }).ToList(),
-        RemotePath = RemotePath,
+        CopyList = SavedItems(CopyWindows[0]),
+        RemotePath = CopyWindows[0].RemotePath,
         LastLocalFolder = LastLocalFolder,
-        OverwriteFiles = OverwriteFiles,
-        PreserveTimestamps = PreserveTimestamps,
-        VerifyChecksums = VerifyChecksums,
+        OverwriteFiles = OptionsOf(CopyWindows[0]).Overwrite,
+        PreserveTimestamps = OptionsOf(CopyWindows[0]).PreserveTimestamps,
+        VerifyChecksums = OptionsOf(CopyWindows[0]).VerifyChecksums,
         ReplaceWithoutAsking = ReplaceWithoutAsking,
-        ExcludeMasks = ExcludeMasks,
-        UseGlobalExcludes = UseGlobalExcludes,
-        MatchByDate = MatchByDate,
-        MatchByHash = MatchByHash,
+        ExcludeMasks = OptionsOf(CopyWindows[0]).ExcludeMasks,
+        UseGlobalExcludes = OptionsOf(CopyWindows[0]).UseGlobalExcludes,
+        MatchByDate = OptionsOf(CopyWindows[0]).MatchByDate,
+        MatchByHash = OptionsOf(CopyWindows[0]).MatchByHash,
+        ExtraCopyWindows = CopyWindows.Count > 1 ? CopyWindows.Skip(1).Select(SaveCopyWindow).ToList() : null,
+        FocusedCopyWindow = CopyWindows.IndexOf(_focusedWindow),
         CommandText = CommandText,
         UseSudo = UseSudo,
         Commands = HeldSteps?.ToList() ?? SaveSteps(),
@@ -3139,10 +3593,157 @@ public sealed class Workspace : ObservableObject
         LockedServerIds = _lockedIds?.ToList(),
     };
 
+    /// <summary>Содержимое вкладки — для отмены действий.</summary>
+    public TabContent CaptureContent() => new(
+        Title,
+        CopyWindows.Select(SaveCopyWindow).ToList(),
+        CopyWindows.IndexOf(_focusedWindow),
+        HeldSteps?.ToList() ?? SaveSteps(),
+        _showWindowNames);
+
+    /// <summary>Отмена или возврат: окна те же, где можно, содержимое — из снимка.</summary>
+    public void ApplyContent(TabContent content)
+    {
+        _restoring = true;
+
+        try
+        {
+            while (CopyWindows.Count > content.Windows.Count)
+            {
+                var gone = CopyWindows[^1];
+
+                if (ReferenceEquals(gone, _focusedWindow))
+                {
+                    _focusedWindow = CopyWindows[0];
+                }
+
+                gone.Items.Clear();
+                gone.Items.CollectionChanged -= OnItemsChanged;
+                gone.Downloads.Clear();
+                gone.Downloads.CollectionChanged -= OnDownloadsChanged;
+                gone.Detach();
+                CopyWindows.Remove(gone);
+            }
+
+            while (CopyWindows.Count < content.Windows.Count)
+            {
+                CopyWindows.Add(NewCopyWindow(string.Empty));
+            }
+
+            for (var i = 0; i < content.Windows.Count; i++)
+            {
+                var (window, saved) = (CopyWindows[i], content.Windows[i]);
+
+                window.RestorePath(saved.RemotePath ?? string.Empty);
+                window.RestoreFolder(saved.LocalFolder ?? string.Empty);
+                window.RestoreName(saved.Name ?? string.Empty);
+                window.Options = new CopyOptions(
+                    saved.OverwriteFiles,
+                    saved.PreserveTimestamps,
+                    saved.VerifyChecksums,
+                    saved.MatchByDate,
+                    saved.MatchByHash,
+                    saved.ExcludeMasks ?? string.Empty,
+                    saved.UseGlobalExcludes);
+
+                window.Items.Clear();
+                RestoreItems(window, saved.CopyList);
+
+                window.Downloads.Clear();
+
+                foreach (var download in saved.Downloads ?? [])
+                {
+                    window.Downloads.Add(DownloadItem.From(download));
+                }
+            }
+
+            RenumberWindows();
+
+            foreach (var window in CopyWindows)
+            {
+                window.IsFocused = false;
+            }
+
+            _focusedWindow = CopyWindows[Math.Clamp(content.Focused, 0, CopyWindows.Count - 1)];
+            _focusedWindow.IsFocused = true;
+            LoadCopyOptions(_focusedWindow.Options ?? CurrentCopyOptions);
+
+            // окна команды пересобираются, только если они менялись: иначе курсор и прокрутка сбросились бы зря
+            if (System.Text.Json.JsonSerializer.Serialize(SaveSteps()) != System.Text.Json.JsonSerializer.Serialize(content.Steps))
+            {
+                SetSteps(content.Steps);
+            }
+        }
+        finally
+        {
+            _restoring = false;
+        }
+
+        // кнопка «Название» — как было в снимке; окна услышат сами
+        if (_showWindowNames != content.ShowNames)
+        {
+            _showWindowNames = content.ShowNames;
+            Raise(nameof(ShowWindowNames));
+        }
+
+        RaiseCopyOptions();
+        RaiseCopyInfo();
+        RaiseDownloadInfo();
+        _ = RefreshItemsInfoAsync();
+        Save();
+    }
+
+    private static List<SavedTransferItem> SavedItems(CopyWindow window) =>
+        window.Items.Select(i => new SavedTransferItem { Path = i.FullPath, IsSelected = i.IsSelected }).ToList();
+
+    private SavedCopyWindow SaveCopyWindow(CopyWindow window)
+    {
+        var options = OptionsOf(window);
+
+        return new SavedCopyWindow
+        {
+            CopyList = SavedItems(window),
+            RemotePath = window.RemotePath,
+            Name = window.Name,
+            Downloads = window.Downloads.Count > 0 ? window.Downloads.Select(d => d.ToSaved()).ToList() : null,
+            LocalFolder = window.LocalFolder,
+            OverwriteFiles = options.Overwrite,
+            PreserveTimestamps = options.PreserveTimestamps,
+            VerifyChecksums = options.VerifyChecksums,
+            MatchByDate = options.MatchByDate,
+            MatchByHash = options.MatchByHash,
+            ExcludeMasks = options.ExcludeMasks,
+            UseGlobalExcludes = options.UseGlobalExcludes,
+        };
+    }
+
+    /// <summary>Строки списка из файла. Пропавшие локальные пути отбрасываются. Вернёт, сколько пропало.</summary>
+    private int RestoreItems(CopyWindow window, IEnumerable<SavedTransferItem> saved)
+    {
+        var missing = 0;
+
+        foreach (var item in saved)
+        {
+            if (File.Exists(item.Path) || Directory.Exists(item.Path))
+            {
+                window.Items.Add(new TransferItem(item.Path) { IsSelected = item.IsSelected });
+            }
+            else
+            {
+                missing++;
+                AppLog.Warn($"Пропал объект из списка копирования: {item.Path}", Title);
+            }
+        }
+
+        return missing;
+    }
+
     /// <summary>Восстанавливает вкладку из файла. Пропавшие локальные пути отбрасываются.</summary>
     public void Restore(WorkspaceState state)
     {
-        _remotePath = string.IsNullOrWhiteSpace(state.RemotePath) ? "/" : state.RemotePath;
+        CopyWindows[0].RestorePath(string.IsNullOrWhiteSpace(state.RemotePath) ? "/" : state.RemotePath);
+        CopyWindows[0].RestoreName(state.CopyWindowName ?? string.Empty);
+        _showWindowNames = state.ShowWindowNames;
         _lastLocalFolder = state.LastLocalFolder ?? string.Empty;
         _overwrite = state.OverwriteFiles;
         _preserveTimestamps = state.PreserveTimestamps;
@@ -3161,18 +3762,18 @@ public sealed class Workspace : ObservableObject
         _copyPass = state.CopyPass ?? false;
         OwnerCopyTabId = state.OwnerCopyTabId ?? string.Empty;
 
-        _localFolder = state.LocalFolder ?? string.Empty;
+        CopyWindows[0].RestoreFolder(state.LocalFolder ?? string.Empty);
         Explorer = state.Explorer?.Clone() ?? new ExplorerTabState();
 
         _restoring = true;
 
         try
         {
-            Downloads.Clear();
+            CopyWindows[0].Downloads.Clear();
 
             foreach (var saved in state.Downloads ?? [])
             {
-                Downloads.Add(DownloadItem.From(saved));
+                CopyWindows[0].Downloads.Add(DownloadItem.From(saved));
             }
 
             SetSteps(state.Commands is { Count: > 0 }
@@ -3188,7 +3789,9 @@ public sealed class Workspace : ObservableObject
         _paneShowIp = state.PaneShowIp ?? false;
         _paneShowUser = state.PaneShowUser ?? false;
         _lockedIds = state.LockedServerIds?.ToHashSet(StringComparer.Ordinal);
-        ApplyLock();
+
+        // серверы к этому моменту уже могли прийти — замок сверяется с ними и с открытым набором здесь же
+        SyncLock();
         _scopes.Clear();
 
         foreach (var scope in state.PaneScopes ?? [])
@@ -3209,29 +3812,66 @@ public sealed class Workspace : ObservableObject
             };
         }
 
-        var missing = 0;
+        var missing = RestoreItems(CopyWindows[0], state.CopyList);
 
-        foreach (var saved in state.CopyList)
+        foreach (var saved in state.ExtraCopyWindows ?? [])
         {
-            if (File.Exists(saved.Path) || Directory.Exists(saved.Path))
+            var window = NewCopyWindow(saved.RemotePath ?? string.Empty);
+            window.Options = new CopyOptions(
+                saved.OverwriteFiles,
+                saved.PreserveTimestamps,
+                saved.VerifyChecksums,
+                saved.MatchByDate,
+                saved.MatchByHash,
+                saved.ExcludeMasks ?? string.Empty,
+                saved.UseGlobalExcludes);
+            window.RestoreFolder(saved.LocalFolder ?? string.Empty);
+            window.RestoreName(saved.Name ?? string.Empty);
+            CopyWindows.Add(window);
+            missing += RestoreItems(window, saved.CopyList);
+
+            _restoring = true;
+
+            try
             {
-                Items.Add(new TransferItem(saved.Path) { IsSelected = saved.IsSelected });
+                foreach (var download in saved.Downloads ?? [])
+                {
+                    window.Downloads.Add(DownloadItem.From(download));
+                }
             }
-            else
+            finally
             {
-                missing++;
-                AppLog.Warn($"Пропал объект из списка копирования: {saved.Path}", Title);
+                _restoring = false;
             }
         }
 
-        if (Items.Count > 0 || missing > 0)
+        RenumberWindows();
+
+        // «Открываться там, где ушёл»: панель и параметры — на том окне, что было в фокусе
+        if (state.FocusedCopyWindow > 0 && state.FocusedCopyWindow < CopyWindows.Count)
         {
-            AppLog.Debug($"Список копирования восстановлен: {Items.Count} объект(ов)"
+            var window = CopyWindows[state.FocusedCopyWindow];
+            _focusedWindow.Options = CurrentCopyOptions;
+            _focusedWindow.IsFocused = false;
+            _focusedWindow = window;
+            window.IsFocused = true;
+            LoadCopyOptions(window.Options ?? CurrentCopyOptions);
+        }
+
+        if (AllItems.Any() || missing > 0)
+        {
+            AppLog.Debug($"Список копирования восстановлен: {AllItems.Count()} объект(ов)"
                 + (missing > 0 ? $", не найдено {missing}" : string.Empty), Title);
         }
 
         RaiseMany(
             nameof(RemotePath),
+            nameof(Items),
+            nameof(Downloads),
+            nameof(LocalFolder),
+            nameof(DownloadInfo),
+            nameof(AllDownloadsSelected),
+            nameof(ShowWindowNames),
             nameof(OverwriteFiles),
             nameof(PreserveTimestamps),
             nameof(VerifyChecksums),
@@ -3323,7 +3963,7 @@ public sealed class Workspace : ObservableObject
 
         var tooltip = $"{what}: {badge}"
             + (string.IsNullOrEmpty(note) ? string.Empty : $" · {note}")
-            + $" · серверов отработало {ok} из {total}"
+            + (CopyWindows.Count > 1 ? $" · строк отработало {ok} из {total}" : $" · серверов отработало {ok} из {total}")
             + (failed > 0 ? $", с ошибкой {failed} — что за ошибка, видно в терминале" : string.Empty);
 
         ShowStatus(badge, failed > 0 ? $"Ошибок {failed}" : string.Empty, kind, tooltip);
@@ -3341,9 +3981,18 @@ public sealed class Workspace : ObservableObject
             item.PropertyChanged -= OnItemChanged;
         }
 
+        foreach (var window in CopyWindows)
+        {
+            window.RaiseItems();
+        }
+
         SyncWatchers();
         RaiseCopyInfo();
-        Save();
+
+        if (!_restoring)
+        {
+            Save();
+        }
     }
 
     /// <summary>
@@ -3352,19 +4001,22 @@ public sealed class Workspace : ObservableObject
     /// </summary>
     private void SyncWatchers()
     {
-        foreach (var gone in _watchers.Keys.Where(k => !Items.Contains(k)).ToList())
+        foreach (var gone in _watchers.Keys.Where(k => !AllItems.Contains(k)).ToList())
         {
             _watchers[gone].Dispose();
             _watchers.Remove(gone);
         }
 
-        foreach (var item in Items.Where(i => !_watchers.ContainsKey(i)))
+        foreach (var item in AllItems.Where(i => !_watchers.ContainsKey(i)))
         {
             _watchers[item] = new ItemWatcher(item, OnItemChangedOnDisk, OnWatchLost);
         }
     }
 
     /// <summary>Вкладку закрыли — следить за её файлами больше незачем.</summary>
+    /// <summary>Вкладку вернули: снова следить за файлами списка.</summary>
+    public void ResumeWatching() => SyncWatchers();
+
     public void StopWatching()
     {
         foreach (var watcher in _watchers.Values)
@@ -3416,17 +4068,14 @@ public sealed class Workspace : ObservableObject
     /// </summary>
     private void DropMissing(IEnumerable<TransferItem> candidates)
     {
-        var gone = candidates.Where(i => Items.Contains(i) && !i.ExistsOnDisk).ToList();
+        var gone = candidates.Where(i => !i.ExistsOnDisk && AllItems.Contains(i)).ToList();
 
         if (gone.Count == 0)
         {
             return;
         }
 
-        foreach (var item in gone)
-        {
-            Items.Remove(item);
-        }
+        RemoveItems(gone);
 
         var names = string.Join(", ", gone.Take(5).Select(i => i.Name))
             + (gone.Count > 5 ? $" и ещё {gone.Count - 5}" : string.Empty);
@@ -3445,6 +4094,11 @@ public sealed class Workspace : ObservableObject
     {
         if (e.PropertyName == nameof(TransferItem.IsSelected))
         {
+            foreach (var window in CopyWindows)
+            {
+                window.RaiseItems();
+            }
+
             RaiseCopyInfo();
             Save();
         }
@@ -3507,8 +4161,24 @@ public sealed class Workspace : ObservableObject
 
     private DateTime _lockHintAt;
 
-    /// <summary>Вкладка под замком: остальные серверы и наборы приглушены, сменить сервер нельзя.</summary>
+    /// <summary>
+    /// Вкладка под замком: остальные серверы и наборы приглушены, сменить сервер нельзя. На «Копировании»
+    /// и «Скачивании» заперто и всё остальное, кроме галочек у строк, с которыми пойдёт операция.
+    /// </summary>
     public bool IsPaneLocked => _lockedIds is not null;
+
+    public bool IsNotPaneLocked => _lockedIds is null;
+
+    /// <summary>В «Командах» и «Проводнике» замок держит только сервер, на содержимое вкладки не влияет.</summary>
+    private bool LockGuardsContent => !IsExplorerTab && !AppState.Current.CommandTabs.Contains(this);
+
+    /// <summary>Замок запер содержимое вкладки — закрыть её тоже нельзя, иначе пропадёт всё запертое.</summary>
+    public bool IsContentLocked => IsPaneLocked && LockGuardsContent;
+
+    /// <summary>Подсказка у открытого замка: что он запрёт на этой вкладке.</summary>
+    public string LockTip => LockGuardsContent
+        ? "Закрепить вкладку за этим сервером: менять можно будет только галочки у строк"
+        : "Закрепить вкладку за этим сервером: сменить его можно будет, только сняв замок";
 
     /// <summary>Отметки, которые держит замок: у командной вкладки — команды, у остальных — копирования.</summary>
     private ObservableCollection<ServerCheck> LockList =>
@@ -3534,26 +4204,30 @@ public sealed class Workspace : ObservableObject
             clicked.IsSelected = true;
         }
 
-        var picked = LockList.Where(c => c.IsSelected).ToList();
+        // только отмеченные в открытом наборе: отметки, которые другие наборы помнят за собой, в замок не идут —
+        // иначе их серверы считались бы закреплёнными и не гасли в списке у подписи сервера
+        var picked = InActiveSet(LockList).Where(c => c.IsSelected).ToList();
         _lockedIds = picked.Select(c => c.Server.Id).ToHashSet(StringComparer.Ordinal);
         ApplyLock();
-        AppLog.Hint($"Вкладка «{Title}» закреплена: {string.Join(", ", picked.Select(c => c.Server.PaneLabel))}. Сменить — сняв замок.");
+        AppLog.Hint($"Вкладка «{Title}» закреплена: {string.Join(", ", picked.Select(c => c.Server.PaneLabel))}. "
+            + (LockGuardsContent ? "Менять можно только галочки у строк, для остального требуется снять замок." : "Сменить — сняв замок."));
         Save();
     }
 
     /// <summary>Под замком действие, меняющее серверы вкладки, не выполняется — и об этом плашка.</summary>
-    private bool BlockedByLock()
+    public bool BlockedByLock()
     {
         if (_lockedIds is null)
         {
             return false;
         }
 
-        // одно действие трогает много отметок — плашка одна
-        if (DateTime.UtcNow - _lockHintAt > TimeSpan.FromSeconds(2))
+        // одно действие трогает много отметок — плашка одна. Промежуток короткий:
+        // щелчок закрывает плашку, и следующий щелчок должен показать её снова
+        if (DateTime.UtcNow - _lockHintAt > TimeSpan.FromMilliseconds(300))
         {
             _lockHintAt = DateTime.UtcNow;
-            AppLog.Hint($"Вкладка «{Title}» закреплена за своим сервером — сменить можно, сняв замок в его строке.");
+            AppLog.Hint($"Вкладка «{Title}» закреплена за своим сервером — требуется снять замок.", LogLevel.Warning);
         }
 
         return true;
@@ -3572,7 +4246,7 @@ public sealed class Workspace : ObservableObject
             check.IsMuted = _lockedIds is not null && !pinned;
         }
 
-        Raise(nameof(IsPaneLocked));
+        RaiseMany(nameof(IsPaneLocked), nameof(IsNotPaneLocked), nameof(IsContentLocked));
     }
 
     /// <summary>
@@ -3593,13 +4267,25 @@ public sealed class Workspace : ObservableObject
             return;
         }
 
+        var before = _lockedIds.Count;
         var present = CopyServers.Select(c => c.Server.Id).ToHashSet(StringComparer.Ordinal);
         _lockedIds.IntersectWith(present);
+
+        // до 3.1.0 в замок попадали и отметки, которые помнят другие наборы: под замком набор не меняется,
+        // так что закреплённые — только из открытого
+        if (!_paneAllSets && PaneSet is { } set)
+        {
+            _lockedIds.RemoveWhere(id => !set.Servers.Any(s => s.Id == id));
+        }
 
         if (_lockedIds.Count == 0)
         {
             _lockedIds = null;
             AppLog.Hint($"Вкладка «{Title}»: закреплённого сервера больше нет — замок снят.");
+            Save();
+        }
+        else if (_lockedIds.Count != before)
+        {
             Save();
         }
 

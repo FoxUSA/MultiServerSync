@@ -1,6 +1,9 @@
 ﻿using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using MultiServerSync.Models;
 using MultiServerSync.Services;
 using MultiServerSync.Views.Dialogs;
@@ -8,26 +11,24 @@ using MultiServerSync.Views.Dialogs;
 namespace MultiServerSync.Views.Pages;
 
 /// <summary>
-/// Страница копирования. Список файлов, путь и параметры принадлежат текущей вкладке,
-/// история путей на сервере общая для всех вкладок.
+/// Страница копирования. Вкладка делится на окна: у каждого свой список файлов, путь и параметры.
+/// Панель кнопок и параметры показывают окно в фокусе, история путей на сервере общая для всех.
 /// </summary>
-public partial class FilesPage : Page, Controls.IToastHost
+public partial class FilesPage : Page
 {
     private bool _activationHooked;
 
     public FilesPage()
     {
         InitializeComponent();
-        BarToast.Follow(EverywhereSwitch);
-
-        // история путей сквозная — одна на все вкладки
-        RemotePathBox.ItemsSource = AppState.Current.Settings.RemotePathHistory;
 
         DataContext = AppState.Current.ActiveWorkspace;
         AppState.Current.ActiveWorkspaceChanged += workspace => DataContext = workspace;
 
-        // порядок в таблице выбирается щелчком по заголовку и не сбрасывается
-        GridSort.Keep(ItemsGrid, "files");
+        Controls.CopyWindowLayout.Follow(WindowsScroll, WindowsList);
+        Controls.CopyWindowLayout.Reorder(WindowsScroll, WindowsList, () => Workspace);
+        Controls.CopyWindowLayout.WatchFailures(this, () => Workspace);
+        Controls.CopyWindowLayout.RestoreBand(BandRow, BandLeft);
 
         IsVisibleChanged += async (_, _) =>
         {
@@ -67,30 +68,137 @@ public partial class FilesPage : Page, Controls.IToastHost
 
     private Workspace? Workspace => DataContext as Workspace;
 
+    private void OnBandMoved(object sender, DragCompletedEventArgs e) => Controls.CopyWindowLayout.SaveBand(BandRow, BandLeft);
+
+    /// <summary>Какое поле пути открыло свой список — крестик в списке чистит историю из него.</summary>
+    private ComboBox? _openPathBox;
+
+    /// <summary>Щелчок в окне переводит на него панель и параметры — раньше, чем сработает его кнопка.</summary>
+    private void OnWindowMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        Core.FocusDrop.Leave(sender);
+        FocusWindowOf(sender);
+    }
+
+    private void OnWindowKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) => FocusWindowOf(sender);
+
+    private void FocusWindowOf(object sender)
+    {
+        if (sender is FrameworkElement { DataContext: CopyWindow window })
+        {
+            Workspace?.FocusWindow(window);
+        }
+    }
+
+    private void OnAddWindow(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: CopyWindow after } || Workspace is not { } workspace || workspace.BlockedByLock())
+        {
+            return;
+        }
+
+        Controls.CopyWindowLayout.Show(WindowsList, workspace.AddCopyWindow(after));
+    }
+
+    private void OnRemoveWindow(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: CopyWindow window } && Workspace is { } workspace && !workspace.BlockedByLock())
+        {
+            workspace.RemoveCopyWindow(window);
+        }
+    }
+
+    /// <summary>Кнопка «Название»: плашки названий в окнах вкладки. Замок не держит: без плашек названия не сменить.</summary>
+    private void OnWindowNames(object sender, RoutedEventArgs e)
+    {
+        if (Workspace is { } workspace)
+        {
+            workspace.ShowWindowNames = !workspace.ShowWindowNames;
+        }
+    }
+
+    private void OnWindowNameDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount == 2 && sender is FrameworkElement plaque && Workspace is { } workspace)
+        {
+            e.Handled = true;
+            Controls.CopyWindowLayout.Rename(plaque, workspace);
+        }
+    }
+
+    private void OnWindowGridLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is DataGrid grid)
+        {
+            Controls.CopyWindowLayout.Arrange(grid, "files");
+        }
+    }
+
+    private void OnPathDropDownOpened(object? sender, EventArgs e) => _openPathBox = sender as ComboBox;
+
     /// <summary>
     /// Одно окно на всё: в нём выбираются и файлы, и папки, поодиночке или пачкой.
     /// Разделять их заранее двумя кнопками незачем — на сервер всё уходит одинаково.
     /// </summary>
     private void OnAdd(object sender, RoutedEventArgs e)
     {
+        if (Workspace is not { } workspace || workspace.BlockedByLock())
+        {
+            return;
+        }
+
+        var picked = PickLocal(workspace, workspace.LastLocalFolder);
+
+        if (picked.Count > 0)
+        {
+            workspace.AddPaths(picked);
+        }
+    }
+
+    private IReadOnlyList<string> PickLocal(Workspace workspace, string? start)
+    {
         var owner = Window.GetWindow(this) is { } window
             ? new WindowInteropHelper(window).Handle
             : IntPtr.Zero;
 
-        var workspace = Workspace;
-        var picked = LocalPicker.Pick(owner, workspace?.LastLocalFolder);
+        var picked = LocalPicker.Pick(owner, start);
 
-        if (picked.Count > 0 && workspace is not null)
+        if (picked.Count > 0)
         {
             // в следующий раз окно этой вкладки откроется там же, откуда добавляли сейчас
-            workspace.LastLocalFolder = System.IO.Path.GetDirectoryName(picked[0].TrimEnd(System.IO.Path.DirectorySeparatorChar)) ?? string.Empty;
-            workspace.AddPaths(picked);
+            workspace.LastLocalFolder = ParentOf(picked[0]);
+        }
+
+        return picked;
+    }
+
+    private static string ParentOf(string path) =>
+        System.IO.Path.GetDirectoryName(path.TrimEnd(System.IO.Path.DirectorySeparatorChar)) ?? string.Empty;
+
+    /// <summary>Двойной щелчок: мимо строк — как «Открыть» для этого окна, по строке — другой адрес для неё.</summary>
+    private void OnGridDoubleClick(object sender, MouseButtonEventArgs e) =>
+        Controls.CopyWindowLayout.DoubleClick(e, () => OnAdd(sender, e), row => PickForRow((TransferItem)row));
+
+    /// <summary>Тот же выбор, что у «Открыть», с папки этой строки: первое выбранное встаёт на её место, остальное — новыми строками.</summary>
+    private void PickForRow(TransferItem item)
+    {
+        if (Workspace is not { } workspace || workspace.BlockedByLock())
+        {
+            return;
+        }
+
+        var picked = PickLocal(workspace, ParentOf(item.FullPath));
+
+        if (picked.Count > 0)
+        {
+            ReplaceRow(workspace, item, picked[0]);
+            workspace.AddPaths(picked.Skip(1));
         }
     }
 
     private void OnExcludes(object sender, RoutedEventArgs e)
     {
-        if (Workspace is { } workspace)
+        if (Workspace is { } workspace && !workspace.BlockedByLock())
         {
             ExcludeDialog.Edit(Window.GetWindow(this), workspace, "копировании");
         }
@@ -105,36 +213,61 @@ public partial class FilesPage : Page, Controls.IToastHost
         }
     }
 
+    /// <summary>Значок в поле «Путь на сервере»: путь окна — в буфер обмена.</summary>
+    private void OnCopyRemotePath(object sender, RoutedEventArgs e)
+    {
+        var path = Workspace?.RemotePath?.Trim();
+
+        if (string.IsNullOrEmpty(path))
+        {
+            AppLog.Hint("Путь на сервере пустой — копировать нечего.", LogLevel.Warning);
+            return;
+        }
+
+        if (ClipboardText.Copy(path))
+        {
+            AppLog.Hint("Путь скопирован: " + path);
+        }
+    }
+
     /// <summary>Значок в конце строки: вписать другой путь — строка встаёт на то же место.</summary>
     private void OnEditItemPath(object sender, RoutedEventArgs e)
     {
-        if (sender is not FrameworkElement { DataContext: TransferItem item } || Workspace is not { } workspace)
+        if (sender is not FrameworkElement { DataContext: TransferItem item } || Workspace is not { } workspace || workspace.BlockedByLock())
         {
             return;
         }
 
         var dialog = new InputDialog("Путь строки", "Файл или папка на компьютере:", item.FullPath) { Owner = Window.GetWindow(this) };
 
-        if (dialog.ShowDialog() != true || dialog.Value.Length == 0
-            || string.Equals(dialog.Value, item.FullPath, StringComparison.OrdinalIgnoreCase))
+        if (dialog.ShowDialog() == true && dialog.Value.Length > 0)
+        {
+            ReplaceRow(workspace, item, dialog.Value);
+        }
+    }
+
+    /// <summary>Тот же адрес — ничего не меняется и в журнал не идёт.</summary>
+    private static void ReplaceRow(Workspace workspace, TransferItem item, string path)
+    {
+        if (string.Equals(path, item.FullPath, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
-        if (workspace.ReplaceItemPath(item, dialog.Value) is { } problem)
+        if (workspace.ReplaceItemPath(item, path) is { } problem)
         {
             AppLog.Hint("Путь не сменён: " + problem + ".", LogLevel.Warning);
             return;
         }
 
-        ActionLog.Info($"Путь строки сменён: {item.Name} → {System.IO.Path.GetFileName(dialog.Value.TrimEnd('\\'))}",
-            ActionLog.Computer, AppSection.Files, workspace, [$"было: {item.FullPath}", $"стало: {dialog.Value}"]);
+        ActionLog.Info($"Путь строки сменён: {item.Name} → {System.IO.Path.GetFileName(path.TrimEnd('\\'))}",
+            ActionLog.Computer, AppSection.Files, workspace, [$"было: {item.FullPath}", $"стало: {path}"]);
     }
 
     /// <summary>Корзина в конце строки: строка уходит из списка, файл на месте.</summary>
     private void OnRemoveItemRow(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: TransferItem item } && Workspace is { } workspace)
+        if (sender is FrameworkElement { DataContext: TransferItem item } && Workspace is { } workspace && !workspace.BlockedByLock())
         {
             workspace.RemoveItems([item]);
             ActionLog.Info($"Убрана строка: {item.Name}", null, AppSection.Files, workspace,
@@ -142,29 +275,9 @@ public partial class FilesPage : Page, Controls.IToastHost
         }
     }
 
-    private void OnRemoveSelected(object sender, RoutedEventArgs e)
-    {
-        if (Workspace is not { } workspace)
-        {
-            return;
-        }
-
-        var picked = ItemsGrid.SelectedItems.OfType<TransferItem>().ToList();
-
-        if (picked.Count == 0)
-        {
-            AppLog.Hint("Выделите строки, которые убрать (Ctrl, Shift).");
-            return;
-        }
-
-        workspace.RemoveItems(picked);
-        ActionLog.Info($"Убрано строк: {picked.Count}", null, AppSection.Files, workspace,
-            picked.Select(i => i.FullPath).Append($"в списке осталось: {workspace.Items.Count}"));
-    }
-
     private void OnClearItems(object sender, RoutedEventArgs e)
     {
-        if (Workspace is not { Items.Count: > 0 } workspace)
+        if (Workspace is not { Items.Count: > 0 } workspace || workspace.BlockedByLock())
         {
             return;
         }
@@ -196,7 +309,14 @@ public partial class FilesPage : Page, Controls.IToastHost
         }
 
         var settings = AppState.Current.Settings;
-        var typed = RemotePathBox.Text;
+
+        if (Workspace is not { } workspace)
+        {
+            return;
+        }
+
+        // удаление выбранной строки очищает поля ввода — возвращаем то, что там было, у всех окон
+        var paths = workspace.CopyWindows.Select(w => (Window: w, w.RemotePath)).ToList();
 
         if (!settings.RemotePathHistory.Remove(value))
         {
@@ -204,26 +324,48 @@ public partial class FilesPage : Page, Controls.IToastHost
         }
 
         AppState.Current.SaveSettings();
-        ActionLog.Info($"Из истории путей на сервере удалено: {value}", null, AppSection.Files, Workspace);
+        ActionLog.Info($"Из истории путей на сервере удалено: {value}", null, AppSection.Files, workspace);
 
-        // удаление выбранной строки очищает поле ввода — возвращаем то, что там было
-        Dispatcher.BeginInvoke(new Action(() => RemotePathBox.Text = typed));
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            foreach (var (window, path) in paths)
+            {
+                window.RemotePath = path;
+            }
+        }));
 
-        RemotePathBox.IsDropDownOpen = settings.RemotePathHistory.Count > 0;
+        if (_openPathBox is { } box)
+        {
+            box.IsDropDownOpen = settings.RemotePathHistory.Count > 0;
+        }
     }
 
     private void OnDragOver(object sender, DragEventArgs e)
     {
-        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) && Workspace?.IsPaneLocked != true
+            ? DragDropEffects.Copy
+            : DragDropEffects.None;
         e.Handled = true;
     }
 
     private void OnDrop(object sender, DragEventArgs e)
     {
-        if (e.Data.GetData(DataFormats.FileDrop) is string[] paths)
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] paths || Workspace is not { } workspace || workspace.BlockedByLock())
         {
-            Workspace?.AddPaths(paths);
+            return;
         }
+
+        // бросили на окно — файлы в него; мимо окон — в то, что в фокусе
+        for (var node = e.OriginalSource as DependencyObject; node is not null; node = VisualTreeHelper.GetParent(node))
+        {
+            if (node is FrameworkElement { DataContext: CopyWindow window })
+            {
+                workspace.FocusWindow(window);
+                break;
+            }
+        }
+
+        workspace.AddPaths(paths);
     }
 
     /// <summary>Щелчок по плашке — туда, где устраняется: в личную вкладку команд.</summary>
@@ -238,7 +380,7 @@ public partial class FilesPage : Page, Controls.IToastHost
 
     private void OnBrowse(object sender, RoutedEventArgs e)
     {
-        if (Workspace is not { } workspace)
+        if (Workspace is not { } workspace || workspace.BlockedByLock())
         {
             return;
         }
@@ -271,7 +413,7 @@ public partial class FilesPage : Page, Controls.IToastHost
         }
     }
 
-    /// <summary>«Выполнить»: эта вкладка — её файлы, путь и серверы; со свитчем «Везде» — все вкладки.</summary>
+    /// <summary>«Выполнить»: эта вкладка — все её окна и серверы; со свитчем «Везде» — все вкладки.</summary>
     private async void OnCopy(object sender, RoutedEventArgs e)
     {
         if (Workspace is not { } workspace)
@@ -397,5 +539,4 @@ public partial class FilesPage : Page, Controls.IToastHost
         AppState.Current.NotifyFinished(workspace.SummaryBatch);
     }
 
-    Controls.ActionToast Controls.IToastHost.PageToast => BarToast;
 }

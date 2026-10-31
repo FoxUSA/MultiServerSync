@@ -44,8 +44,8 @@ public sealed class AppState : ObservableObject
     private Workspace? _activeExplorer;
 
     /// <summary>
-    /// Вкладка «Команд», открытая до перехода стрелкой в личные команды, и сама личная вкладка:
-    /// уйдём из раздела — он снова откроется на выбранной человеком вкладке, а не на личной.
+    /// Вкладка «Команд», открытая до перехода в личные команды, и сама личная вкладка: на ленте
+    /// только она; выйдем из этого вида — раздел снова на выбранной человеком вкладке.
     /// </summary>
     private Workspace? _commandBeforeJump;
     private Workspace? _jumpedTo;
@@ -757,7 +757,8 @@ public sealed class AppState : ObservableObject
 
     /// <summary>Это вывод команды — одной вкладки или сводка «Выполнить везде», а не копирования или проверки связи.</summary>
     public bool IsCommandBatch(OperationBatch batch) =>
-        CommandTabs.Any(w => ReferenceEquals(w.CommandBatch, batch) || ReferenceEquals(w.SummaryBatch, batch));
+        AllWorkspaces.Any(w => ReferenceEquals(w.CommandBatch, batch))
+        || CommandTabs.Any(w => ReferenceEquals(w.SummaryBatch, batch));
 
     /// <summary>Это вывод копирования — одной вкладки или сводка «Выполнить везде».</summary>
     public bool IsCopyBatch(OperationBatch batch) =>
@@ -1044,6 +1045,8 @@ public sealed class AppState : ObservableObject
             return;
         }
 
+        UndoJournal.Touch();
+
         WriteJson(AppPaths.ServerSetsFile, new ServerSetsFile
         {
             ActiveId = ActiveServerSet.Id,
@@ -1193,11 +1196,21 @@ public sealed class AppState : ObservableObject
 
         tabs.Add(workspace);
         SaveWorkspaces();
+        UndoJournal.TabAdded(new TabPlace(workspace, SectionOf(workspace), tabs.IndexOf(workspace), null, -1, null, false));
 
         ActionLog.Info(workspace.IsArchived
             ? $"Добавлена вкладка «{workspace.Title}» — в архиве · всего вкладок {tabs.Count}"
             : $"Добавлена вкладка «{workspace.Title}» · всего вкладок {tabs.Count}", null, SectionOf(workspace), workspace);
         return workspace;
+    }
+
+    /// <summary>Мини-терминал — одно окно: лишние могли остаться в файле от прежних версий.</summary>
+    private static void KeepOneStep(WorkspaceState state)
+    {
+        if (state.Commands is { Count: > 1 } steps)
+        {
+            state.Commands = steps.Take(1).ToList();
+        }
     }
 
     /// <summary>Открытая вкладка «Копирования» — даже когда на экране другой раздел.</summary>
@@ -1212,8 +1225,8 @@ public sealed class AppState : ObservableObject
     public void ShowTab(Workspace tab) => TabShowRequested?.Invoke(tab);
 
     /// <summary>
-    /// Переход стрелкой с ярлыка копирования в его личные команды — быстрая ссылка: выбор
-    /// вкладки в «Командах» она не меняет, вернутся в раздел обычным путём — там прежняя вкладка.
+    /// Переход в личные команды стрелкой с ярлыка копирования или кнопкой мини-терминала. В «Командах»
+    /// только так их и видно; выбор вкладки там переход не меняет, обычным путём — прежняя вкладка.
     /// </summary>
     public void JumpToPersonal(Workspace personal)
     {
@@ -1225,40 +1238,34 @@ public sealed class AppState : ObservableObject
         _jumpedTo = personal;
     }
 
-    private void ReturnFromJump()
+    /// <summary>Личная вкладка, на которую перешли: она одна на ленте «Команд». Null — лента обычная.</summary>
+    public Workspace? PersonalShown => _section == AppSection.Command && ReferenceEquals(_activeCommand, _jumpedTo) ? _jumpedTo : null;
+
+    /// <summary>Вкладка, на которой раздел был до перехода.</summary>
+    private Workspace CommandBeforeJump => _commandBeforeJump is { IsPersonal: false } before && CommandTabs.Contains(before) ? before : CommandTabs[0];
+
+    /// <summary>Щелчок по кнопке «Команды» из личной вкладки: обычная лента и прежняя вкладка.</summary>
+    public void LeaveJump()
     {
-        if (_commandBeforeJump is { } before && ReferenceEquals(_activeCommand, _jumpedTo) && CommandTabs.Contains(before))
+        if (_jumpedTo is not null && ReferenceEquals(_activeCommand, _jumpedTo))
         {
-            _activeCommand = before;
-            SaveWorkspaces();
+            ActiveWorkspace = CommandBeforeJump;
         }
 
         _commandBeforeJump = null;
         _jumpedTo = null;
     }
 
-    /// <summary>
-    /// Личные вкладки — у правого края «Команд», в конце ленты, в порядке их вкладок копирования;
-    /// перетаскиванием их не разбросать — после переноса строй восстанавливается.
-    /// </summary>
-    private void ArrangePersonalTabs()
+    private void ReturnFromJump()
     {
-        var personal = CommandTabs
-            .Where(t => t.IsPersonal)
-            .OrderBy(t => t.Owner is { } owner ? Workspaces.IndexOf(owner) : int.MaxValue)
-            .ToList();
-
-        // уже стоят как надо — не трогаем: лишняя перестановка дёргает выбор на ленте
-        if (CommandTabs.Skip(CommandTabs.Count - personal.Count).SequenceEqual(personal))
+        if (_jumpedTo is not null && ReferenceEquals(_activeCommand, _jumpedTo))
         {
-            return;
+            _activeCommand = CommandBeforeJump;
+            SaveWorkspaces();
         }
 
-        // по одной в конец ленты — в итоге хвост ровно в нужном порядке
-        foreach (var tab in personal)
-        {
-            CommandTabs.Move(CommandTabs.IndexOf(tab), CommandTabs.Count - 1);
-        }
+        _commandBeforeJump = null;
+        _jumpedTo = null;
     }
 
     /// <summary>Раздел, к которому относится вкладка.</summary>
@@ -1321,7 +1328,7 @@ public sealed class AppState : ObservableObject
 
     /// <summary>
     /// Личная командная вкладка для вкладки копирования: пустая, с тем же названием,
-    /// серверы берёт у родителя. Встаёт в конец ленты «Команды».
+    /// серверы берёт у родителя. На ленте «Команды» её нет, туда только переходом.
     /// </summary>
     public Workspace CreatePersonalTab(Workspace copy)
     {
@@ -1337,10 +1344,9 @@ public sealed class AppState : ObservableObject
 
         CommandTabs.Add(personal);
         copy.LinkPersonal(personal);
-        ArrangePersonalTabs();
         SaveWorkspaces();
 
-        AppLog.Hint($"Создана личная вкладка команд для «{copy.Title}»: выполнится после удачного копирования.");
+        AppLog.Hint($"Создана личная вкладка команд для «{copy.Title}».");
         return personal;
     }
 
@@ -1372,12 +1378,6 @@ public sealed class AppState : ObservableObject
         }
 
         tabs.Move(from, to);
-
-        // личные вкладки держат строй у правого края «Команд» — за порядком копирования
-        if (ReferenceEquals(tabs, CommandTabs) || ReferenceEquals(tabs, Workspaces))
-        {
-            ArrangePersonalTabs();
-        }
 
         AppLog.Debug($"Вкладка «{dragged.Title}» переставлена: место {from + 1} → {to + 1}.");
         SaveWorkspaces();
@@ -1434,12 +1434,13 @@ public sealed class AppState : ObservableObject
     /// <summary>
     /// Вкладка, что открывается вместо закрытой: ближайшая слева в той же ленте (основной или
     /// архива), нет её — справа. Закрыли последнюю в архиве — основная вкладка раздела.
+    /// Личных на лентах нет, они не в счёт.
     /// </summary>
     private static Workspace NeighborInStrip(IList<Workspace> tabs, int index, bool archived)
     {
         for (var i = Math.Min(index, tabs.Count) - 1; i >= 0; i--)
         {
-            if (tabs[i].IsArchived == archived)
+            if (tabs[i].IsArchived == archived && !tabs[i].IsPersonal)
             {
                 return tabs[i];
             }
@@ -1447,7 +1448,7 @@ public sealed class AppState : ObservableObject
 
         for (var i = index; i < tabs.Count; i++)
         {
-            if (tabs[i].IsArchived == archived)
+            if (tabs[i].IsArchived == archived && !tabs[i].IsPersonal)
             {
                 return tabs[i];
             }
@@ -1461,6 +1462,12 @@ public sealed class AppState : ObservableObject
         if (workspace.IsMain)
         {
             AppLog.Hint("Первую вкладку закрыть нельзя.", LogLevel.Warning);
+            return false;
+        }
+
+        if (workspace.IsContentLocked)
+        {
+            workspace.BlockedByLock();
             return false;
         }
 
@@ -1485,6 +1492,16 @@ public sealed class AppState : ObservableObject
             return false;
         }
 
+        // после удаления вкладка уже не знает, откуда она, — запомнить заранее
+        var place = new TabPlace(
+            workspace,
+            SectionOf(workspace),
+            index,
+            workspace.Personal,
+            workspace.Personal is { } own ? CommandTabs.IndexOf(own) : -1,
+            workspace.Owner,
+            workspace.Owner?.AfterCopyEnabled ?? false);
+
         if (workspace.Personal is { } personal)
         {
             if (ReferenceEquals(_activeCommand, personal))
@@ -1505,13 +1522,157 @@ public sealed class AppState : ObservableObject
             || ReferenceEquals(_activeDownload, workspace) || ReferenceEquals(_activeExplorer, workspace))
         {
             // соседа — из той же ленты: архивные вкладки лежат в том же списке, и сосед по списку
-            // мог оказаться архивным — тогда лента шла за ним и сама открывала архив
-            ActiveWorkspace = NeighborInStrip(tabs, index, workspace.IsArchived);
+            // мог оказаться архивным — тогда лента шла за ним и сама открывала архив.
+            // Закрыли личную, на которую перешли, — вид кончился, раздел на прежней вкладке
+            ActiveWorkspace = ReferenceEquals(workspace, _jumpedTo)
+                ? CommandBeforeJump
+                : NeighborInStrip(tabs, index, workspace.IsArchived);
         }
 
         SaveWorkspaces();
-        ActionLog.Info($"Вкладка «{workspace.Title}» закрыта", null, SectionOf(workspace));
+        UndoJournal.TabClosed(place);
+        ActionLog.Info($"Вкладка «{workspace.Title}» закрыта", null, place.Section);
         return true;
+    }
+
+    /// <summary>Вернуть закрытую вкладку на её место — ту же самую, с её терминалом и содержимым.</summary>
+    public void ReopenTab(TabPlace place)
+    {
+        var tabs = TabsFor(place.Section);
+        tabs.Insert(Math.Min(place.Index, tabs.Count), place.Tab);
+        place.Tab.SyncServers(Servers);
+        place.Tab.ResumeWatching();
+
+        if (place.Personal is { } personal)
+        {
+            CommandTabs.Insert(Math.Clamp(place.PersonalIndex, 0, CommandTabs.Count), personal);
+            personal.SyncServers(Servers);
+        }
+
+        place.Owner?.LinkPersonal(place.Tab.Id, place.OwnerEnabled);
+        place.Tab.RaiseChain();
+
+        if (place.Section == Section)
+        {
+            // на ленте личной нет: вернулась — открыта тем же видом, что при переходе
+            if (place.Tab.IsPersonal)
+            {
+                JumpToPersonal(place.Tab);
+            }
+
+            ActiveWorkspace = place.Tab;
+        }
+
+        SaveWorkspaces();
+    }
+
+    /// <summary>Серверы и наборы — для отмены действий.</summary>
+    public ServersContent CaptureServers() => new(
+        Servers.Select(s => (s, s.Snapshot())).ToList(),
+        ServerSets.Select(s => (s, s.Title, s.IsArchived)).ToList());
+
+    /// <summary>
+    /// Отмена или возврат на «Серверах»: только то, что менял сам шаг, ведь память у каждого набора своя и
+    /// правки других наборов могли быть позже. Сервер, которого не было, приходит на вкладки без отметки,
+    /// как любой новый.
+    /// </summary>
+    public void ApplyServers(ServersContent from, ServersContent to)
+    {
+        for (var i = 0; i < to.Sets.Count; i++)
+        {
+            var (set, title, archived) = to.Sets[i];
+            var was = from.Sets.FirstOrDefault(s => ReferenceEquals(s.Set, set));
+
+            if (was.Set is null && !ServerSets.Contains(set))
+            {
+                ServerSets.Insert(Math.Min(i, ServerSets.Count), set);
+            }
+
+            if (was.Set is null || was.Title != title || was.Archived != archived)
+            {
+                set.Title = title;
+                set.IsArchived = archived;
+            }
+        }
+
+        foreach (var (gone, _) in from.Servers.Where(s => to.Servers.All(t => !ReferenceEquals(t.Entry, s.Entry))))
+        {
+            Servers.Remove(gone);
+        }
+
+        for (var i = 0; i < to.Servers.Count; i++)
+        {
+            var (entry, fields) = to.Servers[i];
+            var was = from.Servers.FirstOrDefault(s => ReferenceEquals(s.Entry, entry));
+
+            if (was.Entry is null)
+            {
+                entry.RestoreFrom(fields);
+
+                if (!Servers.Contains(entry))
+                {
+                    Servers.Insert(Math.Min(i, Servers.Count), entry);
+                }
+            }
+            else if (was.Fields.Signature() != fields.Signature())
+            {
+                entry.RestoreFrom(fields);
+            }
+        }
+
+        // порядок трогаем, только если шаг менял именно его
+        var serversBefore = from.Servers.Select(s => s.Entry).Where(e => to.Servers.Any(t => ReferenceEquals(t.Entry, e)));
+        var serversAfter = to.Servers.Select(s => s.Entry).Where(e => from.Servers.Any(f => ReferenceEquals(f.Entry, e)));
+
+        if (!serversBefore.SequenceEqual(serversAfter))
+        {
+            for (var i = 0; i < to.Servers.Count; i++)
+            {
+                var index = Servers.IndexOf(to.Servers[i].Entry);
+
+                if (index >= 0 && index != i && i < Servers.Count)
+                {
+                    Servers.Move(index, i);
+                }
+            }
+        }
+
+        var setsBefore = from.Sets.Select(s => s.Set).Where(e => to.Sets.Any(t => ReferenceEquals(t.Set, e)));
+        var setsAfter = to.Sets.Select(s => s.Set).Where(e => from.Sets.Any(f => ReferenceEquals(f.Set, e)));
+
+        if (!setsBefore.SequenceEqual(setsAfter))
+        {
+            for (var i = 0; i < to.Sets.Count; i++)
+            {
+                var index = ServerSets.IndexOf(to.Sets[i].Set);
+
+                if (index >= 0 && index != i && i < ServerSets.Count)
+                {
+                    ServerSets.Move(index, i);
+                }
+            }
+        }
+
+        foreach (var (gone, _, _) in from.Sets.Where(s => to.Sets.All(t => !ReferenceEquals(t.Set, s.Set))))
+        {
+            var index = ServerSets.IndexOf(gone);
+
+            if (index < 0)
+            {
+                continue;
+            }
+
+            ServerSets.Remove(gone);
+
+            if (ReferenceEquals(_activeSet, gone))
+            {
+                ActiveServerSet = NeighborSet(index, gone.IsArchived);
+            }
+        }
+
+        ServersRegrouped();
+        SaveServerSets();
+        RaisePane();
     }
 
     /// <summary>
@@ -1524,6 +1685,12 @@ public sealed class AppState : ObservableObject
         if (archived && workspace.IsMain)
         {
             AppLog.Hint("Основная вкладка в архив не убирается.", LogLevel.Warning);
+            return false;
+        }
+
+        if (archived && workspace.IsPersonal)
+        {
+            AppLog.Hint("Личная вкладка в архив не убирается.", LogLevel.Warning);
             return false;
         }
 
@@ -1540,8 +1707,8 @@ public sealed class AppState : ObservableObject
 
         // сначала открыть соседнюю в той же ленте, потом перенести ярлык: лента не остаётся без выбранного
         if (wasOpen
-            && (tabs.Take(index).LastOrDefault(t => t.IsArchived == workspace.IsArchived)
-                ?? tabs.Skip(index + 1).FirstOrDefault(t => t.IsArchived == workspace.IsArchived)) is { } next)
+            && (tabs.Take(index).LastOrDefault(t => t.IsArchived == workspace.IsArchived && !t.IsPersonal)
+                ?? tabs.Skip(index + 1).FirstOrDefault(t => t.IsArchived == workspace.IsArchived && !t.IsPersonal)) is { } next)
         {
             ActiveWorkspace = next;
         }
@@ -1625,6 +1792,8 @@ public sealed class AppState : ObservableObject
             return;
         }
 
+        UndoJournal.Touch();
+
         WriteJson(AppPaths.WorkspacesFile, new WorkspacesFile
         {
             ActiveId = (_active ?? Workspaces[0]).Id,
@@ -1659,6 +1828,8 @@ public sealed class AppState : ObservableObject
                 check.Server.IsSelected = check.IsSelected;
             }
         }
+
+        UndoJournal.Touch();
 
         WriteJson(AppPaths.ServersFile, Servers.ToList());
         _dirty = false;
@@ -1739,6 +1910,7 @@ public sealed class AppState : ObservableObject
                 // файл старого формата: набора для команды в нём нет — берём тот же, что у копирования,
                 // чтобы после обновления вкладки работали ровно как раньше
                 workspace.SelectCommandServers(state.CommandServerIds ?? state.SelectedServerIds);
+                KeepOneStep(state);
                 workspace.Restore(state);
                 InitLegacyPane(workspace, state, copying: true);
                 InitLegacyTerminalChecks(workspace, state, AppSection.Files);
@@ -1811,6 +1983,7 @@ public sealed class AppState : ObservableObject
 
                 tab.SyncServers(Servers);
                 tab.SelectServers(state.SelectedServerIds ?? new List<string>());
+                KeepOneStep(state);
                 tab.Restore(state);
                 InitLegacyPane(tab, state, copying: true);
                 InitLegacyTerminalChecks(tab, state, AppSection.Download);
@@ -1856,7 +2029,7 @@ public sealed class AppState : ObservableObject
             _activeExplorer = ExplorerTabs.FirstOrDefault(w => w.Id == file?.ActiveExplorerId) ?? ExplorerTabs[0];
 
             // связки, у которых пропала одна сторона, распускаем: личная без родителя становится обычной
-            foreach (var copy in Workspaces.Where(w => w.AfterCopyTabId.Length > 0 && w.Personal is null))
+            foreach (var copy in Workspaces.Concat(DownloadTabs).Where(w => w.AfterCopyTabId.Length > 0 && w.Personal is null))
             {
                 copy.UnlinkPersonal();
             }
@@ -1866,7 +2039,17 @@ public sealed class AppState : ObservableObject
                 orphan.OwnerCopyTabId = string.Empty;
             }
 
-            ArrangePersonalTabs();
+            // в архиве личных больше нет: лент у них нет вообще
+            foreach (var personal in CommandTabs.Where(t => t.IsPersonal))
+            {
+                personal.IsArchived = false;
+            }
+
+            // закрыли программу на личной вкладке — откроется тем же видом
+            if (_activeCommand is { IsPersonal: true })
+            {
+                _jumpedTo = _activeCommand;
+            }
 
             AppLog.Debug($"Вкладок копирования: {Workspaces.Count}, команды: {CommandTabs.Count}, "
                 + $"скачивания: {DownloadTabs.Count}, проводника: {ExplorerTabs.Count}.");
@@ -2013,9 +2196,7 @@ public sealed class AppState : ObservableObject
     {
         try
         {
-            var tmp = path + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(value, JsonOptions));
-            File.Move(tmp, path, overwrite: true);
+            AtomicFile.Write(path, JsonSerializer.Serialize(value, JsonOptions));
         }
         catch (Exception ex)
         {

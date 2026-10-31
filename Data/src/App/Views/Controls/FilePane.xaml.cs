@@ -2817,7 +2817,7 @@ public partial class FilePane : UserControl
 
         if (files.Count == 0)
         {
-            AppLog.Hint("Поставьте курсор на файл: править можно только файл.");
+            AppLog.Hint("Поставьте курсор на файл: править можно только файл.", LogLevel.Warning);
             return;
         }
 

@@ -143,9 +143,7 @@ public static class TerminalStore
     {
         try
         {
-            var tmp = path + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(value, JsonOptions));
-            File.Move(tmp, path, overwrite: true);
+            AtomicFile.Write(path, JsonSerializer.Serialize(value, JsonOptions));
         }
         catch (Exception ex)
         {

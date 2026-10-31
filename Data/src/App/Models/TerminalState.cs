@@ -7,6 +7,8 @@ public sealed class TerminalRowState
 {
     public string ServerId { get; set; } = string.Empty;
 
+    public string WindowLabel { get; set; } = string.Empty;
+
     public string Scope { get; set; } = string.Empty;
 
     public DateTime Created { get; set; }

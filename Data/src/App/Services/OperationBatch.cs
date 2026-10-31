@@ -209,6 +209,9 @@ public sealed class OperationBatch : ObservableObject
 
     public int RunFailed => _sources.Count > 0 ? FailedCount : _lastRun.Count(r => r.Status is OperationStatus.Failed or OperationStatus.Cancelled);
 
+    /// <summary>Последний запуск прошёл весь — плашка о его окончании зелёная.</summary>
+    public bool RunSucceeded => RunTotal > 0 && RunSuccess == RunTotal;
+
     /// <summary>Название вкладки, из которой запущена операция — попадает в строки результатов.</summary>
     public string? Scope { get; set; }
 
@@ -991,6 +994,11 @@ public sealed class OperationBatch : ObservableObject
         using var gate = new SemaphoreSlim(Math.Max(1, maxParallel));
         var doneLock = new Lock();
 
+        foreach (var row in targets)
+        {
+            row.ArmFinished();
+        }
+
         var tasks = targets.Select(async result =>
         {
             // своя отмена у строки — стоп в строке; общая «Остановить» гасит и её
@@ -1002,20 +1010,41 @@ public sealed class OperationBatch : ObservableObject
 
             try
             {
-                try
+                // окно ниже идёт после окна выше на этом же сервере и не занимает место в очереди, пока ждёт
+                var turn = true;
+
+                if (result.PreviousWindow is { } previous)
                 {
-                    await gate.WaitAsync(rowCt);
-                    entered = true;
+                    result.Message = "ждёт окно выше";
+
+                    try
+                    {
+                        await previous.Finished.WaitAsync(rowCt);
+                        turn = previous.Status == OperationStatus.Success;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        turn = false;
+                    }
                 }
-                catch (OperationCanceledException)
+
+                if (turn)
                 {
-                    // остановили, пока ждала своей очереди среди серверов
+                    try
+                    {
+                        await gate.WaitAsync(rowCt);
+                        entered = true;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // остановили, пока ждала своей очереди среди серверов
+                    }
                 }
 
                 if (!entered || rowCt.IsCancellationRequested)
                 {
                     result.Skipped = true;
-                    result.Message = "не запускалось";
+                    result.Message = result.PreviousWindow is { Status: not OperationStatus.Success } ? "не запускалось: окно выше не прошло" : "не запускалось";
                     result.Status = OperationStatus.Cancelled;
                     return;
                 }
@@ -1097,13 +1126,15 @@ public sealed class OperationBatch : ObservableObject
                 // с одним сервером его итог и есть итог операции — он придёт ниже, один раз
                 if (targets.Count > 1)
                 {
-                    AppLog.ServerLine(LevelOf(result), Outcome(result), result.Server.Display);
+                    AppLog.ServerLine(LevelOf(result), Outcome(result), result.FullTitle);
                 }
 
                 if (entered)
                 {
                     gate.Release();
                 }
+
+                result.MarkFinished();
             }
         });
 
@@ -1123,19 +1154,19 @@ public sealed class OperationBatch : ObservableObject
         if (targets.Count == 1)
         {
             var only = targets[0];
-            AppLog.Write(LevelOf(only), $"{_operationName}: {Outcome(only)}", only.Server.Display);
+            AppLog.Write(LevelOf(only), $"{_operationName}: {Outcome(only)}", only.FullTitle);
         }
         else
         {
             // итог — про этот прогон, а не про всю накопленную таблицу
             var bad = targets
                 .Where(r => r.Status is OperationStatus.Failed or OperationStatus.Cancelled)
-                .Select(r => r.Server.PaneLabel)
+                .Select(r => r.ShortTitle)
                 .ToList();
 
             if (bad.Count == 0)
             {
-                AppLog.Success($"{_operationName}: все {targets.Count} сервер(ов) — успешно.");
+                AppLog.Success($"{_operationName}: все {targets.Count} {(targets.Any(r => r.WindowLabel.Length > 0) ? "строк(и)" : "сервер(ов)")} — успешно.");
             }
             else
             {

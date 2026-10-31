@@ -1,7 +1,7 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
-using System.Windows.Input;
 using MultiServerSync.Services;
 using MultiServerSync.Views.Dialogs;
 
@@ -43,96 +43,51 @@ public partial class TransferOptionsPanel : UserControl
             choice.GroupName = group;
         }
 
-        // свёрнутая строка повторяет то, что выбрано, — при любом щелчке и при смене вкладки
-        foreach (var toggle in new ToggleButton[] { AllChoice, MissingChoice, DateChoice, HashChoice, DateOption, VerifyOption, ReplaceOption })
+        DataContextChanged += (_, e) =>
         {
-            toggle.Checked += (_, _) => UpdateSummary();
-            toggle.Unchecked += (_, _) => UpdateSummary();
-        }
+            if (e.OldValue is INotifyPropertyChanged old)
+            {
+                old.PropertyChanged -= OnTabChanged;
+            }
 
-        DataContextChanged += (_, _) => Dispatcher.BeginInvoke(new Action(UpdateSummary));
+            if (e.NewValue is INotifyPropertyChanged tab)
+            {
+                tab.PropertyChanged += OnTabChanged;
+            }
+
+            ApplyLock();
+        };
 
         ApplyTexts();
     }
 
-    /// <summary>Свернуть можно у «Копирования» и «Скачивания»; в окне «Проводника» блок всегда целиком.</summary>
-    private bool CanFold => Direction != TransferDirection.Both;
-
-    private bool Folded
+    private void OnTabChanged(object? sender, PropertyChangedEventArgs e)
     {
-        get => Direction == TransferDirection.Download
-            ? AppState.Current.Settings.DownloadOptionsFolded
-            : AppState.Current.Settings.UploadOptionsFolded;
-        set
+        if (e.PropertyName == nameof(Workspace.IsPaneLocked))
         {
-            if (Direction == TransferDirection.Download)
-            {
-                AppState.Current.Settings.DownloadOptionsFolded = value;
-            }
-            else
-            {
-                AppState.Current.Settings.UploadOptionsFolded = value;
-            }
-
-            AppState.Current.SaveSettings();
+            ApplyLock();
         }
     }
 
-    private void OnFold(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// Под замком вкладки на «Копировании» и «Скачивании» параметры не меняются.
+    /// В окне «Проводника» замок про сервер панели, а не про параметры.
+    /// </summary>
+    private void ApplyLock()
     {
-        Folded = !Folded;
-        ApplyFold();
-    }
+        var locked = Direction != TransferDirection.Both && DataContext is Workspace { IsPaneLocked: true };
 
-    /// <summary>Надпись «Параметры копирования» — как стрелка: сворачивает и разворачивает.</summary>
-    private void OnHeaderClick(object sender, MouseButtonEventArgs e)
-    {
-        if (CanFold)
+        Body.IsEnabled = !locked;
+        LockMute.SetIsOn(Body, locked);
+
+        // у каждого параметра своё описание: под замком оно остаётся, снизу добавляется про замок
+        foreach (var toggle in Toggles)
         {
-            e.Handled = true;
-            OnFold(sender, e);
+            LockMute.SetIsOn(toggle, locked);
         }
     }
 
-    /// <summary>Свёрнутая строка раскрывается щелчком в любом её месте; сворачивается — только стрелкой или надписью.</summary>
-    private void OnFrameClick(object sender, MouseButtonEventArgs e)
-    {
-        if (CanFold && Folded)
-        {
-            e.Handled = true;
-            OnFold(sender, e);
-        }
-    }
-
-    /// <summary>Свёрнуто — шапка и строка выбранного; развёрнуто — все параметры.</summary>
-    private void ApplyFold()
-    {
-        var folded = CanFold && Folded;
-
-        FoldButton.Visibility = CanFold ? Visibility.Visible : Visibility.Collapsed;
-        FoldIcon.Symbol = folded ? Wpf.Ui.Controls.SymbolRegular.ChevronRight24 : Wpf.Ui.Controls.SymbolRegular.ChevronDown24;
-        FoldButton.ToolTip = folded ? "Развернуть параметры" : "Свернуть в одну строку";
-        Body.Visibility = folded ? Visibility.Collapsed : Visibility.Visible;
-        SummaryText.Visibility = folded ? Visibility.Visible : Visibility.Collapsed;
-        HeaderRow.Margin = folded ? new Thickness(0) : new Thickness(0, 0, 0, 4);
-        Frame.Cursor = folded ? Cursors.Hand : null;
-        Frame.ToolTip = folded ? "Развернуть параметры" : null;
-        HeaderText.Cursor = CanFold ? Cursors.Hand : null;
-
-        UpdateSummary();
-    }
-
-    /// <summary>Выбранный режим и включённые галочки — через точку, теми же словами, что в блоке.</summary>
-    private void UpdateSummary()
-    {
-        var mode = new[] { AllChoice, MissingChoice, DateChoice, HashChoice }.FirstOrDefault(c => c.IsChecked == true);
-        var options = new[] { DateOption, VerifyOption, ReplaceOption }
-            .Where(o => o.IsChecked == true && o.Visibility == Visibility.Visible);
-
-        var parts = new ContentControl?[] { mode }.Concat(options).OfType<ContentControl>().Select(c => c.Content as string).OfType<string>();
-        SummaryText.Text = string.Join("  ·  ", parts);
-        SummaryText.ToolTip = SummaryText.Text;
-    }
+    private ToggleButton[] Toggles => [AllChoice, MissingChoice, DateChoice, HashChoice, DateOption, VerifyOption, ReplaceOption];
 
     public TransferDirection Direction
     {
@@ -145,15 +100,16 @@ public partial class TransferOptionsPanel : UserControl
         switch (Direction)
         {
             case TransferDirection.Download:
+                // подписи короткие, как на «Копировании»: блок занимает треть ширины страницы
                 HeaderText.Text = "ПАРАМЕТРЫ СКАЧИВАНИЯ";
                 ModeTitle.Text = "Скачивать с сервера:";
                 Set(AllChoice, "все файлы", "Каждый файл скачивается заново, что бы ни лежало в папке.");
-                Set(MissingChoice, "только те, которых здесь нет", "Файлы, которые уже есть в папке, не трогаются совсем.");
-                Set(DateChoice, "отличающиеся по дате изменения", "Файл скачивается, если дата изменения или размер разошлись с серверными.");
-                Set(HashChoice, "отличающиеся по контрольной сумме",
+                Set(MissingChoice, "которых здесь нет", "Файлы, которые уже есть в папке, не трогаются совсем.");
+                Set(DateChoice, "с другой датой", "Файл скачивается, если дата изменения или размер разошлись с серверными.");
+                Set(HashChoice, "с другой суммой",
                     "Где размер совпал, сравниваются SHA-256 здесь и на сервере; скачивается только то, что отличается по содержимому.");
-                Set(DateOption, "сохранять дату изменения", "Скачанному файлу ставится дата изменения, как на сервере");
-                Set(VerifyOption, "после скачивания сверять суммы",
+                Set(DateOption, "сохранять дату", "Скачанному файлу ставится дата изменения, как на сервере");
+                Set(VerifyOption, "сверять суммы",
                     "Проверка уже скачанного: SHA-256 здесь против sha256sum на сервере — только для файлов этого захода.");
                 ExcludeButton.Visibility = Visibility.Collapsed;
                 ReplaceOption.Visibility = Visibility.Collapsed;
@@ -177,22 +133,34 @@ public partial class TransferOptionsPanel : UserControl
             default:
                 HeaderText.Text = "ПАРАМЕТРЫ КОПИРОВАНИЯ";
                 ModeTitle.Text = "Отправлять на сервер:";
-                Set(AllChoice, "все отмеченные файлы",
+                // подписи короткие: блок занимает треть ширины страницы, и длинные в два столбца не встают
+                Set(AllChoice, "все отмеченные",
                     "Каждый отмеченный файл отправляется заново, что бы ни лежало на сервере. Ничего не сверяется — дольше всего, но результат заведомо совпадает с локальным.");
-                Set(MissingChoice, "только те, которых нет на сервере", "Существующие файлы не трогаются совсем, даже если они отличаются.");
-                Set(DateChoice, "отличающиеся по дате изменения",
-                    "Файл отправляется, если дата изменения разошлась с серверной в любую сторону. Размер сверяется всегда. Нужна галочка «сохранять дату изменения».");
-                Set(HashChoice, "отличающиеся по контрольной сумме",
+                Set(MissingChoice, "которых нет на сервере", "Существующие файлы не трогаются совсем, даже если они отличаются.");
+                Set(DateChoice, "с другой датой",
+                    "Файл отправляется, если дата изменения разошлась с серверной в любую сторону. Размер сверяется всегда. Нужна галочка «сохранять дату».");
+                Set(HashChoice, "с другой суммой",
                     "Перед копированием на сервере считается sha256sum файлов назначения, и отправляется только то, что отличается по содержимому. Надёжнее всего, но на больших объёмах это отдельная сверка.");
-                Set(DateOption, "сохранять дату изменения", "После загрузки файлу на сервере проставляется дата изменения локального оригинала");
-                Set(VerifyOption, "после копирования сверять суммы",
+                Set(DateOption, "сохранять дату", "После загрузки файлу на сервере проставляется дата изменения локального оригинала");
+                Set(VerifyOption, "сверять суммы",
                     "Проверка уже отправленного: после копирования на сервере запускается sha256sum и хеши сравниваются с локальными. Только для файлов этого захода.");
                 ExcludeButton.Visibility = Visibility.Collapsed;
                 ReplaceOption.Visibility = Visibility.Collapsed;
                 break;
         }
 
-        ApplyFold();
+        // на страницах столбцы плотнее; у окна «Проводника» отступ из стиля
+        foreach (var toggle in Toggles)
+        {
+            if (Direction == TransferDirection.Both)
+            {
+                toggle.ClearValue(MarginProperty);
+            }
+            else
+            {
+                toggle.Margin = new Thickness(toggle is CheckBox ? -10.67 : 0, 1, 16, 1);
+            }
+        }
     }
 
     private static void Set(ContentControl control, string text, string tip)

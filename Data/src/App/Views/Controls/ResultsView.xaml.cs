@@ -527,6 +527,7 @@ public partial class ResultsView : UserControl
 
         // автокопия — только строки запусков: «убрана строка», «создана папка» в чат не идут
         var runsOnly = finished is not null;
+        var level = FinishedLevel(finished is not null && batch.RunSucceeded && chain?.RunSucceeded != false);
 
         // «+ команды»: следом вывод личных команд вкладки — один отчёт, сначала копирование
         string Build(int? share) => chain is null
@@ -547,7 +548,7 @@ public partial class ResultsView : UserControl
 
                 if (ClipboardText.CopyTerminalOutputFile(text, name, tab) is { } file)
                 {
-                    AppLog.Hint($"{finished} — лог длинный ({lines:N0} строк), в буфере файлом: {file}.");
+                    AppLog.Hint($"{finished} — лог длинный ({lines:N0} строк), в буфере файлом: {file}.", level);
                 }
 
                 return;
@@ -559,9 +560,12 @@ public partial class ResultsView : UserControl
         if (ClipboardText.CopyTerminalOutput(text, auto: finished is not null, tab))
         {
             AppLog.Hint((finished is not null ? $"{finished} — вывод всех серверов скопирован в буфер обмена: " : "Вывод скопирован в буфер обмена: ")
-                + $"серверов {batch.Results.Count}, строк {text.Split('\n').Length}.");
+                + $"серверов {batch.Results.Count}, строк {text.Split('\n').Length}.", level);
         }
     }
+
+    /// <summary>Автокопия после удачного запуска — плашка зелёная. Кнопка и неудачный запуск — обычная.</summary>
+    private static LogLevel FinishedLevel(bool succeeded) => succeeded ? LogLevel.Success : LogLevel.Info;
 
     /// <summary>
     /// Галочка «после …» у текущего окна. Срабатывает, где бы человек ни был — на другой
@@ -618,6 +622,7 @@ public partial class ResultsView : UserControl
         var after = batch is not null && AppState.Current.ChainFor(batch) is { } chain
             ? AppState.AfterRowOf(batch, result, chain)
             : null;
+        var level = FinishedLevel(auto && result.Status == OperationStatus.Success && after?.Status is null or OperationStatus.Success);
 
         // имя и адрес сервера сверху — иначе в буфере не понять, к чему лог;
         // «+ команды» — следом вывод личных команд этого же сервера
@@ -649,7 +654,7 @@ public partial class ResultsView : UserControl
             {
                 if (ClipboardText.CopyTerminalOutputFile(full + Environment.NewLine, result.Server.PaneLabel, tab) is { } file)
                 {
-                    AppLog.Hint($"{finished} — лог длинный ({LogTrim.Count(full):N0} строк), в буфере файлом: {file}.");
+                    AppLog.Hint($"{finished} — лог длинный ({LogTrim.Count(full):N0} строк), в буфере файлом: {file}.", level);
                 }
 
                 return;
@@ -662,7 +667,7 @@ public partial class ResultsView : UserControl
         {
             AppLog.Hint(finished is not null
                 ? $"{finished} — вывод скопирован в буфер обмена: {result.Title}."
-                : $"Вывод скопирован: {result.Title}.");
+                : $"Вывод скопирован: {result.Title}.", level);
         }
     }
 

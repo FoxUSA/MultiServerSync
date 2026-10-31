@@ -248,9 +248,14 @@
               <Setter TargetName="SortArrow" Property="Visibility" Value="Visible" />
               <Setter TargetName="SortArrow" Property="Data" Value="M0,0 L4,4 L8,0" />
             </Trigger>
-            <Trigger Property="IsMouseOver" Value="True">
+            <!--  подсветка только у заголовка, который сортирует по щелчку; остальные не нажимаются  -->
+            <MultiTrigger>
+              <MultiTrigger.Conditions>
+                <Condition Property="IsMouseOver" Value="True" />
+                <Condition Property="CanUserSort" Value="True" />
+              </MultiTrigger.Conditions>
               <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}" />
-            </Trigger>
+            </MultiTrigger>
             <Trigger Property="IsPressed" Value="True">
               <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
             </Trigger>
@@ -312,14 +317,6 @@
               HorizontalAlignment="Right"
               Style="{StaticResource ColResizeGripperStyle}" />
           </Grid>
-          <ControlTemplate.Triggers>
-            <Trigger Property="IsMouseOver" Value="True">
-              <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}" />
-            </Trigger>
-            <Trigger Property="IsPressed" Value="True">
-              <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
-            </Trigger>
-          </ControlTemplate.Triggers>
         </ControlTemplate>
       </Setter.Value>
     </Setter>

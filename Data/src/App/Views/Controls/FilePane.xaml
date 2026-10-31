@@ -735,6 +735,7 @@
             <DataGridTemplateColumn
               x:Name="CheckColumn"
               Width="40"
+              MinWidth="40"
               CanUserSort="False"
               CellStyle="{StaticResource FirstColumnCellStyle}"
               HeaderStyle="{StaticResource FirstColumnHeaderStyle}">

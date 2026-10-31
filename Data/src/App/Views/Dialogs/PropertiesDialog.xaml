@@ -264,12 +264,14 @@
             Grid.Column="1"
             Margin="0,0,12,0"
             IsEditable="True"
+            IsTextSearchEnabled="False"
             ToolTip="Сменить владельца может только root" />
           <TextBlock Grid.Column="2" Style="{StaticResource LabelStyle}" Text="Группа" />
           <ComboBox
             x:Name="GroupBox"
             Grid.Column="3"
-            IsEditable="True" />
+            IsEditable="True"
+            IsTextSearchEnabled="False" />
         </Grid>
 
         <TextBlock

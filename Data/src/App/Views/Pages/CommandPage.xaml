@@ -30,47 +30,6 @@
       <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
 
-    <!--
-      Значки поверх поля ввода, в его правом верхнем углу: места на странице не занимают,
-      а действие относится ровно к тому полю, над которым висят.
-    -->
-    <Style x:Key="EditorIconStyle" TargetType="Button">
-      <Setter Property="Width" Value="32" />
-      <Setter Property="Height" Value="{StaticResource IconButtonSize}" />
-      <Setter Property="Margin" Value="2,0,0,0" />
-      <Setter Property="Padding" Value="0" />
-      <Setter Property="Focusable" Value="False" />
-      <Setter Property="Cursor" Value="Hand" />
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="Button">
-            <Border
-              x:Name="Bd"
-              Background="{TemplateBinding Background}"
-              CornerRadius="4"
-              TextElement.Foreground="{TemplateBinding Foreground}">
-              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-            </Border>
-            <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
-                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
-              </Trigger>
-              <!--  пока команда идёт, запуск погашен — видно, что второй раз не нажать  -->
-              <Trigger Property="IsEnabled" Value="False">
-                <Setter Property="Opacity" Value="0.35" />
-              </Trigger>
-              <!--  делать нечего: значок тусклый, но жмётся — нажатие мигает рамкой окна  -->
-              <Trigger Property="pages:CommandPage.Idle" Value="True">
-                <Setter Property="Opacity" Value="0.35" />
-              </Trigger>
-            </ControlTemplate.Triggers>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
-    </Style>
   </Page.Resources>
 
   <Grid Margin="12">
@@ -292,7 +251,7 @@
           </ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
             <DataTemplate>
-              <Grid Margin="0,4,0,0">
+              <Grid Margin="0,4,0,0" GotKeyboardFocus="OnStepFocused">
                 <ui:TextBox
                   x:Name="Box"
                   AcceptsReturn="True"
@@ -300,7 +259,6 @@
                   ClearButtonEnabled="False"
                   DataObject.Pasting="OnCommandBoxPasting"
                   FontFamily="Consolas"
-                  GotKeyboardFocus="OnStepFocused"
                   HorizontalScrollBarVisibility="Auto"
                   Loaded="OnStepBoxLoaded"
                   Padding="10,8,240,44"
@@ -316,6 +274,15 @@
                 <Border
                   x:Name="PersonalRing"
                   BorderBrush="#80E07A1F"
+                  BorderThickness="2"
+                  CornerRadius="4"
+                  IsHitTestVisible="False"
+                  Visibility="Collapsed" />
+
+                <!--  окно в фокусе при нескольких окнах — вся рамка цвета нижней линии поля, как на «Копировании» и «Скачивании»  -->
+                <Border
+                  x:Name="FocusRing"
+                  BorderBrush="{DynamicResource TextControlFocusedBorderBrush}"
                   BorderThickness="2"
                   CornerRadius="4"
                   IsHitTestVisible="False"
@@ -514,6 +481,13 @@
                 <DataTrigger Binding="{Binding DataContext.IsPersonal, RelativeSource={RelativeSource AncestorType=Page}}" Value="True">
                   <Setter TargetName="PersonalRing" Property="Visibility" Value="Visible" />
                 </DataTrigger>
+                <MultiDataTrigger>
+                  <MultiDataTrigger.Conditions>
+                    <Condition Binding="{Binding IsMulti}" Value="True" />
+                    <Condition Binding="{Binding IsFocused}" Value="True" />
+                  </MultiDataTrigger.Conditions>
+                  <Setter TargetName="FocusRing" Property="Visibility" Value="Visible" />
+                </MultiDataTrigger>
                 <!--  кнопкам нечего делать — тусклые  -->
                 <DataTrigger Binding="{Binding IsEmpty}" Value="True">
                   <Setter TargetName="RunOne" Property="pages:CommandPage.Idle" Value="True" />
@@ -599,6 +573,8 @@
           IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=Everywhere, Mode=TwoWay}"
           Style="{StaticResource DangerSwitchStyle}"
           ToolTip="Включено — «Выполнить» запускает команды сразу во всех командных вкладках, каждая со своими окнами и серверами, после вопроса. Личные вкладки копирования не запускаются. Итог по каждой — на её ярлыке" />
+
+        <controls:UndoButtons Margin="8,0,0,0" VerticalAlignment="Center" />
       </StackPanel>
 
       <TextBlock
@@ -609,11 +585,5 @@
         Foreground="{DynamicResource TextFillColorTertiaryBrush}"
         Text="{Binding CommandSizeInfo}" />
     </Grid>
-
-    <!--  плашка о нажатии — не в углу окна, а сразу справа от главной кнопки; место ставит Follow  -->
-    <controls:ActionToast
-      x:Name="BarToast"
-      Grid.RowSpan="9"
-      Grid.ColumnSpan="2" />
   </Grid>
 </Page>

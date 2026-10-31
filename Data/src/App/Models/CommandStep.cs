@@ -93,6 +93,15 @@ public sealed class CommandStep : ObservableObject
         set => Set(ref _tailEmpty, value);
     }
 
+    private bool _isFocused;
+
+    /// <summary>Окно в фокусе: при нескольких окнах у него рамка. Ставит вкладка.</summary>
+    public bool IsFocused
+    {
+        get => _isFocused;
+        set => Set(ref _isFocused, value);
+    }
+
     public void Place(int number, int count)
     {
         _number = number;
@@ -121,8 +130,6 @@ public sealed class CommandStep : ObservableObject
     public string StatusText => _state switch
     {
         StepState.Waiting => "ждёт",
-        StepState.Running => "идёт",
-        StepState.Ok => "ок",
         StepState.Failed => "не ок",
         StepState.Skipped => "не запускалось",
         _ => string.Empty,

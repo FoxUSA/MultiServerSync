@@ -260,7 +260,7 @@ public partial class ExplorerPage : Page
     {
         if (_tab is { } tab)
         {
-            ServerMenu.Show(anchor, tab.ExplorerServer, tab.PickExplorerServer);
+            ServerMenu.Show(anchor, s => ReferenceEquals(s, tab.ExplorerServer), tab.PickExplorerServer, ServerMenu.Locks.ForExplorer(tab));
         }
     }
 

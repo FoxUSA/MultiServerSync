@@ -14,7 +14,7 @@ namespace MultiServerSync.Views.Pages;
 /// (она в рамке), ярлык наверху меняет её набор, кнопки действуют на неё. Галочки нужны
 /// только для действий на этой странице: удалить, дублировать, перенести, проверить связь.
 /// </summary>
-public partial class ServersPage : Page, Controls.IToastHost
+public partial class ServersPage : Page
 {
     public ServersPage()
     {
@@ -25,6 +25,8 @@ public partial class ServersPage : Page, Controls.IToastHost
         // порядок в таблицах выбирается щелчком по заголовку и не сбрасывается; колонки у них одни
         GridSort.Keep(LeftGrid, "servers");
         GridSort.Keep(RightGrid, "servers");
+        Controls.CopyWindowLayout.FollowColumns(LeftGrid);
+        Controls.CopyWindowLayout.FollowColumns(RightGrid);
 
         AppState.Current.PropertyChanged += OnStateChanged;
         ShowPicked();
@@ -296,5 +298,4 @@ public partial class ServersPage : Page, Controls.IToastHost
         await AppState.Current.ServersDesk.RunCheckAsync(picked);
     }
 
-    Controls.ActionToast Controls.IToastHost.PageToast => BarToast;
 }

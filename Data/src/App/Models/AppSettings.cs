@@ -10,6 +10,34 @@ public sealed class SavedTransferItem
     public bool IsSelected { get; set; } = true;
 }
 
+/// <summary>Окно «Копирования» или «Скачивания» в файле вкладки: свой список, путь или папка, параметры.</summary>
+public sealed class SavedCopyWindow
+{
+    public List<SavedTransferItem> CopyList { get; set; } = new();
+
+    public string RemotePath { get; set; } = string.Empty;
+
+    public string Name { get; set; } = string.Empty;
+
+    public List<SavedDownloadItem>? Downloads { get; set; }
+
+    public string LocalFolder { get; set; } = string.Empty;
+
+    public bool OverwriteFiles { get; set; } = true;
+
+    public bool PreserveTimestamps { get; set; } = true;
+
+    public bool VerifyChecksums { get; set; }
+
+    public bool MatchByDate { get; set; }
+
+    public bool MatchByHash { get; set; }
+
+    public string ExcludeMasks { get; set; } = string.Empty;
+
+    public bool UseGlobalExcludes { get; set; } = true;
+}
+
 /// <summary>
 /// Шестерёнка у «Терминал / Журнал»: какие разовые действия раздела писать в терминал и в журнал.
 /// Сервер — действия на сервере, Компьютер — на этом ПК, Программа — списки, вкладки, наборы.
@@ -227,10 +255,10 @@ public sealed class AppSettings
     /// </summary>
     public Dictionary<string, string> GridSort { get; set; } = new();
 
-    /// <summary>Параметры копирования свёрнуты в одну строку: у «Копирования» и у «Скачивания» — свой выбор.</summary>
-    public bool UploadOptionsFolded { get; set; }
+    /// <summary>«Копирование» и «Скачивание», нижняя полоса: высота и ширина левой части, сдвинутые мышью; 0 — как задумано.</summary>
+    public double CopyBandHeight { get; set; }
 
-    public bool DownloadOptionsFolded { get; set; }
+    public double CopyBandLeft { get; set; }
 
     /// <summary>Порядок кнопок разделов, переставленный мышью: имена кнопок слева направо.</summary>
     public List<string> SectionOrder { get; set; } = new();

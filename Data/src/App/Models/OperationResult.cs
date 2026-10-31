@@ -30,6 +30,7 @@ public sealed class OperationResult : ObservableObject
     private readonly Lock _sync = new();
 
     private string _scope = string.Empty;
+    private string _windowLabel = string.Empty;
     private OperationStatus _status = OperationStatus.Pending;
     private string _message = "в очереди";
     private TimeSpan _duration;
@@ -79,11 +80,42 @@ public sealed class OperationResult : ObservableObject
 
     public string Title => Server.Display;
 
+    /// <summary>Окно «Копирования» или «Скачивания» этой строки: номер и название на момент запуска. Пусто, когда окно одно.</summary>
+    public string WindowLabel
+    {
+        get => _windowLabel;
+        set
+        {
+            if (Set(ref _windowLabel, value ?? string.Empty))
+            {
+                RaiseMany(nameof(ShortTitle), nameof(FullTitle), nameof(ScopedShortTitle), nameof(ScopedFullTitle));
+            }
+        }
+    }
+
+    private string WithWindow(string title) => _windowLabel.Length == 0 ? title : $"{title} · окно {_windowLabel}";
+
     /// <summary>Короткое имя для узкой колонки таблицы — полное показывает подсказка.</summary>
-    public string ShortTitle => Server.PaneLabel;
+    public string ShortTitle => WithWindow(Server.PaneLabel);
 
     /// <summary>Полное имя — для заголовка вывода.</summary>
-    public string FullTitle => Title;
+    public string FullTitle => WithWindow(Title);
+
+    /// <summary>Что делает эта строка, если окон несколько. Работа запуска достаёт отсюда своё окно.</summary>
+    public object? Job { get; set; }
+
+    /// <summary>Строка окна выше на этом же сервере: эта идёт после неё и только если та прошла.</summary>
+    public OperationResult? PreviousWindow { get; set; }
+
+    private TaskCompletionSource _finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Строка закончила этот запуск — чем угодно.</summary>
+    public Task Finished => _finished.Task;
+
+    /// <summary>Запуск или повтор начинается: окно ниже будет ждать именно его.</summary>
+    internal void ArmFinished() => _finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    internal void MarkFinished() => _finished.TrySetResult();
 
     /// <summary>
     /// То же с названием вкладки — только для сводки «Выполнить везде», где в одной таблице
@@ -95,7 +127,7 @@ public sealed class OperationResult : ObservableObject
 
     /// <summary>Подпись для текста в буфер обмена: имя и адрес сервера, в сводке — ещё и вкладка.</summary>
     public string CaptionFor(bool summary) =>
-        summary && Scope.Length > 0 ? $"{Scope} · {Server.Caption}" : Server.Caption;
+        summary && Scope.Length > 0 ? $"{Scope} · {WithWindow(Server.Caption)}" : WithWindow(Server.Caption);
 
     /// <summary>Шапка вывода в буфере обмена — чтобы скопированный лог было с чем связать.</summary>
     public string CopyHeader(bool summary) => $"Сервер: {CaptionFor(summary)}:";
@@ -872,6 +904,7 @@ public sealed class OperationResult : ObservableObject
             {
                 ServerId = Server.Id,
                 Scope = _scope,
+                WindowLabel = _windowLabel,
                 Created = Created,
                 Status = _status,
                 Message = _message,
@@ -918,6 +951,7 @@ public sealed class OperationResult : ObservableObject
 
         row._skipped = state.Skipped || state.Status == OperationStatus.Pending;
         row._warning = state.Warning;
+        row._windowLabel = state.WindowLabel ?? string.Empty;
         row.IsAction = state.IsAction;
         row.RunId = state.RunId;
         row._duration = TimeSpan.FromMilliseconds(state.DurationMs);

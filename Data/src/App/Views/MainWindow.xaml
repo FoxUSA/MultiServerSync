@@ -54,7 +54,7 @@
                 CornerRadius="6"
                 IsHitTestVisible="False"
                 Visibility="Collapsed" />
-              <!--  рамка работы: зелёная мигает, пока идёт; красная стоит, если кончилось с ошибкой.
+              <!--  рамка работы: зелёная мигает, пока идёт; красная стоит, если кончилось с ошибкой, пока вкладку не увидели.
                     Пока видна, рамку выделения прячет — иначе та просвечивала бы в такт миганию  -->
               <Border
                 x:Name="StatusRing"
@@ -201,9 +201,14 @@
                 <Setter TargetName="Mark" Property="Text" Value="&#x2212;" />
                 <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
               </Trigger>
-              <Trigger Property="IsMouseOver" Value="True">
+              <!--  у строки сервера подсветка своя, на всю ширину вместе с замком: галочка там уже строки  -->
+              <MultiTrigger>
+                <MultiTrigger.Conditions>
+                  <Condition Property="IsMouseOver" Value="True" />
+                  <Condition Property="Tag" Value="Hover" />
+                </MultiTrigger.Conditions>
                 <Setter TargetName="Row" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
-              </Trigger>
+              </MultiTrigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -261,6 +266,36 @@
     </Style>
 
     <!--  замок в конце строки целевого сервера: под мышью — залитый фон и белый значок  -->
+    <!--  замок на плашке сервера: значок белый всегда, под мышью фон синий  -->
+    <Style x:Key="ServerTagLockStyle" TargetType="Button">
+      <Setter Property="Width" Value="22" />
+      <Setter Property="Height" Value="20" />
+      <Setter Property="Margin" Value="8,-2,-5,-2" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Bd"
+              Background="Transparent"
+              CornerRadius="4">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#2F7FD6" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="#256BB8" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <Style x:Key="PaneLockButtonStyle" TargetType="Button">
       <Setter Property="Width" Value="20" />
       <Setter Property="Height" Value="20" />
@@ -730,20 +765,7 @@
           Grid.RowSpan="2"
           Margin="20,0,20,0"
           VerticalAlignment="Center">
-          <Viewbox
-            x:Name="TitleBox"
-            MaxHeight="33"
-            HorizontalAlignment="Center"
-            StretchDirection="DownOnly">
-            <TextBlock
-              x:Name="TitleText"
-              MaxWidth="{Binding ActualWidth, ElementName=Texts}"
-              FontSize="12"
-              FontWeight="SemiBold"
-              Text="{Binding Title}"
-              TextAlignment="Center"
-              TextWrapping="WrapWithOverflow" />
-          </Viewbox>
+          <controls:FitTextBlock x:Name="TitleBox" Text="{Binding Title}" />
           <!--  одна строка статуса вместо названия, пока идёт работа: ошибки — «Ошибок N», иначе ход  -->
           <Grid
             x:Name="StatusLine"
@@ -813,6 +835,7 @@
           Margin="0,1,2,0"
           HorizontalAlignment="Right"
           VerticalAlignment="Top"
+          controls:LockMute.IsOn="{Binding IsContentLocked}"
           Click="OnCloseTab"
           Style="{StaticResource TabCloseButtonStyle}"
           ToolTip="Закрыть вкладку (Ctrl+W)" />
@@ -824,9 +847,29 @@
           VerticalAlignment="Bottom"
           Click="OnRenameTabClick"
           Style="{StaticResource TabRenameButtonStyle}" />
+
+        <!--  вкладка закреплена за сервером — маленький замок в правом верхнем углу, с отступом от краёв;
+              под мышью на его месте крестик, и замок прячется  -->
+        <ui:SymbolIcon
+          x:Name="LockMark"
+          Grid.RowSpan="2"
+          Margin="0,5,6,0"
+          HorizontalAlignment="Right"
+          VerticalAlignment="Top"
+          FontSize="11"
+          Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
+          IsHitTestVisible="False"
+          Symbol="LockClosed24"
+          Visibility="Collapsed" />
       </Grid>
 
       <DataTemplate.Triggers>
+        <DataTrigger Binding="{Binding IsPaneLocked}" Value="True">
+          <Setter TargetName="LockMark" Property="Visibility" Value="Visible" />
+        </DataTrigger>
+        <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+          <Setter TargetName="LockMark" Property="Visibility" Value="Collapsed" />
+        </DataTrigger>
         <DataTrigger Binding="{Binding HasStatus}" Value="True">
           <Setter TargetName="BadgeText" Property="Visibility" Value="Visible" />
         </DataTrigger>
@@ -841,6 +884,9 @@
         </DataTrigger>
         <DataTrigger Binding="{Binding CanClose}" Value="False">
           <Setter TargetName="Close" Property="Visibility" Value="Collapsed" />
+        </DataTrigger>
+        <DataTrigger Binding="{Binding IsMain}" Value="True">
+          <Setter TargetName="RenameButton" Property="Visibility" Value="Collapsed" />
         </DataTrigger>
         <DataTrigger Binding="{Binding HasPersonal}" Value="True">
           <Setter TargetName="Forward" Property="Visibility" Value="Visible" />
@@ -907,14 +953,10 @@
         Width="140"
         Height="39"
         ToolTip="{Binding TabTooltip}">
-        <TextBlock
+        <controls:FitTextBlock
           Margin="20,0,20,0"
-          HorizontalAlignment="Center"
           VerticalAlignment="Center"
-          FontSize="12"
-          FontWeight="SemiBold"
-          Text="{Binding Title}"
-          TextTrimming="CharacterEllipsis" />
+          Text="{Binding Title}" />
 
         <Button
           x:Name="Close"
@@ -1053,6 +1095,8 @@
       x:Name="TabStripArea"
       Grid.Row="1"
       Padding="5.34,2,5.34,2"
+      Background="Transparent"
+      PreviewMouseLeftButtonDown="OnTabStripAreaDown"
       SizeChanged="OnTabStripAreaSized"
       TextOptions.TextFormattingMode="Display"
       UseLayoutRounding="True"
@@ -1067,6 +1111,7 @@
               вместе ровно в высоту ярлыков, сколько бы рядов их ни было;
               отступы те же, что у ярлыка. У наборов серверов архива нет — там «+» во всю высоту  -->
         <Grid
+          x:Name="TabButtons"
           Grid.Column="0"
           Width="44"
           Margin="0,2,4,2">
@@ -1083,7 +1128,7 @@
             HorizontalContentAlignment="Center"
             VerticalAlignment="Stretch"
             Click="OnAddTab"
-            ToolTip="Новая вкладка (Ctrl+T)">
+            ToolTip="Новая вкладка (Ctrl+T или двойной щелчок по пустому месту ленты)">
             <ui:Button.Icon>
               <ui:SymbolIcon FontSize="14" Symbol="Add24" />
             </ui:Button.Icon>
@@ -1136,7 +1181,7 @@
           SelectionChanged="OnSetSelected"
           Visibility="{Binding State.ShowsServerSetTabs, Converter={StaticResource BoolToVis}}" />
 
-        <!--  вкладки раздела; личные вкладки команд — у правого края последнего ряда  -->
+        <!--  вкладки раздела  -->
         <ListBox
           x:Name="TabStrip"
           Grid.Column="1"
@@ -1169,7 +1214,8 @@
       <Border
         Padding="6,4"
         Background="{DynamicResource SubtleFillColorSecondaryBrush}"
-        CornerRadius="7">
+        CornerRadius="7"
+        PreviewMouseLeftButtonDown="OnSectionRowDown">
       <DockPanel>
       <!--
         «Проводник»: сервер правой панели — у правого края ряда, как раз над ней. Название, логин,
@@ -1211,6 +1257,16 @@
             FontSize="12"
             Foreground="{DynamicResource TextFillColorTertiaryBrush}"
             Symbol="ArrowDown24" />
+          <Button
+            x:Name="ExplorerServerLock"
+            Click="OnExplorerServerLock"
+            Style="{StaticResource ServerTagLockStyle}">
+            <ui:SymbolIcon
+              x:Name="ExplorerServerLockIcon"
+              FontSize="13"
+              Foreground="White"
+              Symbol="LockOpen24" />
+          </Button>
         </StackPanel>
       </Button>
 
@@ -1270,6 +1326,15 @@
             <TextBlock Text="Скачивание" />
           </StackPanel>
         </RadioButton>
+        <!--  вернуть закрытую или переименованную вкладку этого раздела: виден, только пока есть что  -->
+        <Button
+          x:Name="TabActionButton"
+          Margin="12,0,0,0"
+          Click="OnUndoTabAction"
+          Style="{StaticResource UndoButtonStyle}"
+          Visibility="Collapsed">
+          <ui:SymbolIcon FontSize="16" Symbol="ArrowUndo24" />
+        </Button>
       </StackPanel>
       </DockPanel>
       </Border>
@@ -1376,6 +1441,7 @@
                   Content="Отметить все"
                   IsChecked="{Binding State.ActiveWorkspace.PaneAllChecked, Mode=TwoWay}"
                   Style="{StaticResource PaneCheckStyle}"
+                  Tag="Hover"
                   ToolTip="Отметить или снять все серверы в списке этой вкладки. Если отмечена часть — отмечает все" />
               </Border>
 
@@ -1407,7 +1473,7 @@
                           Click="OnPaneLockClick"
                           DockPanel.Dock="Right"
                           Style="{StaticResource PaneLockButtonStyle}"
-                          ToolTip="Закрепить вкладку за этим сервером: сменить его можно будет, только сняв замок"
+                          ToolTip="{Binding DataContext.State.ActiveWorkspace.LockTip, RelativeSource={RelativeSource AncestorType=Window}}"
                           Visibility="Hidden">
                           <ui:SymbolIcon
                             x:Name="LockIcon"
@@ -1474,9 +1540,28 @@
                           <Setter TargetName="Lock" Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
                           <Setter TargetName="Lock" Property="ToolTip" Value="Вкладка закреплена за этим сервером — щелчок снимает замок" />
                         </DataTrigger>
+                        <!--  строка под мышью или в фокусе — замок белый, открытый он или закрытый, как в списке у подписи сервера.
+                              После триггера замка: перебивает цвет акцента у закрытого  -->
+                        <Trigger SourceName="Item" Property="IsMouseOver" Value="True">
+                          <Setter TargetName="Lock" Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger SourceName="Item" Property="IsKeyboardFocusWithin" Value="True">
+                          <Setter TargetName="Lock" Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                        </Trigger>
                         <DataTrigger Binding="{Binding IsMuted}" Value="True">
                           <Setter TargetName="Item" Property="Opacity" Value="0.5" />
                         </DataTrigger>
+                        <!--  под мышью — прямоугольник той же ширины и с теми же углами, что у отмеченного, вместе с замком.
+                              По высоте и по тексту ничего не сдвигается: сбоку отступ возвращает то, что забрало поле  -->
+                        <MultiDataTrigger>
+                          <MultiDataTrigger.Conditions>
+                            <Condition Binding="{Binding IsMouseOver, ElementName=Item}" Value="True" />
+                            <Condition Binding="{Binding DataContext.State.ActiveWorkspace.IsPaneLocked, RelativeSource={RelativeSource AncestorType=Window}}" Value="False" />
+                          </MultiDataTrigger.Conditions>
+                          <Setter TargetName="Pick" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                          <Setter TargetName="Pick" Property="Margin" Value="-4,0,-4,0" />
+                          <Setter TargetName="Pick" Property="Padding" Value="4,0,4,0" />
+                        </MultiDataTrigger>
                         <MultiDataTrigger>
                           <MultiDataTrigger.Conditions>
                             <Condition Binding="{Binding IsSelected}" Value="True" />
@@ -1487,6 +1572,16 @@
                           <Setter TargetName="Pick" Property="Margin" Value="-4,2,-4,2" />
                           <Setter TargetName="Pick" Property="Padding" Value="3,3,3,3" />
                           <Setter TargetName="Check" Property="FontSize" Value="14" />
+                        </MultiDataTrigger>
+                        <!--  отмеченный под мышью — фон чуть плотнее, как у плашки сервера  -->
+                        <MultiDataTrigger>
+                          <MultiDataTrigger.Conditions>
+                            <Condition Binding="{Binding IsSelected}" Value="True" />
+                            <Condition Binding="{Binding DataContext.State.PaneHighlightsPicks, RelativeSource={RelativeSource AncestorType=Window}}" Value="True" />
+                            <Condition Binding="{Binding IsMouseOver, ElementName=Item}" Value="True" />
+                            <Condition Binding="{Binding DataContext.State.ActiveWorkspace.IsPaneLocked, RelativeSource={RelativeSource AncestorType=Window}}" Value="False" />
+                          </MultiDataTrigger.Conditions>
+                          <Setter TargetName="Pick" Property="Background" Value="#38E07A1F" />
                         </MultiDataTrigger>
                         <DataTrigger Binding="{Binding RelativeSource={RelativeSource PreviousData}}" Value="{x:Null}">
                           <Setter TargetName="Item" Property="Margin" Value="0" />
@@ -1595,13 +1690,14 @@
       </Border>
     </Grid>
 
-    <!--  что сделано по последнему нажатию — тихо в правом нижнем углу, гаснет само  -->
+    <!--  что сделано по последнему нажатию — под кнопкой, а без кнопки посередине окна; гаснет само.
+          Лежит поверх всех рядов и раскладку не раздвигает, щелчки проходят сквозь неё  -->
     <controls:ActionToast
       x:Name="Toast"
-      Grid.Row="3"
-      Margin="0,0,24,7"
-      HorizontalAlignment="Right"
-      VerticalAlignment="Bottom" />
+      Grid.RowSpan="9"
+      Panel.ZIndex="1000"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top" />
 
     <GridSplitter
       x:Name="BottomSplitter"

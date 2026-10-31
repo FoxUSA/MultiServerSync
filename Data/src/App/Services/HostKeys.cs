@@ -170,9 +170,7 @@ public static class HostKeys
     {
         try
         {
-            var tmp = AppPaths.KnownHostsFile + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(_known, JsonOptions));
-            File.Move(tmp, AppPaths.KnownHostsFile, overwrite: true);
+            AtomicFile.Write(AppPaths.KnownHostsFile, JsonSerializer.Serialize(_known, JsonOptions));
         }
         catch (Exception ex)
         {

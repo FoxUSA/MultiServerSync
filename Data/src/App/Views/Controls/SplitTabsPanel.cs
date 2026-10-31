@@ -1,13 +1,11 @@
 using System.Windows;
 using System.Windows.Controls;
-using MultiServerSync.Services;
 
 namespace MultiServerSync.Views.Controls;
 
 /// <summary>
 /// Лента вкладок: ярлыки одного размера идут в ряд, не влезли по ширине — переносятся
-/// в следующий ряд, и лента растёт вниз. Обычные вкладки — с начала, личные вкладки команд —
-/// прижаты к правому краю последнего ряда; пока места хватает, между ними пусто.
+/// в следующий ряд, и лента растёт вниз.
 /// </summary>
 public sealed class SplitTabsPanel : Panel
 {
@@ -23,9 +21,6 @@ public sealed class SplitTabsPanel : Panel
         get => (double)GetValue(RowHeightProperty);
         set => SetValue(RowHeightProperty, value);
     }
-
-    private static bool IsRight(UIElement child) =>
-        child is FrameworkElement { DataContext: Workspace { IsPersonal: true } };
 
     /// <summary>Сколько мест в ряду при такой ширине; бесконечная ширина — все в один ряд.</summary>
     private int PerRow(double width, double slot) =>
@@ -62,38 +57,12 @@ public sealed class SplitTabsPanel : Panel
         var tallest = children.Select(c => c.DesiredSize.Height).DefaultIfEmpty(0).Max();
         var rowHeight = double.IsNaN(RowHeight) ? tallest : RowHeight;
         var perRow = PerRow(final.Width, widest);
-        var slots = RowsFor(perRow) * perRow;
 
-        var left = children.Where(c => !IsRight(c)).ToList();
-        var right = children.Where(IsRight).ToList();
-
-        // обычные — с первого места по порядку, личные — на последних местах
-        for (var i = 0; i < left.Count; i++)
+        for (var i = 0; i < children.Count; i++)
         {
-            Place(left[i], i);
-        }
-
-        for (var i = 0; i < right.Count; i++)
-        {
-            Place(right[i], slots - right.Count + i);
+            children[i].Arrange(new Rect(i % perRow * widest, i / perRow * rowHeight, widest, rowHeight));
         }
 
         return final;
-
-        void Place(UIElement child, int slot)
-        {
-            var row = slot / perRow;
-            var column = slot % perRow;
-
-            // правый край ряда — вплотную к краю ленты, как раньше у личных вкладок
-            var x = column * widest;
-
-            if (right.Contains(child))
-            {
-                x = final.Width - (perRow - column) * widest;
-            }
-
-            child.Arrange(new Rect(x, row * rowHeight, widest, rowHeight));
-        }
     }
 }
