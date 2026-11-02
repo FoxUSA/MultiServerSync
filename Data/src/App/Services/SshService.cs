@@ -53,6 +53,12 @@ public sealed record UploadOptions(
 
     /// <summary>Надо ли вообще решать, отправлять файл: иначе он отправляется всегда.</summary>
     public bool Matching => MatchByDate || MatchByHash;
+
+    /// <summary>
+    /// «Сошлось» в этом режиме значит, что отправлять нечего, и галочка «незалитого» не нужна.
+    /// Кроме сверки только по размеру: правку того же размера она не заметит.
+    /// </summary>
+    public bool CompareConfirms => !Overwrite || Matching;
 }
 
 public sealed record UploadedFile(string LocalPath, string RemotePath, long Size);
@@ -105,11 +111,14 @@ public sealed record CompareDiff(string Path, string Reason);
 /// <summary>
 /// Итог сравнения с одного сервера — что было бы при копировании или скачивании, но без них:
 /// сколько файлов совпало, каких нет в назначении, какие отличаются и каких папок нет.
+/// <paramref name="Ignored"/> — отличия, которые выбранный режим не сверяет: файлы уже посчитаны
+/// в <paramref name="Same"/>, на итог не влияют и показываются только в выводе.
 /// </summary>
 public sealed record CompareStats(
     int Same,
     IReadOnlyList<string> MissingFiles,
     IReadOnlyList<CompareDiff> Different,
+    IReadOnlyList<CompareDiff> Ignored,
     IReadOnlyList<string> MissingDirs,
     StageClock Clock)
 {
@@ -851,7 +860,7 @@ public static class SshService
                 var ctx = new UploadContext(sftp, options, localHashes, inventory, new Counters(), report);
                 clock.Mark("опись");
 
-                if (options.MatchByHash)
+                if (options.MatchByHash && options.Overwrite)
                 {
                     ctx.RemoteHashes = FetchRemoteHashes(ssh, ctx, plan.Files, report, ct, step);
                     clock.Mark("суммы");
@@ -859,6 +868,7 @@ public static class SshService
 
                 var missing = new ConcurrentBag<string>();
                 var different = new ConcurrentBag<CompareDiff>();
+                var ignored = new ConcurrentBag<CompareDiff>();
                 var same = 0;
 
                 RunParallel(plan.Files, ct, job =>
@@ -872,6 +882,24 @@ public static class SshService
                     }
 
                     var info = new FileInfo(job.LocalPath);
+
+                    // существующие файлы этот режим не трогает: их отличия на итог не влияют, только в вывод
+                    if (!options.Overwrite)
+                    {
+                        Interlocked.Increment(ref same);
+
+                        var note = remote.IsDirectory ? "на сервере на этом месте папка"
+                            : info.Length != remote.Size ? SizeDifference(info.Length, remote.Size)
+                            : DateDifference(info, remote);
+
+                        if (note is not null)
+                        {
+                            ignored.Add(new CompareDiff(job.RemotePath, note));
+                        }
+
+                        return;
+                    }
+
                     var reason = remote.IsDirectory ? "на сервере на этом месте папка"
                         : options.Matching ? Difference(info, remote, job.RemotePath, ctx)
                         : info.Length != remote.Size ? SizeDifference(info.Length, remote.Size)
@@ -880,6 +908,12 @@ public static class SshService
                     if (reason is null)
                     {
                         Interlocked.Increment(ref same);
+
+                        // сверка по сумме и по размеру на дату не смотрит: расхождение — только в вывод
+                        if (DateDifference(info, remote) is { } dateNote)
+                        {
+                            ignored.Add(new CompareDiff(job.RemotePath, dateNote));
+                        }
                     }
                     else
                     {
@@ -915,6 +949,7 @@ public static class SshService
                     same,
                     missing.Order(StringComparer.Ordinal).ToList(),
                     different.OrderBy(d => d.Path, StringComparer.Ordinal).ToList(),
+                    ignored.OrderBy(d => d.Path, StringComparer.Ordinal).ToList(),
                     absentDirs,
                     clock);
             },
@@ -923,9 +958,10 @@ public static class SshService
 
     /// <summary>По какому правилу сравниваются файлы — первой строкой в выводе сравнения.</summary>
     internal static string CompareRule(UploadOptions options) =>
-        options.MatchByHash ? "сравнение по размеру и контрольной сумме SHA-256"
+        !options.Overwrite ? "сравнение только по наличию файла: в параметрах выбраны те, которых нет, отличия существующих на итог не влияют"
+        : options.MatchByHash ? "сравнение по размеру и контрольной сумме SHA-256, дата на итог не влияет"
         : options.MatchByDate ? "сравнение по размеру и дате изменения"
-        : "сравнение только по размеру: сверка по дате и по контрольной сумме в параметрах выключены";
+        : "сравнение только по размеру: сверка по дате и по контрольной сумме в параметрах выключены, дата на итог не влияет";
 
     /// <summary>Причина «другой размер» — одними словами для копирования, скачивания и сравнения.</summary>
     internal static string SizeDifference(long local, long remote) =>
@@ -2799,6 +2835,12 @@ public static class SshService
 
         // расхождение в любую сторону — повод отправить файл: на сервере должно лежать то же,
         // что и локально, в том числе когда локальный откатили на версию постарше
+        return DateDifference(local, remote);
+    }
+
+    /// <summary>Чем различаются даты файла здесь и на сервере, или null, если они в пределах запаса.</summary>
+    private static string? DateDifference(FileInfo local, RemoteStat remote)
+    {
         var drift = DriftSeconds(local, remote);
 
         if (Math.Abs(drift) <= DateTolerance)

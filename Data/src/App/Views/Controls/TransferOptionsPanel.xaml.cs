@@ -147,7 +147,7 @@ public partial class TransferOptionsPanel : UserControl
                 ReplaceOption.Visibility = Visibility.Collapsed;
                 UnsentBlock.Visibility = Visibility.Visible;
                 UnsentButton.Content = "Отмечать нескачанные";
-                UnsentButton.ToolTip = "Отмечает то, что ещё не скачивали или что изменилось на сервере после скачивания. Повторное нажатие возвращает прежние галочки.";
+                UnsentButton.ToolTip = "Пока кнопка включена, отмечены только нескачанные.";
                 break;
 
             case TransferDirection.Both:
@@ -184,7 +184,7 @@ public partial class TransferOptionsPanel : UserControl
                 ReplaceOption.Visibility = Visibility.Collapsed;
                 UnsentBlock.Visibility = Visibility.Visible;
                 UnsentButton.Content = "Отмечать незалитые";
-                UnsentButton.ToolTip = "Отмечает то, что ещё не копировали или что изменилось после копирования. Повторное нажатие возвращает прежние галочки.";
+                UnsentButton.ToolTip = "Пока кнопка включена, отмечены только незалитые. Учитывает фильтры.";
                 break;
         }
 

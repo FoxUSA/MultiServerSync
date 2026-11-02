@@ -41,6 +41,51 @@
       </Style>
 
       <!--
+        Подсказки: в WPF UI тень висит на рамке вместе с текстом, текст рисуется через эффект и расплывается.
+        Здесь тень у отдельной подложки, а числа и кисти те же, что в теме.
+      -->
+      <Style BasedOn="{StaticResource DefaultToolTipStyle}" TargetType="ToolTip">
+        <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+        <Setter Property="UseLayoutRounding" Value="True" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="ToolTip">
+              <ui:EffectThicknessDecorator Thickness="15">
+                <Grid>
+                  <Border Background="{TemplateBinding Background}" CornerRadius="4">
+                    <Border.Effect>
+                      <DropShadowEffect
+                        BlurRadius="10"
+                        Direction="270"
+                        Opacity="0.135"
+                        ShadowDepth="5"
+                        Color="#202020" />
+                    </Border.Effect>
+                  </Border>
+                  <Border
+                    Padding="8"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4">
+                    <ContentPresenter
+                      Margin="4"
+                      HorizontalAlignment="Left"
+                      VerticalAlignment="Top">
+                      <ContentPresenter.Resources>
+                        <Style TargetType="TextBlock">
+                          <Setter Property="TextWrapping" Value="WrapWithOverflow" />
+                        </Style>
+                      </ContentPresenter.Resources>
+                    </ContentPresenter>
+                  </Border>
+                </Grid>
+              </ui:EffectThicknessDecorator>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
+
+      <!--
         Значки поверх поля ввода, в его правом верхнем углу: места на странице не занимают,
         а действие относится ровно к тому полю, над которым висят. «Команда» и мини-терминал «Копирования».
       -->

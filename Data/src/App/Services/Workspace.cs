@@ -1253,6 +1253,8 @@ public sealed class Workspace : ObservableObject
                 .Select(g => (Server: AppState.Current.Servers.FirstOrDefault(s => s.Id == g.Key), Rows: g.ToList()))
                 .Where(g => g.Server is not null)
                 .Select(g => CheckDownloadsAsync(g.Server!, g.Rows, settings)));
+
+            _ = FollowUnsentAsync();
         }
         finally
         {
@@ -1554,10 +1556,7 @@ public sealed class Workspace : ObservableObject
         var consideredOn = new Dictionary<ServerEntry, int>();
 
         // для «Нескачанных»: дата строк до скачивания — сменится по ходу, строка останется нескачанной
-        var dates = jobs
-            .Where(j => j.Window is not null)
-            .SelectMany(j => j.Window!.Downloads.Where(d => d.IsSelected).Select(d => (Job: j, Row: d, Date: d.ChangeDate)))
-            .ToList();
+        var dates = DownloadDates(jobs);
 
         foreach (var job in jobs)
         {
@@ -1624,10 +1623,7 @@ public sealed class Workspace : ObservableObject
 
                 if (stats.Skipped == 0)
                 {
-                    foreach (var (_, row, date) in dates.Where(d => ReferenceEquals(d.Job, job) && d.Row.ServerId == server.Id))
-                    {
-                        row.Memory.Date = date ?? row.Memory.Date;
-                    }
+                    RememberReceived(dates, job, server);
                 }
             },
             settings.MaxParallel,
@@ -1637,6 +1633,7 @@ public sealed class Workspace : ObservableObject
         if (dates.Count > 0)
         {
             Save();
+            _ = FollowUnsentAsync();
         }
 
         // запуски «Проводника» идут рядом — итог на ярлыке, когда закончился последний
@@ -2369,6 +2366,7 @@ public sealed class Workspace : ObservableObject
             });
 
             DropMissing(rows.Select(r => r.Item).ToList());
+            _ = FollowUnsentAsync();
         }
         catch (Exception ex)
         {
@@ -2389,6 +2387,9 @@ public sealed class Workspace : ObservableObject
     // ── кнопка «Незалитые» ─────────────────────────────────────────────────────
 
     private bool _pickingUnsent;
+    private bool _followingUnsent;
+    private bool _followUnsentAgain;
+    private int _unsentPresses;
 
     private IEnumerable<IRowCheck> TickRows => AllItems.Cast<IRowCheck>().Concat(AllDownloads);
 
@@ -2406,6 +2407,7 @@ public sealed class Workspace : ObservableObject
     /// Первое нажатие — галочки на том, что этой программой ещё не копировали или что изменилось после копирования.
     /// Второе — галочки, какие были до первого; если их успели поменять руками — снова незалитые.
     /// По всем окнам вкладки: «Выполнить» тоже идёт по всем. Даты только здешние, на сервер ничего не уходит.
+    /// Пока кнопка включена, галочки держит <see cref="FollowUnsentAsync"/>.
     /// </summary>
     public async Task ToggleUnsentAsync()
     {
@@ -2415,6 +2417,7 @@ public sealed class Workspace : ObservableObject
         }
 
         _pickingUnsent = true;
+        _unsentPresses++;
 
         try
         {
@@ -2429,32 +2432,10 @@ public sealed class Workspace : ObservableObject
             }
             else
             {
-                // у каждого окна свои исключения; читаются здесь, в потоке окна
-                var items = CopyWindows.SelectMany(w =>
-                {
-                    var filter = ExcludesOf(w);
-                    return w.Items.Select(i => (Item: i, Filter: filter));
-                }).ToList();
+                // незалитых нет — кнопка всё равно включается: что отмечать нечего, видно по пустым галочкам
+                var (rows, unsent) = await FindUnsentAsync();
 
-                var itemDates = await Task.Run(() => items.Select(r => r.Item.ChangeDate(r.Filter)).ToList());
-                var rows = items.Select((r, i) => ((IRowCheck)r.Item, itemDates[i]))
-                    .Concat(AllDownloads.Select(d => ((IRowCheck)d, d.Server is null ? null : d.ChangeDate)))
-                    .ToList();
-                var unsent = rows.Where(r => r.Item2 is not null && r.Item2 != r.Item1.Memory.Date).Select(r => r.Item1).ToHashSet();
-
-                if (unsent.Count == 0)
-                {
-                    AppLog.Echo(IsDownloadTab ? "Нескачанных нет: всё уже скачано." : "Незалитых нет: всё уже скопировано.", LogLevel.Warning);
-                    return;
-                }
-
-                // повторно после ручной правки прежние галочки остаются те, что были до самого первого нажатия
-                foreach (var (row, _) in rows)
-                {
-                    row.Memory.Before ??= row.IsSelected;
-                    row.Memory.Marked = unsent.Contains(row);
-                    row.IsSelected = row.Memory.Marked;
-                }
+                MarkUnsent(rows, unsent);
             }
 
             Raise(nameof(UnsentOn));
@@ -2463,6 +2444,126 @@ public sealed class Workspace : ObservableObject
         finally
         {
             _pickingUnsent = false;
+        }
+    }
+
+    /// <summary>
+    /// Кнопка включена — отмечено ровно незалитое: удачно отправленное теряет галочку, изменившийся файл её получает.
+    /// Зовут те, кто узнал новое: конец захода, правка файла, проверка списка. Галочки тронули руками — рамка погасла, не вмешиваемся.
+    /// </summary>
+    private async Task FollowUnsentAsync()
+    {
+        if (_followingUnsent)
+        {
+            _followUnsentAgain = true;
+            return;
+        }
+
+        if (_pickingUnsent || CopyBatch.IsRunning || !UnsentOn)
+        {
+            return;
+        }
+
+        _followingUnsent = true;
+
+        var presses = _unsentPresses;
+
+        try
+        {
+            var (rows, unsent) = await FindUnsentAsync();
+
+            // пока читали, могли нажать кнопку, тронуть галочки или начать копирование
+            if (presses == _unsentPresses && !CopyBatch.IsRunning && UnsentOn && rows.Any(r => r.IsSelected != unsent.Contains(r)))
+            {
+                MarkUnsent(rows, unsent);
+                Save();
+            }
+        }
+        finally
+        {
+            _followingUnsent = false;
+
+            if (_followUnsentAgain)
+            {
+                _followUnsentAgain = false;
+                _ = FollowUnsentAsync();
+            }
+        }
+    }
+
+    /// <summary>Дата строк до захода: читается один раз, когда первый сервер начал работу. У «Проводника» окна нет — и строк для памяти нет.</summary>
+    private static Dictionary<UploadJob, Lazy<List<string?>>> RowDates(IReadOnlyList<UploadJob> jobs) =>
+        jobs.ToDictionary(j => j, j => new Lazy<List<string?>>(() =>
+        {
+            var filter = j.Options.Excludes();
+            return j.Window is null ? [] : j.Payload.Select(i => i.ChangeDate(filter)).ToList();
+        }));
+
+    /// <summary>Окно дошло до всех серверов целиком — его строки залиты, какими были до захода.</summary>
+    private void RememberSent(
+        IReadOnlyList<UploadJob> jobs,
+        Dictionary<UploadJob, Lazy<List<string?>>> dates,
+        System.Collections.Concurrent.ConcurrentDictionary<UploadJob, int> reached,
+        int servers)
+    {
+        foreach (var job in jobs.Where(j => j.Window is not null && reached.GetValueOrDefault(j) == servers))
+        {
+            for (var i = 0; i < job.Payload.Count; i++)
+            {
+                job.Payload[i].Memory.Date = dates[job].Value[i] ?? job.Payload[i].Memory.Date;
+            }
+        }
+
+        if (jobs.Any(j => j.Window is not null))
+        {
+            Save();
+            _ = FollowUnsentAsync();
+        }
+    }
+
+    /// <summary>Дата строк скачивания до захода — сменится по ходу, строка останется нескачанной.</summary>
+    private static List<(DownloadJob Job, DownloadItem Row, string? Date)> DownloadDates(IReadOnlyList<DownloadJob> jobs) =>
+        jobs.Where(j => j.Window is not null)
+            .SelectMany(j => j.Window!.Downloads.Where(d => d.IsSelected).Select(d => (Job: j, Row: d, Date: d.ChangeDate)))
+            .ToList();
+
+    /// <summary>Строки этого окна с этого сервера получены: у каждой строки сервер один.</summary>
+    private static void RememberReceived(List<(DownloadJob Job, DownloadItem Row, string? Date)> dates, DownloadJob job, ServerEntry server)
+    {
+        foreach (var (_, row, date) in dates.Where(d => ReferenceEquals(d.Job, job) && d.Row.ServerId == server.Id))
+        {
+            row.Memory.Date = date ?? row.Memory.Date;
+        }
+    }
+
+    /// <summary>Незалитое: дата есть и не та, что запомнена при последнем удачном заходе.</summary>
+    private async Task<(List<IRowCheck> Rows, HashSet<IRowCheck> Unsent)> FindUnsentAsync()
+    {
+        // у каждого окна свои исключения; читаются здесь, в потоке окна
+        var items = CopyWindows.SelectMany(w =>
+        {
+            var filter = ExcludesOf(w);
+            return w.Items.Select(i => (Item: i, Filter: filter));
+        }).ToList();
+
+        var itemDates = await Task.Run(() => items.Select(r => r.Item.ChangeDate(r.Filter)).ToList());
+        var dated = items.Select((r, i) => ((IRowCheck)r.Item, itemDates[i]))
+            .Concat(AllDownloads.Select(d => ((IRowCheck)d, d.Server is null ? null : d.ChangeDate)))
+            .ToList();
+
+        return (
+            dated.Select(r => r.Item1).ToList(),
+            dated.Where(r => r.Item2 is not null && r.Item2 != r.Item1.Memory.Date).Select(r => r.Item1).ToHashSet());
+    }
+
+    private static void MarkUnsent(List<IRowCheck> rows, HashSet<IRowCheck> unsent)
+    {
+        // прежние галочки остаются те, что были до самого первого нажатия
+        foreach (var row in rows)
+        {
+            row.Memory.Before ??= row.IsSelected;
+            row.Memory.Marked = unsent.Contains(row);
+            row.IsSelected = row.Memory.Marked;
         }
     }
 
@@ -2728,9 +2829,13 @@ public sealed class Workspace : ObservableObject
 
         var rows = targets.SelectMany(server => jobs.Select(job => (Server: server, Job: job))).ToList();
 
+        // сошлось на всех серверах — файл и так там, отмечать его незалитым незачем
+        var dates = RowDates(jobs);
+        var matched = new System.Collections.Concurrent.ConcurrentDictionary<UploadJob, int>();
+
         await CompareCoreAsync(
             rows.Select(r => r.Server).ToList(),
-            (server, result, ct) =>
+            async (server, result, ct) =>
             {
                 var job = (UploadJob)result.Job!;
 
@@ -2739,7 +2844,9 @@ public sealed class Workspace : ObservableObject
                 result.Append($"объектов: {job.Payload.Count}");
                 result.Append("── сравнение ──");
 
-                return SshService.CompareUploadAsync(
+                await Task.Run(() => dates[job].Value, ct);
+
+                var stats = await SshService.CompareUploadAsync(
                     server,
                     settings,
                     job.Payload,
@@ -2754,9 +2861,18 @@ public sealed class Workspace : ObservableObject
                         UploadStep.CheckingDates => StepCheckingDates,
                         _ => StepConnecting,
                     }) + "…");
+
+                if (stats.Mismatches == 0 && job.Options.CompareConfirms)
+                {
+                    matched.AddOrUpdate(job, 1, (_, count) => count + 1);
+                }
+
+                return stats;
             },
             "на сервере",
             WindowRows(rows, j => j.Window, null, chained: false));
+
+        RememberSent(jobs, dates, matched, targets.Count);
 
         if (notify)
         {
@@ -2796,9 +2912,12 @@ public sealed class Workspace : ObservableObject
             .SelectMany(server => jobs.Where(j => j.Plan.ContainsKey(server)).Select(job => (Server: server, Job: job)))
             .ToList();
 
+        // сошлось — файл и так здесь, отмечать его нескачанным незачем
+        var dates = DownloadDates(jobs);
+
         await CompareCoreAsync(
             rows.Select(r => r.Server).ToList(),
-            (server, result, ct) =>
+            async (server, result, ct) =>
             {
                 var job = (DownloadJob)result.Job!;
                 var root = job.Plan.Count > 1 ? Path.Combine(job.Folder, FolderName(server)) : job.Folder;
@@ -2808,10 +2927,23 @@ public sealed class Workspace : ObservableObject
                 result.Append($"путей: {job.Plan[server].Count}");
                 result.Append("── сравнение ──");
 
-                return DownloadService.CompareAsync(server, settings, job.Plan[server], root, job.Options, line => result.Append(line), ct);
+                var stats = await DownloadService.CompareAsync(server, settings, job.Plan[server], root, job.Options, line => result.Append(line), ct);
+
+                if (stats.Mismatches == 0 && job.Options.CompareConfirms)
+                {
+                    RememberReceived(dates, job, server);
+                }
+
+                return stats;
             },
             "здесь",
             WindowRows(rows, j => j.Window, null, chained: false));
+
+        if (dates.Count > 0)
+        {
+            Save();
+            _ = FollowUnsentAsync();
+        }
 
         if (notify)
         {
@@ -2872,12 +3004,16 @@ public sealed class Workspace : ObservableObject
             CopyBatch,
             "сравнение",
             worst == 0 ? "сошлось" : $"отличий {worst}",
-            worst == 0 ? "файлы одинаковые" : "что именно не сошлось — в выводе терминала");
+            worst == 0 ? "по выбранному правилу отличий нет" : "что именно не сошлось — в выводе терминала");
     }
+
+    /// <summary>Сколько отличий, не влияющих на итог, показать в выводе: дата может разойтись у всех файлов сразу.</summary>
+    private const int IgnoredShown = 200;
 
     /// <summary>
     /// Итог сравнения в строку сервера. Статус — сразу ответ «сошлось или нет»; в выводе — счёт
     /// и списки: чего нет, что отличается и чем. «Не сошлось» — не ошибка, а ответ: оранжевым.
+    /// Отличия, которые выбранный режим не сверяет, на статус не влияют и идут только в вывод.
     /// </summary>
     private static void ReportCompare(OperationResult result, CompareStats stats, string where)
     {
@@ -2897,6 +3033,11 @@ public sealed class Workspace : ObservableObject
         if (stats.MissingDirs.Count > 0)
         {
             result.Append($"нет {where} папок: {stats.MissingDirs.Count}");
+        }
+
+        if (stats.Ignored.Count > 0)
+        {
+            result.Append($"на итог не влияют: {stats.Ignored.Count}");
         }
 
         result.Append("время: " + stats.Clock);
@@ -2931,9 +3072,29 @@ public sealed class Workspace : ObservableObject
             }
         }
 
+        if (stats.Ignored.Count > 0)
+        {
+            result.Append($"── на итог не влияют ({stats.Ignored.Count}) ──");
+
+            foreach (var diff in stats.Ignored.Take(IgnoredShown))
+            {
+                result.Append($"≈ {diff.Path} · {diff.Reason}");
+            }
+
+            if (stats.Ignored.Count > IgnoredShown)
+            {
+                result.Append($"…и ещё {stats.Ignored.Count - IgnoredShown}");
+            }
+        }
+
+        // среди совпавших есть файлы с отличиями, которые режим не сверяет: «одинаковыми» их не назвать
+        var hasIgnored = stats.Ignored.Count > 0;
+
         if (stats.Mismatches == 0)
         {
-            result.Message = stats.Total == 0 ? "сошлось · файлов нет" : $"сошлось · одинаковых файлов {stats.Same}";
+            result.Message = stats.Total == 0 ? "сошлось · файлов нет"
+                : hasIgnored ? $"сошлось · файлов {stats.Same}"
+                : $"сошлось · одинаковых файлов {stats.Same}";
             result.Status = OperationStatus.Success;
             return;
         }
@@ -2955,7 +3116,7 @@ public sealed class Workspace : ObservableObject
             parts.Add($"папок нет {stats.MissingDirs.Count}");
         }
 
-        result.Message = "не сошлось · " + string.Join(" · ", parts) + $" · одинаковых {stats.Same}";
+        result.Message = "не сошлось · " + string.Join(" · ", parts) + (hasIgnored ? $" · совпало {stats.Same}" : $" · одинаковых {stats.Same}");
         result.Warning = true;
         result.Status = OperationStatus.Success;
     }
@@ -3030,11 +3191,7 @@ public sealed class Workspace : ObservableObject
 
         // для «Незалитых»: дата строк до отправки — правка по ходу копирования останется незалитой.
         // Запоминается, только если окно дошло до всех серверов целиком
-        var dates = jobs.ToDictionary(j => j, j => new Lazy<List<string?>>(() =>
-        {
-            var filter = j.Options.Excludes();
-            return j.Window is null ? [] : j.Payload.Select(i => i.ChangeDate(filter)).ToList();
-        }));
+        var dates = RowDates(jobs);
         var delivered = new System.Collections.Concurrent.ConcurrentDictionary<UploadJob, int>();
 
         await CopyBatch.RunAsync(
@@ -3205,18 +3362,7 @@ public sealed class Workspace : ObservableObject
             concurrent: concurrent,
             prepare: WindowRows(rows, j => j.Window, prepare, chained: true));
 
-        foreach (var job in jobs.Where(j => j.Window is not null && delivered.GetValueOrDefault(j) == targets.Count))
-        {
-            for (var i = 0; i < job.Payload.Count; i++)
-            {
-                job.Payload[i].Memory.Date = dates[job].Value[i] ?? job.Payload[i].Memory.Date;
-            }
-        }
-
-        if (jobs.Any(j => j.Window is not null))
-        {
-            Save();
-        }
+        RememberSent(jobs, dates, delivered, targets.Count);
 
         // запуски «Проводника» идут рядом — итог на ярлыке, когда закончился последний
         if (CopyBatch.IsRunning)
@@ -4438,6 +4584,8 @@ public sealed class Workspace : ObservableObject
         {
             Application.Current?.Dispatcher.BeginInvoke(new Action(() => DropMissing([item])));
         }
+
+        Application.Current?.Dispatcher.BeginInvoke(new Action(() => _ = FollowUnsentAsync()));
     }
 
     /// <summary>

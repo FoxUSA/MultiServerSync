@@ -268,6 +268,7 @@ public static class DownloadService
 
                 var missing = new List<string>();
                 var different = new List<CompareDiff>();
+                var ignored = new List<CompareDiff>();
                 var hashCandidates = new List<Job>();
                 var same = 0;
 
@@ -288,6 +289,23 @@ public static class DownloadService
                         continue;
                     }
 
+                    // файлы, что уже здесь, этот режим не трогает: их отличия на итог не влияют, только в вывод
+                    if (!options.Overwrite)
+                    {
+                        same++;
+
+                        var note = info.Length != entry.Size
+                            ? SshService.SizeDifference(info.Length, entry.Size)
+                            : DateDifference(info, entry);
+
+                        if (note is not null)
+                        {
+                            ignored.Add(new CompareDiff(entry.Relative, note));
+                        }
+
+                        continue;
+                    }
+
                     if (info.Length != entry.Size)
                     {
                         different.Add(new CompareDiff(entry.Relative, SshService.SizeDifference(info.Length, entry.Size)));
@@ -300,16 +318,18 @@ public static class DownloadService
                         continue;
                     }
 
-                    var drift = Unix(info.LastWriteTimeUtc) - entry.MTime;
+                    var dateNote = DateDifference(info, entry);
 
-                    if (options.MatchByDate && Math.Abs(drift) > DateSlackSeconds)
+                    if (options.MatchByDate && dateNote is not null)
                     {
-                        var remoteTime = DateTimeOffset.FromUnixTimeMilliseconds((long)(entry.MTime * 1000)).LocalDateTime;
-                        different.Add(new CompareDiff(
-                            entry.Relative,
-                            (drift > 0 ? "здесь свежее" : "на сервере свежее")
-                            + $" · локально {info.LastWriteTime:dd.MM.yyyy HH:mm:ss}, на сервере {remoteTime:dd.MM.yyyy HH:mm:ss}"));
+                        different.Add(new CompareDiff(entry.Relative, dateNote));
                         continue;
+                    }
+
+                    // сверка только по размеру на дату не смотрит: расхождение — только в вывод
+                    if (dateNote is not null)
+                    {
+                        ignored.Add(new CompareDiff(entry.Relative, dateNote));
                     }
 
                     same++;
@@ -342,6 +362,12 @@ public static class DownloadService
                         else if (mine.TryGetValue(job.Local, out var local) && string.Equals(sum, local, StringComparison.OrdinalIgnoreCase))
                         {
                             same++;
+
+                            // содержимое то же: другая дата на итог не влияет, только в вывод
+                            if (DateDifference(new FileInfo(job.Local), job.Entry) is { } sameDateNote)
+                            {
+                                ignored.Add(new CompareDiff(job.Entry.Relative, sameDateNote));
+                            }
                         }
                         else
                         {
@@ -377,10 +403,27 @@ public static class DownloadService
                     same,
                     missing.Order(StringComparer.Ordinal).ToList(),
                     different.OrderBy(d => d.Path, StringComparer.Ordinal).ToList(),
+                    ignored.OrderBy(d => d.Path, StringComparer.Ordinal).ToList(),
                     absentDirs,
                     clock);
             },
             ct);
+    }
+
+    /// <summary>Чем различаются даты файла здесь и на сервере, или null, если они в пределах запаса.</summary>
+    private static string? DateDifference(FileInfo info, Entry entry)
+    {
+        var drift = Unix(info.LastWriteTimeUtc) - entry.MTime;
+
+        if (Math.Abs(drift) <= DateSlackSeconds)
+        {
+            return null;
+        }
+
+        var remoteTime = DateTimeOffset.FromUnixTimeMilliseconds((long)(entry.MTime * 1000)).LocalDateTime;
+
+        return (drift > 0 ? "здесь свежее" : "на сервере свежее")
+            + $" · локально {info.LastWriteTime:dd.MM.yyyy HH:mm:ss}, на сервере {remoteTime:dd.MM.yyyy HH:mm:ss}";
     }
 
     /// <summary>

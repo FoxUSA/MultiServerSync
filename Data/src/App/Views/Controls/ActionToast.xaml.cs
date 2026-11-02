@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -118,6 +119,7 @@ public partial class ActionToast : UserControl
         var height = parent.ActualHeight;
 
         Card.MaxWidth = Math.Min(MostWidth, Math.Max(200, width - EdgeGap * 2));
+        Balance();
         Card.Measure(new Size(Card.MaxWidth, double.PositiveInfinity));
 
         var size = Card.DesiredSize;
@@ -144,9 +146,11 @@ public partial class ActionToast : UserControl
     private void Display(LogEntry entry)
     {
         // ошибка пришла не отсюда — плашка говорит, откуда: сервер, раздел, вкладка, как в шапке вывода
-        Message.Text = entry.Level is LogLevel.Warning or LogLevel.Error && IsElsewhere(entry)
+        var text = entry.Level is LogLevel.Warning or LogLevel.Error && IsElsewhere(entry)
             ? entry.Text + Environment.NewLine + entry.PlaceText
             : entry.Text;
+
+        Message.Text = NumberWithWord.Replace(text, "\u00A0");
         Dot.Fill = DotBrush(entry.Level);
 
         // рамка тусклая оранжевая — рамкой темы плашку было плохо видно; удача — в зелёной; ошибка — на тусклом
@@ -170,6 +174,7 @@ public partial class ActionToast : UserControl
         }
 
         Visibility = Visibility.Visible;
+        Balance();
         Place();
         BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(150)));
 
@@ -181,6 +186,54 @@ public partial class ActionToast : UserControl
         }
 
         _timer.Start();
+    }
+
+    /// <summary>Пробел между числом и коротким словом за ним: «4,0 с» не должно разрываться переносом.</summary>
+    private static readonly Regex NumberWithWord = new(@"(?<=\d) (?=\p{L}{1,3}(?!\p{L}))");
+
+    /// <summary>
+    /// Ровный перенос: не влезло в строку — плашка сужается до наименьшей ширины с тем же числом строк.
+    /// Так на последней строке не остаётся одинокая буква или слово.
+    /// </summary>
+    private void Balance()
+    {
+        Message.MaxWidth = double.PositiveInfinity;
+
+        double HeightAt(double width)
+        {
+            Message.Measure(new Size(width, double.PositiveInfinity));
+            return Message.DesiredSize.Height;
+        }
+
+        var most = Card.MaxWidth
+            - Body.Padding.Left - Body.Padding.Right
+            - Body.BorderThickness.Left - Body.BorderThickness.Right
+            - Dot.Width - Dot.Margin.Right;
+
+        var height = HeightAt(most);
+
+        if (height <= HeightAt(double.PositiveInfinity))
+        {
+            return;
+        }
+
+        var (low, high) = (0d, most);
+
+        while (high - low > 2)
+        {
+            var middle = (low + high) / 2;
+
+            if (HeightAt(middle) > height)
+            {
+                low = middle;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        Message.MaxWidth = Math.Ceiling(high);
     }
 
     private void Hide()
