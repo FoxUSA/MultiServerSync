@@ -58,7 +58,38 @@ public partial class TransferOptionsPanel : UserControl
             ApplyLock();
         };
 
+        ModeGrid.SizeChanged += (_, _) => FitUnsent();
+
         ApplyTexts();
+    }
+
+    /// <summary>
+    /// Кнопка стоит в строке «сверять суммы», на свободном месте справа от неё. Узкому блоку места не хватает,
+    /// а подпись обрезаться не должна: тогда кнопка переходит в строку заголовка, высоту которой не меняет.
+    /// </summary>
+    private void FitUnsent()
+    {
+        if (Direction == TransferDirection.Both || ModeGrid.ActualWidth <= 0)
+        {
+            return;
+        }
+
+        UnsentBlock.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+
+        var free = ModeGrid.ActualWidth - ModeGrid.ColumnDefinitions[0].ActualWidth - VerifyOption.DesiredSize.Width;
+        var fits = free >= UnsentBlock.DesiredSize.Width;
+        Grid home = fits ? ModeGrid : HeaderRow;
+
+        if (!ReferenceEquals(UnsentBlock.Parent, home))
+        {
+            ((Grid)UnsentBlock.Parent).Children.Remove(UnsentBlock);
+            home.Children.Add(UnsentBlock);
+        }
+
+        Grid.SetRow(UnsentBlock, fits ? 3 : 0);
+        Grid.SetColumn(UnsentBlock, 1);
+        Grid.SetColumnSpan(UnsentBlock, fits ? 3 : 1);
+        UnsentBlock.Margin = fits ? new Thickness(0) : new Thickness(0, -5, 0, -5);
     }
 
     private void OnTabChanged(object? sender, PropertyChangedEventArgs e)
@@ -77,12 +108,13 @@ public partial class TransferOptionsPanel : UserControl
     {
         var locked = Direction != TransferDirection.Both && DataContext is Workspace { IsPaneLocked: true };
 
-        Body.IsEnabled = !locked;
         LockMute.SetIsOn(Body, locked);
 
-        // у каждого параметра своё описание: под замком оно остаётся, снизу добавляется про замок
+        // у каждого параметра своё описание: под замком оно остаётся, снизу добавляется про замок.
+        // Отключаются сами параметры, а не весь блок: «Незалитые» меняют только галочки, а их замок разрешает
         foreach (var toggle in Toggles)
         {
+            toggle.IsEnabled = !locked;
             LockMute.SetIsOn(toggle, locked);
         }
     }
@@ -113,6 +145,9 @@ public partial class TransferOptionsPanel : UserControl
                     "Проверка уже скачанного: SHA-256 здесь против sha256sum на сервере — только для файлов этого захода.");
                 ExcludeButton.Visibility = Visibility.Collapsed;
                 ReplaceOption.Visibility = Visibility.Collapsed;
+                UnsentBlock.Visibility = Visibility.Visible;
+                UnsentButton.Content = "Отмечать нескачанные";
+                UnsentButton.ToolTip = "Отмечает то, что ещё не скачивали или что изменилось на сервере после скачивания. Повторное нажатие возвращает прежние галочки.";
                 break;
 
             case TransferDirection.Both:
@@ -128,6 +163,7 @@ public partial class TransferOptionsPanel : UserControl
                     "Проверка уже скопированного: SHA-256 с обеих сторон — только для файлов этого захода.");
                 ExcludeButton.Visibility = Visibility.Visible;
                 ReplaceOption.Visibility = Visibility.Visible;
+                UnsentBlock.Visibility = Visibility.Collapsed;
                 break;
 
             default:
@@ -146,6 +182,9 @@ public partial class TransferOptionsPanel : UserControl
                     "Проверка уже отправленного: после копирования на сервере запускается sha256sum и хеши сравниваются с локальными. Только для файлов этого захода.");
                 ExcludeButton.Visibility = Visibility.Collapsed;
                 ReplaceOption.Visibility = Visibility.Collapsed;
+                UnsentBlock.Visibility = Visibility.Visible;
+                UnsentButton.Content = "Отмечать незалитые";
+                UnsentButton.ToolTip = "Отмечает то, что ещё не копировали или что изменилось после копирования. Повторное нажатие возвращает прежние галочки.";
                 break;
         }
 
@@ -167,6 +206,14 @@ public partial class TransferOptionsPanel : UserControl
     {
         control.Content = text;
         control.ToolTip = tip;
+    }
+
+    private async void OnUnsent(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is Workspace workspace)
+        {
+            await workspace.ToggleUnsentAsync();
+        }
     }
 
     private void OnExcludes(object sender, RoutedEventArgs e)

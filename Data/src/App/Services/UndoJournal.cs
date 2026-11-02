@@ -1,8 +1,11 @@
+using System.IO;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Threading;
+using MultiServerSync.Core;
 using MultiServerSync.Models;
 
 namespace MultiServerSync.Services;
@@ -52,11 +55,15 @@ public sealed class TabContent(string title, List<SavedCopyWindow> windows, int 
             Steps = steps.Select(s => $"{s.UseSudo}|{s.Text}"),
         });
 
+    private static int Lines(TabContent c) => c.Windows.Sum(w => w.CopyList.Count + (w.Downloads?.Count ?? 0));
+
+    /// <summary>Те же окна, команды и строки: поменялся только текст или параметры.</summary>
+    public bool SameLayout(TabContent other) =>
+        Windows.Count == other.Windows.Count && Steps.Count == other.Steps.Count && Lines(this) == Lines(other);
+
     /// <summary>Что поменялось — словами для подсказки и журнала.</summary>
     public static string Describe(TabContent before, TabContent after)
     {
-        static int Lines(TabContent c) => c.Windows.Sum(w => w.CopyList.Count + (w.Downloads?.Count ?? 0));
-
         if (before.Windows.Count != after.Windows.Count)
         {
             return after.Windows.Count > before.Windows.Count ? "добавление окна" : "удаление окна";
@@ -162,8 +169,9 @@ public sealed record TabPlace(Workspace Tab, AppSection Section, int Index, Work
 /// Действия ничего не сообщают сами: после каждого сохранения вкладки сверяются с тем, что было, и разница
 /// становится шагом. Так новое действие попадает сюда без правок, а запуск команд и копирование содержимое
 /// вкладки не меняют и шагов не дают. Живёт до закрытия программы; у закрытой вкладки память остаётся и
-/// возвращается вместе с ней. Закрытие и переименование самих вкладок — отдельно, по разделам: стрелки
-/// вкладки их не касаются, для них значок в ряду разделов, он только отменяет.
+/// возвращается вместе с ней. Добавление, закрытие и переименование самих вкладок — своя память у раздела:
+/// без предела по числу и по времени, вкладки переживают перезапуск. Стрелки одни на всё: берут то, что
+/// сделано последним, во вкладке или с вкладками.
 /// </summary>
 public static class UndoJournal
 {
@@ -175,6 +183,12 @@ public static class UndoJournal
     private abstract class Step
     {
         public string What { get; set; } = string.Empty;
+
+        /// <summary>Когда сделано или отменено: стрелки берут самое последнее.</summary>
+        public DateTime At { get; set; } = DateTime.UtcNow;
+
+        /// <summary>Что записать на диск; нет — шаг живёт до закрытия программы.</summary>
+        public virtual TabActionState? ToState() => null;
 
         /// <summary>Можно ли применить сейчас; нельзя — причина уже показана.</summary>
         public abstract bool Ready();
@@ -192,8 +206,6 @@ public static class UndoJournal
         public TabContent After { get; set; } = after;
 
         public bool Typing { get; } = typing;
-
-        public DateTime At { get; set; } = DateTime.UtcNow;
 
         public override bool Ready()
         {
@@ -255,10 +267,11 @@ public static class UndoJournal
                     return false;
                 }
 
-                // вкладки больше нет, а значок предлагал бы вернуть ей название
+                // вкладки больше нет, а стрелки предлагали бы вернуть ей название
                 if (TabActions.TryGetValue(place.Section, out var actions))
                 {
-                    actions.RemoveAll(s => s is RenameStep rename && ReferenceEquals(rename.Tab, place.Tab));
+                    actions.Back.RemoveAll(s => s is RenameStep rename && ReferenceEquals(rename.Tab, place.Tab));
+                    actions.Forward.RemoveAll(s => s is RenameStep rename && ReferenceEquals(rename.Tab, place.Tab));
                 }
 
                 return true;
@@ -267,10 +280,29 @@ public static class UndoJournal
             AppState.Current.ReopenTab(place);
             return true;
         }
+
+        public override TabActionState ToState()
+        {
+            static WorkspaceState? IfClosed(Workspace? tab) =>
+                tab is not null && AppState.Current.LiveTab(tab.Id) is null ? tab.ToState() : null;
+
+            return new TabActionState
+            {
+                TabId = place.Tab.Id,
+                Added = added,
+                Index = place.Index,
+                Tab = IfClosed(place.Tab),
+                PersonalId = place.Personal?.Id,
+                Personal = IfClosed(place.Personal),
+                PersonalIndex = place.PersonalIndex,
+                OwnerId = place.Owner?.Id,
+                OwnerEnabled = place.OwnerEnabled,
+            };
+        }
     }
 
-    /// <summary>Вкладку переименовали: значок в ряду разделов возвращает прежнее название.</summary>
-    private sealed class RenameStep(Workspace tab, string before) : Step
+    /// <summary>Вкладку переименовали: стрелки ставят прежнее название и возвращают новое.</summary>
+    private sealed class RenameStep(Workspace tab, string before, string after) : Step
     {
         public Workspace Tab { get; } = tab;
 
@@ -278,9 +310,11 @@ public static class UndoJournal
 
         public override bool Apply(bool undo)
         {
-            Tab.Title = before;
+            Tab.Title = undo ? before : after;
             return true;
         }
+
+        public override TabActionState ToState() => new() { TabId = Tab.Id, Before = before, After = after };
     }
 
     private sealed class Stacks
@@ -293,8 +327,13 @@ public static class UndoJournal
     /// <summary>Память по вкладкам и наборам серверов.</summary>
     private static readonly Dictionary<object, Stacks> Memory = new();
 
-    /// <summary>Закрытые и переименованные вкладки и наборы, у каждого раздела свои. Возврата у них нет.</summary>
-    private static readonly Dictionary<AppSection, List<Step>> TabActions = new();
+    /// <summary>Добавленные, закрытые и переименованные вкладки и наборы, у каждого раздела свои.</summary>
+    private static readonly Dictionary<AppSection, Stacks> TabActions = new();
+
+    private static readonly JsonSerializerOptions TabActionsJson = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
 
     private static readonly Dictionary<Workspace, TabContent> KnownTabs = new();
     private static ServersContent? _knownServers;
@@ -331,19 +370,146 @@ public static class UndoJournal
         return stacks;
     }
 
-    public static string? UndoName() => CurrentOwner() is { } owner && StacksOf(owner).Back is { Count: > 0 } steps ? steps[^1].What : null;
+    public static string? UndoName() => Next(undo: true)?.Step.What;
 
-    public static string? RedoName() => CurrentOwner() is { } owner && StacksOf(owner).Forward is { Count: > 0 } steps ? steps[^1].What : null;
+    public static string? RedoName() => Next(undo: false)?.Step.What;
 
-    /// <summary>Что вернёт значок в ряду разделов; null — значка нет.</summary>
-    public static string? TabActionName() =>
-        TabActions.TryGetValue(AppState.Current.Section, out var steps) && steps.Count > 0 ? steps[^1].What : null;
+    /// <summary>Что сделают стрелки: самое последнее — действие в открытой вкладке или с вкладками её раздела.</summary>
+    private static (Stacks Home, Step Step)? Next(bool undo)
+    {
+        var section = AppState.Current.Section;
+        var own = CurrentOwner() is { } owner ? StacksOf(owner) : null;
+        var tabs = Covers(section) && TabActions.TryGetValue(section, out var found) ? found : null;
+        var inTab = own is null ? null : (undo ? own.Back : own.Forward).LastOrDefault();
+        var withTab = tabs is null ? null : (undo ? tabs.Back : tabs.Forward).LastOrDefault();
+
+        if (inTab is not null && (withTab is null || inTab.At >= withTab.At))
+        {
+            return (own!, inTab);
+        }
+
+        return withTab is null ? null : (tabs!, withTab);
+    }
+
+    private static Stacks TabActionsOf(AppSection section)
+    {
+        if (!TabActions.TryGetValue(section, out var stacks))
+        {
+            TabActions[section] = stacks = new Stacks();
+        }
+
+        return stacks;
+    }
 
     /// <summary>Программа загружена и пароли открыты — с этого состояния и начинается память.</summary>
     public static void Start()
     {
         Rebaseline();
+        LoadTabActions();
         _started = true;
+    }
+
+    /// <summary>Действия с вкладками — на диск сразу: у них нет срока, и программу могут снять в любой момент.</summary>
+    private static void SaveTabActions()
+    {
+        var saved = new List<TabActionState>();
+
+        void Add(AppSection section, List<Step> steps, bool undone)
+        {
+            foreach (var step in steps)
+            {
+                if (step.ToState() is { } state)
+                {
+                    state.Section = section;
+                    state.Undone = undone;
+                    state.What = step.What;
+                    state.At = step.At;
+                    saved.Add(state);
+                }
+            }
+        }
+
+        foreach (var (section, stacks) in TabActions)
+        {
+            Add(section, stacks.Back, undone: false);
+            Add(section, stacks.Forward, undone: true);
+        }
+
+        try
+        {
+            AtomicFile.Write(AppPaths.TabActionsFile, JsonSerializer.Serialize(saved, TabActionsJson));
+        }
+        catch (Exception ex)
+        {
+            AppLog.Debug("Не удалось сохранить отмену действий с вкладками: " + ex.Message);
+        }
+    }
+
+    private static void LoadTabActions()
+    {
+        List<TabActionState>? saved = null;
+
+        try
+        {
+            if (File.Exists(AppPaths.TabActionsFile))
+            {
+                saved = JsonSerializer.Deserialize<List<TabActionState>>(File.ReadAllText(AppPaths.TabActionsFile), TabActionsJson);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Debug("Не удалось прочитать отмену действий с вкладками: " + ex.Message);
+        }
+
+        var state = AppState.Current;
+        var rebuilt = new Dictionary<string, Workspace>();
+
+        // сначала все закрытые вкладки: шаг о названии вкладки может идти раньше шага о её закрытии
+        foreach (var closed in (saved ?? []).SelectMany(s => new[] { s.Tab, s.Personal }).OfType<WorkspaceState>())
+        {
+            if (state.LiveTab(closed.Id) is null && !rebuilt.ContainsKey(closed.Id))
+            {
+                rebuilt[closed.Id] = state.RebuildTab(closed);
+            }
+        }
+
+        Workspace? TabOf(string? id) =>
+            string.IsNullOrEmpty(id) ? null : state.LiveTab(id) ?? rebuilt.GetValueOrDefault(id);
+
+        foreach (var entry in saved ?? [])
+        {
+            if (TabOf(entry.TabId) is not { } tab)
+            {
+                continue;
+            }
+
+            Step step;
+
+            if (entry.Before is { } before)
+            {
+                step = new RenameStep(tab, before, entry.After ?? tab.Title);
+            }
+            else
+            {
+                var owner = TabOf(entry.OwnerId);
+
+                // родитель личной вкладки закрыт насовсем: вернётся обычной вкладкой
+                if (tab.IsPersonal && owner is null)
+                {
+                    tab.OwnerCopyTabId = string.Empty;
+                }
+
+                step = new TabStep(
+                    new TabPlace(tab, entry.Section, entry.Index, TabOf(entry.PersonalId), entry.PersonalIndex, owner, entry.OwnerEnabled),
+                    entry.Added);
+            }
+
+            step.What = entry.What;
+            step.At = entry.At;
+
+            var stacks = TabActionsOf(entry.Section);
+            (entry.Undone ? stacks.Forward : stacks.Back).Add(step);
+        }
     }
 
     /// <summary>Что-то сохранилось. Сверка — одна на всё действие, когда оно закончится: промежуточных шагов нет.</summary>
@@ -371,16 +537,16 @@ public static class UndoJournal
         Changed?.Invoke();
     }
 
-    /// <summary>Новая вкладка: отмена — с неё самой, первым шагом её памяти.</summary>
+    /// <summary>Новая вкладка: действие с вкладкой.</summary>
     public static void TabAdded(TabPlace place)
     {
         if (_started && !_applying && Covers(place.Section))
         {
-            Push(place.Tab, new TabStep(place, added: true) { What = $"новая вкладка «{place.Tab.Title}»" });
+            PushTabAction(place.Section, new TabStep(place, added: true) { What = $"новая вкладка «{place.Tab.Title}»" });
         }
     }
 
-    /// <summary>Закрытая вкладка: отмена — значком в ряду её раздела.</summary>
+    /// <summary>Закрытая вкладка: действие с вкладкой.</summary>
     public static void TabClosed(TabPlace place)
     {
         if (_started && !_applying && Covers(place.Section))
@@ -393,48 +559,9 @@ public static class UndoJournal
 
     public static void Redo() => Move(undo: false);
 
-    /// <summary>Значок в ряду разделов: последнее закрытие или переименование в открытом разделе.</summary>
-    public static void UndoTabAction()
-    {
-        if (!TabActions.TryGetValue(AppState.Current.Section, out var steps) || steps.Count == 0 || !steps[^1].Ready())
-        {
-            return;
-        }
-
-        var step = steps[^1];
-
-        _applying = true;
-
-        try
-        {
-            if (!step.Apply(undo: true))
-            {
-                return;
-            }
-        }
-        finally
-        {
-            _applying = false;
-        }
-
-        steps.Remove(step);
-
-        Rebaseline();
-        Changed?.Invoke();
-        Report("Отменено: " + step.What);
-    }
-
     private static void Move(bool undo)
     {
-        if (CurrentOwner() is not { } owner)
-        {
-            return;
-        }
-
-        var stacks = StacksOf(owner);
-        var from = undo ? stacks.Back : stacks.Forward;
-
-        if (from.Count == 0 || from[^1] is not { } step || !step.Ready())
+        if (Next(undo) is not var (home, step) || !step.Ready())
         {
             return;
         }
@@ -453,13 +580,17 @@ public static class UndoJournal
             _applying = false;
         }
 
-        from.RemoveAt(from.Count - 1);
-
-        // вкладку могли убрать или вернуть: обратный шаг — там, где человек оказался
-        var landed = StacksOf(CurrentOwner() ?? owner);
-        (undo ? landed.Forward : landed.Back).Add(step);
+        (undo ? home.Back : home.Forward).Remove(step);
+        step.At = DateTime.UtcNow;
+        (undo ? home.Forward : home.Back).Add(step);
 
         Rebaseline();
+
+        if (TabActions.ContainsValue(home))
+        {
+            SaveTabActions();
+        }
+
         Changed?.Invoke();
         Report((undo ? "Отменено: " : "Возвращено: ") + step.What);
     }
@@ -520,7 +651,7 @@ public static class UndoJournal
             {
                 PushTabAction(
                     AppState.Current.SectionOfTab(tab),
-                    new RenameStep(tab, known.Title) { What = $"переименование вкладки «{known.Title}»" });
+                    new RenameStep(tab, known.Title, now.Title) { What = $"переименование вкладки «{known.Title}»" });
             }
 
             if (known.Signature != now.Signature)
@@ -552,12 +683,24 @@ public static class UndoJournal
 
         if (typing
             && stacks.Back.LastOrDefault() is ContentStep { Typing: true } last
-            && DateTime.UtcNow - last.At < TypingGap)
+            && DateTime.UtcNow - last.At < TypingGap
+            && last.Before.SameLayout(before)
+            && before.SameLayout(after))
         {
-            last.After = after;
-            last.At = DateTime.UtcNow;
-            last.What = TabContent.Describe(last.Before, after);
+            // набрали и тут же стёрли: отменять нечего, а шаг без разницы назывался бы «галочки»
+            if (last.Before.Signature == after.Signature)
+            {
+                stacks.Back.Remove(last);
+            }
+            else
+            {
+                last.After = after;
+                last.At = DateTime.UtcNow;
+                last.What = TabContent.Describe(last.Before, after);
+            }
+
             stacks.Forward.Clear();
+            DropTabRedo(AppState.Current.SectionOfTab(tab));
             Changed?.Invoke();
             return;
         }
@@ -567,19 +710,29 @@ public static class UndoJournal
 
     private static void PushTabAction(AppSection section, Step step)
     {
-        if (!TabActions.TryGetValue(section, out var steps))
+        var stacks = TabActionsOf(section);
+
+        stacks.Back.Add(step);
+        stacks.Forward.Clear();
+
+        // новое действие — возвращать прежнее больше нечего, как и в любой отмене
+        if (CurrentOwner() is { } owner)
         {
-            TabActions[section] = steps = [];
+            StacksOf(owner).Forward.Clear();
         }
 
-        steps.Add(step);
-
-        if (steps.Count > Depth)
-        {
-            steps.RemoveAt(0);
-        }
-
+        SaveTabActions();
         Changed?.Invoke();
+    }
+
+    /// <summary>Новое действие во вкладке: действия с вкладками раздела больше не вернуть.</summary>
+    private static void DropTabRedo(AppSection section)
+    {
+        if (TabActions.TryGetValue(section, out var stacks) && stacks.Forward.Count > 0)
+        {
+            stacks.Forward.Clear();
+            SaveTabActions();
+        }
     }
 
     private static void Push(object owner, Step step)
@@ -594,6 +747,7 @@ public static class UndoJournal
             stacks.Back.RemoveAt(0);
         }
 
+        DropTabRedo(owner is Workspace tab ? AppState.Current.SectionOfTab(tab) : AppSection.Servers);
         Changed?.Invoke();
     }
 }

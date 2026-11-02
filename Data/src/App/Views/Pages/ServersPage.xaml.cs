@@ -274,8 +274,7 @@ public partial class ServersPage : Page
                 Window.GetWindow(this),
                 $"Удалить серверы ({picked.Count}) из набора «{set.Title}»?",
                 names,
-                "Удалить",
-                enterConfirms: true))
+                "Удалить"))
         {
             return;
         }

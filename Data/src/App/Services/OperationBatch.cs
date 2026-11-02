@@ -25,6 +25,9 @@ public sealed class OperationBatch : ObservableObject
     /// <summary>Как называется последний запуск: «Копирование · вкладка», «Сравнение · вкладка».</summary>
     public string OperationName => _operationName;
 
+    /// <summary>Вкладка последнего запуска — для записей журнала, в чьём тексте её нет.</summary>
+    private string? RunTab => LogEntry.TabIn(_operationName);
+
     /// <summary>Прогоны других вкладок, если этот прогон — сводный.</summary>
     private IReadOnlyList<OperationBatch> _sources = [];
 
@@ -73,6 +76,12 @@ public sealed class OperationBatch : ObservableObject
     {
         foreach (var rowState in state.Rows)
         {
+            // шум, записанный прежними версиями, обратно не встаёт
+            if (rowState.IsAction && JournalAction.IsNoise(rowState.Message))
+            {
+                continue;
+            }
+
             if (server(rowState.ServerId) is { } entry)
             {
                 var row = OperationResult.FromState(rowState, entry);
@@ -166,9 +175,66 @@ public sealed class OperationBatch : ObservableObject
 
     /// <summary>Сколько осталось, пока новый запуск ещё дописывается ниже; null — отсчёта нет (идёт работа, пусто или «Сохранять лог»).</summary>
     private TimeSpan? LifeLeft =>
-        _sources.Count == 0 && !KeepLog && !IsRunning && Results.Count > 0 && _lifeFrom is { } from
+        _sources.Count == 0 && !KeepLog && !IsRunning && Companion?.IsRunning != true && AllRows.Count > 0 && LifeFrom is { } from
             ? AppState.Current.OutputLife - (DateTime.Now - from)
             : null;
+
+    /// <summary>
+    /// Прогон, чьи строки идут в том же терминале: на «Копировании» и «Скачивании» это копирование и
+    /// команды мини-терминала. Работают они порознь, а таблица, срок «Хранить лог» и корзина у них общие.
+    /// </summary>
+    internal OperationBatch? Companion => Owner?.CompanionOf(this);
+
+    /// <summary>Все строки терминала этого прогона: свои и соседнего, по времени появления.</summary>
+    public IReadOnlyList<OperationResult> AllRows => Companion is { } pair
+        ? Results.Concat(pair.Results).OrderBy(r => r.Created).ToList()
+        : Results;
+
+    /// <summary>Срок идёт от окончания того запуска в терминале, что закончился позже.</summary>
+    private DateTime? LifeFrom => Companion?._lifeFrom is { } other && (_lifeFrom is not { } own || other > own)
+        ? other
+        : _lifeFrom;
+
+    /// <summary>Новый запуск позже срока начинает терминал заново — весь, с соседним прогоном. Пока что-то идёт, не начинает.</summary>
+    private void StartOverIfExpired()
+    {
+        if (IsRunning || KeepLog || Companion?.IsRunning == true
+            || (LifeFrom is { } last && DateTime.Now - last <= AppState.Current.OutputLife))
+        {
+            return;
+        }
+
+        StartOver();
+        Companion?.StartOver();
+    }
+
+    /// <summary>Прошлые строки уходят; ждущие своей очереди — не прошлое, их строки остаются.</summary>
+    private void StartOver()
+    {
+        Results.Clear();
+
+        foreach (var waiting in _waiting)
+        {
+            Results.Add(waiting);
+        }
+    }
+
+    /// <summary>Это прогон команд вкладки, а не копирования, проверки связи или сравнения.</summary>
+    internal bool RunsCommands => Owner is { } owner && ReferenceEquals(owner.CommandBatch, this);
+
+    /// <summary>Где шла работа — для шапки вывода: раздел и вкладка, на «Серверах» вкладки нет.</summary>
+    internal string PlaceText
+    {
+        get
+        {
+            var state = AppState.Current;
+            var section = LogEntry.NameOf(Section ?? (Owner is { } tab ? state.SectionOfTab(tab) : (AppSection?)null));
+
+            return Owner is { } owner && !ReferenceEquals(owner, state.ServersDesk)
+                ? $"Раздел: {section} · Вкладка: {owner.Title}"
+                : $"Раздел: {section}";
+        }
+    }
 
     /// <summary>Окошко срока: «04:37» — сколько осталось, без отсчёта — сам срок.</summary>
     public string LifeText
@@ -208,6 +274,9 @@ public sealed class OperationBatch : ObservableObject
     public int RunSuccess => _sources.Count > 0 ? SuccessCount : _lastRun.Count(r => r.Status == OperationStatus.Success);
 
     public int RunFailed => _sources.Count > 0 ? FailedCount : _lastRun.Count(r => r.Status is OperationStatus.Failed or OperationStatus.Cancelled);
+
+    /// <summary>Сколько из <see cref="RunFailed"/> остановлено человеком — это не ошибка.</summary>
+    public int RunStopped => _lastRun.Count(r => r.Status == OperationStatus.Cancelled);
 
     /// <summary>Последний запуск прошёл весь — плашка о его окончании зелёная.</summary>
     public bool RunSucceeded => RunTotal > 0 && RunSuccess == RunTotal;
@@ -311,44 +380,17 @@ public sealed class OperationBatch : ObservableObject
     /// «Сервер: Имя (адрес):», под ним строка команды и её ответ.
     /// </summary>
     /// <param name="maxLines">Автокопия: не длиннее стольких строк на сервер, середина вырезается. Null — целиком.</param>
-    /// <param name="runsOnly">Автокопия: только строки запусков, без строк разовых действий.</param>
-    public string BuildTranscript(int? maxLines = null, bool runsOnly = false)
+    /// <param name="runsOnly">Автокопия: только строки запусков этого прогона — без разовых действий и соседнего прогона.</param>
+    public string BuildTranscript(int? maxLines = null, bool runsOnly = false) =>
+        Transcript(runsOnly ? Results.Where(r => !r.IsAction) : AllRows, maxLines);
+
+    private static string Transcript(IEnumerable<OperationResult> rows, int? maxLines = null)
     {
         var text = new StringBuilder();
 
-        foreach (var result in Results)
+        foreach (var result in rows)
         {
-            if (runsOnly && result.IsAction)
-            {
-                continue;
-            }
-
-            var output = result.Output.TrimEnd();
-
-            if (maxLines is { } max)
-            {
-                output = LogTrim.Lines(output, max, "Все логи");
-            }
-
-            // название вкладки — только в сводке, где рядом строки разных вкладок
-            text.AppendLine(result.CopyHeader(IsSummary));
-
-            if (output.Length > 0)
-            {
-                text.AppendLine(output);
-
-                // то же время, что в таблице слева: без вывода оно уже есть в строке статуса
-                if (result.TimeLine is { } time)
-                {
-                    text.AppendLine(time);
-                }
-            }
-            else
-            {
-                text.AppendLine($"(вывода нет · {result.StatusText})");
-            }
-
-            text.AppendLine();
+            text.AppendLine(result.Report(maxLines, "Все логи"));
         }
 
         return text.ToString().TrimEnd() + Environment.NewLine;
@@ -366,6 +408,11 @@ public sealed class OperationBatch : ObservableObject
             return _sources.Sum(s => s.ClearFinished());
         }
 
+        return ClearOwnFinished() + (Companion?.ClearOwnFinished() ?? 0);
+    }
+
+    private int ClearOwnFinished()
+    {
         static bool Active(OperationResult row) => row.Status is OperationStatus.Running or OperationStatus.Pending;
 
         // у копирования под строкой могут идти его команды — строка остаётся, пока они идут
@@ -505,7 +552,7 @@ public sealed class OperationBatch : ObservableObject
             AppLog.Section = section;
         }
 
-        AppLog.Info($"{what} — на {targets.Count} сервере(ах).");
+        AppLog.Write(LogLevel.Info, $"{what} — на {targets.Count} сервере(ах).", tab: RunTab);
 
         var settings = AppState.Current.Settings;
 
@@ -521,18 +568,18 @@ public sealed class OperationBatch : ObservableObject
 
                 if (sent)
                 {
-                    AppLog.Success($"{what} доставлен", result.Server.Display);
+                    AppLog.Write(LogLevel.Success, $"{what} доставлен", result.Server.Display, tab: RunTab);
                 }
                 else
                 {
-                    AppLog.Warn($"{what} не доставлен: процесса уже нет или не хватило прав",
-                        result.Server.Display);
+                    AppLog.Write(LogLevel.Warning, $"{what} не доставлен: процесса уже нет или не хватило прав",
+                        result.Server.Display, tab: RunTab);
                 }
             }
             catch (Exception ex)
             {
-                AppLog.Error($"{what} не отправлен: " + SshService.Describe(ex, result.Server),
-                    result.Server.Display);
+                AppLog.Write(LogLevel.Error, $"{what} не отправлен: " + SshService.Describe(ex, result.Server),
+                    result.Server.Display, tab: RunTab);
             }
         }));
     }
@@ -551,7 +598,7 @@ public sealed class OperationBatch : ObservableObject
 
         if (_cts is { IsCancellationRequested: false })
         {
-            AppLog.Warn("Отмена операции по запросу пользователя.");
+            AppLog.Write(LogLevel.Warning, "Отмена операции по запросу пользователя.", tab: RunTab);
             _cts.Cancel();
         }
     }
@@ -651,18 +698,7 @@ public sealed class OperationBatch : ObservableObject
         // что запущено, и чем кончилось. «Сохранять лог» у вкладки — не стирается ничего, пока
         // галочку не снимут. Без неё прошлые строки уходят, только если новый прогон начат позже
         // срока «Хранить лог» после окончания прошлого (пока что-то идёт, сюда не попасть).
-        var life = AppState.Current.OutputLife;
-
-        if (!IsRunning && !KeepLog && (_lifeFrom is not { } last || DateTime.Now - last > life))
-        {
-            Results.Clear();
-
-            // ждущие своей очереди — не прошлое, их строки остаются
-            foreach (var waiting in _waiting)
-            {
-                Results.Add(waiting);
-            }
-        }
+        StartOverIfExpired();
 
         // вставший в очередь запуск уже виден строкой «в очереди» — он занимает её, а не добавляет новую.
         // Только свою: копирование, стартовавшее рядом на тот же сервер, чужую ждущую строку не берёт
@@ -730,17 +766,7 @@ public sealed class OperationBatch : ObservableObject
     /// </summary>
     public OperationResult AddAction(ServerEntry where, LogLevel level, string summary, IReadOnlyList<string> lines)
     {
-        var life = AppState.Current.OutputLife;
-
-        if (!IsRunning && !KeepLog && (_lifeFrom is not { } last || DateTime.Now - last > life))
-        {
-            Results.Clear();
-
-            foreach (var waiting in _waiting)
-            {
-                Results.Add(waiting);
-            }
-        }
+        StartOverIfExpired();
 
         var row = new OperationResult(where, Scope) { Batch = this, IsAction = true, RunId = NextRunId() };
 
@@ -882,7 +908,7 @@ public sealed class OperationBatch : ObservableObject
             return;
         }
 
-        AppLog.Info($"Повтор операции «{_operationName}» на {failed.Count} сервере(ах).");
+        AppLog.Started($"Повтор операции «{_operationName}» на {failed.Count} сервере(ах).");
 
         var header = RunHeader("повтор: " + _operationName);
 
@@ -951,6 +977,11 @@ public sealed class OperationBatch : ObservableObject
             _cts?.Dispose();
             _cts = new CancellationTokenSource();
             _finishedAt = null;
+        }
+        else if (_cts is { IsCancellationRequested: true })
+        {
+            // шедшие рядом уже остановлены и сворачиваются — новый запуск их отмену не наследует
+            _cts = new CancellationTokenSource();
         }
 
         var ct = _cts!.Token;
@@ -1126,7 +1157,8 @@ public sealed class OperationBatch : ObservableObject
                 // с одним сервером его итог и есть итог операции — он придёт ниже, один раз
                 if (targets.Count > 1)
                 {
-                    AppLog.ServerLine(LevelOf(result), Outcome(result), result.FullTitle);
+                    // сервер — в самой строке: столбца с ним в журнале нет, а строк здесь несколько
+                    AppLog.ServerLine(LevelOf(result), $"{_operationName} · {result.FullTitle}: {Outcome(result)}", result.FullTitle, LogOf(result));
                 }
 
                 if (entered)
@@ -1154,7 +1186,7 @@ public sealed class OperationBatch : ObservableObject
         if (targets.Count == 1)
         {
             var only = targets[0];
-            AppLog.Write(LevelOf(only), $"{_operationName}: {Outcome(only)}", only.FullTitle);
+            AppLog.Write(LevelOf(only), $"{_operationName}: {Outcome(only)}", only.FullTitle, details: LogOf(only));
         }
         else
         {
@@ -1166,11 +1198,14 @@ public sealed class OperationBatch : ObservableObject
 
             if (bad.Count == 0)
             {
-                AppLog.Success($"{_operationName}: все {targets.Count} {(targets.Any(r => r.WindowLabel.Length > 0) ? "строк(и)" : "сервер(ов)")} — успешно.");
+                AppLog.Write(LogLevel.Success, $"{_operationName}: все {targets.Count} {(targets.Any(r => r.WindowLabel.Length > 0) ? "строк(и)" : "сервер(ов)")} — успешно.", ActionLog.WhereText(targets.Select(r => r.Server)), details: Transcript(targets));
             }
             else
             {
-                AppLog.Error($"{_operationName}: успешно {targets.Count - bad.Count} из {targets.Count}. Не прошли: {string.Join(", ", bad)}.");
+                // только остановленные человеком — предупреждение, как и при одном сервере
+                var level = targets.Any(r => r.Status == OperationStatus.Failed) ? LogLevel.Error : LogLevel.Warning;
+
+                AppLog.Write(level, $"{_operationName}: успешно {targets.Count - bad.Count} из {targets.Count}. Не прошли: {string.Join(", ", bad)}.", ActionLog.WhereText(targets.Select(r => r.Server)), details: Transcript(targets));
             }
         }
     }
@@ -1195,6 +1230,10 @@ public sealed class OperationBatch : ObservableObject
 
         return $"{text} ({result.Duration.TotalSeconds:0.0} с)";
     }
+
+    /// <summary>Вывод сервера для журнала — с той же строкой времени внизу, что в терминале.</summary>
+    private static string LogOf(OperationResult result) =>
+        result.TimeLine is { } time ? result.Output.TrimEnd() + Environment.NewLine + time : result.Output;
 
     private static LogLevel LevelOf(OperationResult result) => result.Status switch
     {

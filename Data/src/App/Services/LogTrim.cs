@@ -22,11 +22,28 @@ public static class LogTrim
     /// <summary>Сколько строк лога достаётся каждому серверу в «Все логи».</summary>
     public static int ShareOf(int servers) => Math.Max(MinPerServer, AllServers / Math.Max(1, servers));
 
+    /// <summary>Не длиннее max символов: так же пятая часть — начало, остальное — конец.</summary>
+    public static string Chars(string text, int max)
+    {
+        if (text.Length <= max)
+        {
+            return text;
+        }
+
+        var head = max / 5;
+
+        return text[..head]
+            + Environment.NewLine
+            + $"… пропущено символов: {text.Length - max:N0} …"
+            + Environment.NewLine
+            + text[(text.Length - (max - head))..];
+    }
+
     /// <summary>
     /// Не длиннее max строк: пятая часть — начало, остальное — конец, между ними одна строка о пропуске.
     /// </summary>
-    /// <param name="button">Кнопка, которой лог копируется целиком, — для строки о пропуске.</param>
-    public static string Lines(string text, int max, string button)
+    /// <param name="button">Кнопка, которой лог копируется целиком, — для строки о пропуске; нет — без неё.</param>
+    public static string Lines(string text, int max, string? button = null)
     {
         var lines = text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
 
@@ -41,7 +58,9 @@ public static class LogTrim
 
         return string.Join(Environment.NewLine, lines.Take(head))
             + Environment.NewLine
-            + $"… пропущено строк: {skipped:N0} — весь лог копирует кнопка «{button}» …"
+            + (button is null
+                ? $"… пропущено строк: {skipped:N0} …"
+                : $"… пропущено строк: {skipped:N0} — весь лог копирует кнопка «{button}» …")
             + Environment.NewLine
             + string.Join(Environment.NewLine, lines.Skip(lines.Length - tail));
     }

@@ -143,15 +143,18 @@ public static class RunHistory
             : ("Непривычные серверы — проверьте перед запуском",
                 string.Join("\n", check.Warnings.Select(w => "• " + w.Line)) + $"\nВкладка «{check.Tab}».");
 
-        AppLog.Info($"Умный режим: {head}.", check.Tab);
+        var where = ActionLog.WhereText(check.Targets);
+        var mode = $"Умный режим · вкладка «{check.Tab}»";
+
+        AppLog.Info($"{mode}: {head}.", where);
 
         if (Choose(head, detail, "Выполнить", null) == 1)
         {
-            AppLog.Info("Умный режим: выполнено по подтверждению.", check.Tab);
+            AppLog.Info($"{mode}: выполнено по подтверждению.", where);
             return true;
         }
 
-        AppLog.Info("Умный режим: запуск отменён.", check.Tab);
+        AppLog.Info($"{mode}: запуск отменён.", where);
         return false;
     }
 

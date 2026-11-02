@@ -26,6 +26,19 @@ public static class ActionLog
     /// <summary>Кто действует на этой стороне проводника: сервер или компьютер.</summary>
     public static ServerEntry Where(IFileSource? source) => source is RemoteSource remote ? remote.Server : Computer;
 
+    /// <summary>Столбец «Где» журнала: сервер, а если их несколько — их число; нет серверов — пусто.</summary>
+    public static string? WhereText(IEnumerable<ServerEntry> servers)
+    {
+        var distinct = servers.DistinctBy(s => s.Id).ToList();
+
+        return distinct.Count switch
+        {
+            0 => null,
+            1 => distinct[0].Display,
+            _ => $"{distinct.Count} сервер(ов)",
+        };
+    }
+
     public static void Success(string summary, ServerEntry? where = null, AppSection? section = null, Workspace? tab = null, IEnumerable<string>? details = null) =>
         Write(LogLevel.Success, summary, where, section, tab, details);
 
@@ -59,10 +72,29 @@ public static class ActionLog
         var (toTerminal, toJournal) = ReferenceEquals(where, Computer) ? (prefs.ComputerTerminal, prefs.ComputerJournal)
             : ReferenceEquals(where, Program) ? (prefs.ProgramTerminal, prefs.ProgramJournal)
             : (prefs.ServerTerminal, prefs.ServerJournal);
+        var lines = details?.ToList() ?? [];
+        var target = tab ?? Active();
+
+        // у ошибок «Проводника» нет прогона с итогом: красная рамка на ярлыке и кнопке раздела — отсюда
+        if (level == LogLevel.Error && resolved == AppSection.Explorer && AppState.Current is { TabsLoaded: true } state)
+        {
+            var failed = tab ?? state.ActiveExplorerTab;
+
+            if (failed.Status != WorkspaceStatus.Running)
+            {
+                failed.ShowStatus("ошибка", string.Empty, WorkspaceStatus.Failed, summary);
+            }
+        }
 
         if (always || toJournal)
         {
-            AppLog.Write(level, summary, ReferenceEquals(where, Program) ? null : where.Display, resolved);
+            // в шапку записи — вкладка раздела действия: открытая может быть из другого раздела
+            var tabName = target is not null && resolved != AppSection.Servers && AppState.Current.SectionOfTab(target) == resolved
+                ? target.Title
+                : null;
+
+            AppLog.Write(level, summary, ReferenceEquals(where, Program) ? null : where.Display, resolved,
+                lines.Count > 0 ? string.Join(Environment.NewLine, lines) : null, tabName);
         }
         else
         {
@@ -70,14 +102,11 @@ public static class ActionLog
             AppLog.Hint(summary, level);
         }
 
-        var target = tab ?? Active();
-
         if (target is null || !(always || toTerminal))
         {
             return;
         }
 
-        var lines = details?.ToList() ?? [];
         var dispatcher = Application.Current?.Dispatcher;
 
         // строки терминала живут в окне — из рабочего потока только через него

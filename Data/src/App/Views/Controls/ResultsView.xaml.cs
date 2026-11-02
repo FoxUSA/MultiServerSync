@@ -1,9 +1,11 @@
 ﻿using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Media;
 using MultiServerSync.Models;
 using MultiServerSync.Services;
 using MultiServerSync.Views.Dialogs;
@@ -35,7 +37,7 @@ public partial class ResultsView : UserControl
         {
             if (IsVisible && Batch is { } batch)
             {
-                foreach (var result in batch.Results)
+                foreach (var result in batch.AllRows)
                 {
                     result.RaiseAgo();
                 }
@@ -88,11 +90,20 @@ public partial class ResultsView : UserControl
     /// <summary>Строки таблицы, когда у копирования есть команды после него: сервер, под ним его команды.</summary>
     private readonly ObservableCollection<OperationResult> _rows = new();
 
+    /// <summary>Соседний прогон показанного: его строки идут в той же таблице.</summary>
+    private OperationBatch? _companion;
+
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
         if (e.OldValue is OperationBatch old)
         {
             old.Results.CollectionChanged -= OnResultsChanged;
+        }
+
+        if (_companion is not null)
+        {
+            _companion.Results.CollectionChanged -= OnResultsChanged;
+            _companion = null;
         }
 
         ShowRows();
@@ -108,14 +119,20 @@ public partial class ResultsView : UserControl
         {
             batch.Results.CollectionChanged += OnResultsChanged;
 
+            if (batch.Companion is { } companion)
+            {
+                _companion = companion;
+                _companion.Results.CollectionChanged += OnResultsChanged;
+            }
+
             // сводка приходит уже заполненной — события не будет, выбираем сами
-            if (batch.Results.Count > 0)
+            if (_rows.Count > 0)
             {
                 Dispatcher.BeginInvoke(new Action(() =>
                 {
-                    if (ResultsGrid.SelectedItem is null && ReferenceEquals(DataContext, batch) && batch.Results.Count > 0)
+                    if (ResultsGrid.SelectedItem is null && ReferenceEquals(DataContext, batch) && _rows.Count > 0)
                     {
-                        ResultsGrid.SelectedItem = batch.Results[0];
+                        ResultsGrid.SelectedItem = _rows[0];
                     }
                 }));
             }
@@ -145,7 +162,7 @@ public partial class ResultsView : UserControl
     /// <summary>Корзина в шапке таблицы: убирает законченные запуски из списка.</summary>
     private void OnClearRuns(object sender, RoutedEventArgs e)
     {
-        if (Batch is not { HasResults: true } batch)
+        if (Batch is not { AllRows.Count: > 0 } batch)
         {
             AppLog.Hint("Список запусков и так пуст.");
             return;
@@ -155,7 +172,7 @@ public partial class ResultsView : UserControl
 
         AppLog.Hint(gone == 0
             ? "Убирать нечего — все запуски в списке ещё идут."
-            : batch.HasResults
+            : batch.AllRows.Count > 0
                 ? $"Список очищен: убрано {gone}, идущие остались."
                 : $"Список запусков очищен: убрано {gone}.");
     }
@@ -165,10 +182,19 @@ public partial class ResultsView : UserControl
     /// (серверы — как в панели слева), между запусками черта. Копирование с командами после него:
     /// под строкой копирования каждого сервера — строки его команд, те же, что в разделе «Команда».
     /// Сам прогон строки не переставляет — на его порядок опираются копирование логов и цепочки.
+    /// Команды мини-терминала идут тем же списком, что и копирование, каким бы ни был показанный прогон.
     /// </summary>
     private void ShowRows()
     {
         var chain = Batch is { } batch ? AppState.Current.AfterCopyBatchOf(batch) : null;
+        var copying = Batch;
+
+        // команды мини-терминала шли последними: показан их прогон, а строки копирования — со своими командами
+        if (chain is null && Batch?.Companion is { } other && AppState.Current.AfterCopyBatchOf(other) is { } otherChain)
+        {
+            chain = otherChain;
+            copying = other;
+        }
 
         if (!ReferenceEquals(chain, _chain))
         {
@@ -201,7 +227,7 @@ public partial class ResultsView : UserControl
 
         // запуски — по номеру; свежий тот, чья строка добавлена позже всех. Строки старых версий без
         // номера — каждая сама по себе
-        var runs = shown.Results
+        var runs = shown.AllRows
             .Select((row, index) => (Row: row, Index: index))
             .GroupBy(x => x.Row.RunId != 0 ? x.Row.RunId : -(x.Index + 1))
             .OrderByDescending(g => g.Max(x => x.Index));
@@ -217,12 +243,12 @@ public partial class ResultsView : UserControl
                 first = false;
                 rows.Add(row);
 
-                if (following is null)
+                if (following is null || copying is null || !ReferenceEquals(row.Batch, copying))
                 {
                     continue;
                 }
 
-                if (AppState.AfterRowOf(shown, row, following) is { } after)
+                if (AppState.AfterRowOf(copying, row, following) is { } after)
                 {
                     watched.Add(after);
 
@@ -366,14 +392,34 @@ public partial class ResultsView : UserControl
     }
 
     /// <summary>
-    /// «Сервер» — по содержимому. Ширина «Auto» у таблицы WPF только растёт: однажды показанное
-    /// длинное имя (с названием вкладки) оставляло столбец широким и для коротких. Поэтому при
-    /// каждой смене списка ширина сбрасывается и меряется заново по тому, что показано сейчас.
+    /// «Сервер» — по содержимому, ширина меряется здесь и ставится числом. Сброс «Auto» через ноль
+    /// полагался на замер таблицы: если его не было (панель скрыта, строки ещё не построены),
+    /// столбец оставался на 20 до первого изменения ширины окна.
     /// </summary>
     private void FitServerColumn() => Dispatcher.BeginInvoke(new Action(() =>
     {
-        ServerColumn.Width = new DataGridLength(0);
-        ServerColumn.Width = DataGridLength.Auto;
+        var summary = Batch?.IsSummary == true;
+        var dip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        var mode = TextOptions.GetTextFormattingMode(ResultsGrid);
+
+        double TextWidth(string text, FontFamily font, double size, FontWeight weight) =>
+            new FormattedText(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
+                new Typeface(font, FontStyles.Normal, weight, FontStretches.Normal), size, Brushes.Black, null, mode, dip).WidthIncludingTrailingWhitespace;
+
+        var cellFont = new FontFamily("Consolas");
+        var cells = _rows
+            .Select(r => summary ? r.ScopedShortTitle : r.ShortTitle)
+            .Select(t => TextWidth(t, cellFont, 12, FontWeights.Normal))
+            .DefaultIfEmpty(0)
+            .Max();
+        var head = TextWidth(ServerColumn.Header as string ?? string.Empty, ResultsGrid.FontFamily, 11, FontWeights.SemiBold);
+
+        // 16 — поля ячейки, остальное — запас на рамку и округление до пикселей.
+        // MinWidth вровень: иначе таблица при нехватке места ужмёт столбец и не отдаст обратно
+        var width = Math.Min(ServerColumn.MaxWidth, Math.Ceiling(Math.Max(cells, head) + 22));
+
+        ServerColumn.MinWidth = width;
+        ServerColumn.Width = new DataGridLength(width);
     }), System.Windows.Threading.DispatcherPriority.Background);
 
     /// <summary>Выбранный сервер — тот, чей вывод показывает и отдельное окно.</summary>
@@ -498,6 +544,7 @@ public partial class ResultsView : UserControl
         var detached = OutputWindow.IsOpen;
 
         OutputBox.Visibility = detached ? Visibility.Collapsed : Visibility.Visible;
+        OutputCountdown.Visibility = OutputBox.Visibility;
         DetachedHint.Visibility = detached ? Visibility.Visible : Visibility.Collapsed;
 
         DetachIcon.Symbol = detached ? SymbolRegular.ArrowImport24 : SymbolRegular.WindowNew24;
@@ -516,7 +563,7 @@ public partial class ResultsView : UserControl
     /// <param name="finished">Автокопия: что закончилось — идёт в начало сообщения.</param>
     public void CopyAll(OperationBatch? source, string? finished = null)
     {
-        if (source is not { Results.Count: > 0 } batch)
+        if (source is not { AllRows.Count: > 0 } batch)
         {
             AppLog.Hint("Копировать нечего — результатов пока нет.", LogLevel.Warning);
             return;
@@ -532,10 +579,11 @@ public partial class ResultsView : UserControl
         // «+ команды»: следом вывод личных команд вкладки — один отчёт, сначала копирование
         string Build(int? share) => chain is null
             ? batch.BuildTranscript(share, runsOnly)
-            : "═════ Копирование ═════" + Environment.NewLine + batch.BuildTranscript(share, runsOnly) + Environment.NewLine
+            : OutputFeed.CopyHeader + Environment.NewLine + batch.BuildTranscript(share, runsOnly) + Environment.NewLine
                 + OutputFeed.ChainHeader + Environment.NewLine + chain.BuildTranscript(share, runsOnly);
 
         var text = Build(null);
+        string? cut = null;
 
         // автокопия длиннее LogTrim.AllServers строк подвешивала программу, куда её вставляли (и CopyPass):
         // с «*.txt» — файлом с полным логом, без неё — обрезкой, всем серверам поровну. Кнопка — целиком
@@ -554,18 +602,32 @@ public partial class ResultsView : UserControl
                 return;
             }
 
+            var whole = text;
             text = Build(LogTrim.ShareOf(batch.Results.Count + (chain?.Results.Count ?? 0)));
+            cut = CutNote(whole, text);
         }
 
         if (ClipboardText.CopyTerminalOutput(text, auto: finished is not null, tab))
         {
-            AppLog.Hint((finished is not null ? $"{finished} — вывод всех серверов скопирован в буфер обмена: " : "Вывод скопирован в буфер обмена: ")
-                + $"серверов {batch.Results.Count}, строк {text.Split('\n').Length}.", level);
+            // автокопия целиком — молча: об окончании уже сказал итог, сбой буфера скажет сам
+            if (cut is not null)
+            {
+                AppLog.Hint(cut, level);
+            }
+            else if (finished is null)
+            {
+                AppLog.Echo($"Вывод скопирован в буфер обмена: запусков {batch.AllRows.Count}, строк {text.Split('\n').Length}.");
+            }
         }
     }
 
     /// <summary>Автокопия после удачного запуска — плашка зелёная. Кнопка и неудачный запуск — обычная.</summary>
     private static LogLevel FinishedLevel(bool succeeded) => succeeded ? LogLevel.Success : LogLevel.Info;
+
+    /// <summary>Плашка об обрезанной автокопии; null — обрезать оказалось нечего.</summary>
+    private static string? CutNote(string whole, string sent) => whole == sent
+        ? null
+        : $"В буфере обрезанный лог: {LogTrim.Count(sent):N0} строк из {LogTrim.Count(whole):N0}.";
 
     /// <summary>
     /// Галочка «после …» у текущего окна. Срабатывает, где бы человек ни был — на другой
@@ -574,10 +636,13 @@ public partial class ResultsView : UserControl
     /// </summary>
     public void CopyCurrentAfter(OperationBatch batch, string finished)
     {
-        // строки разовых действий — не в счёт: автокопия про запуск
-        var result = ReferenceEquals(Batch, batch) && ResultsGrid.SelectedItem is OperationResult { IsAction: false } shown
+        // строки разовых действий и прошлых запусков — не в счёт: автокопия про запуск, что закончился
+        bool Usable(OperationResult row) => !row.IsAction
+            && (batch.LastRun.Count == 0 || batch.LastRun.Any(r => r.RunId == (row.Parent ?? row).RunId));
+
+        var result = ReferenceEquals(Batch, batch) && ResultsGrid.SelectedItem is OperationResult shown && Usable(shown)
             ? shown
-            : batch.Picked is { IsAction: false } picked && batch.Results.Contains(picked)
+            : batch.Picked is { } picked && batch.Results.Contains(picked) && Usable(picked)
                 ? picked
                 : batch.LastRun.FirstOrDefault() ?? batch.Results.FirstOrDefault(r => !r.IsAction);
 
@@ -624,28 +689,12 @@ public partial class ResultsView : UserControl
             : null;
         var level = FinishedLevel(auto && result.Status == OperationStatus.Success && after?.Status is null or OperationStatus.Success);
 
-        // имя и адрес сервера сверху — иначе в буфере не понять, к чему лог;
+        // в буфер — то же, что показано в выводе: шапка с сервером, разделом и вкладкой,
         // «+ команды» — следом вывод личных команд этого же сервера
-        string Build(int? max)
-        {
-            var output = result.Output.TrimEnd();
-            output = max is { } m ? LogTrim.Lines(output, m, "Текущий лог") : output;
-
-            var text = result.CopyHeader(batch?.IsSummary == true) + Environment.NewLine + output
-                + (result.TimeLine is { } time ? Environment.NewLine + time : string.Empty);
-
-            if (after?.Output.TrimEnd() is { Length: > 0 } afterText)
-            {
-                afterText = max is { } am ? LogTrim.Lines(afterText, am, "Текущий лог") : afterText;
-                text = "═════ Копирование ═════" + Environment.NewLine + text + Environment.NewLine + Environment.NewLine
-                    + OutputFeed.ChainHeader + Environment.NewLine + afterText
-                    + (after.TimeLine is { } afterTime ? Environment.NewLine + afterTime : string.Empty);
-            }
-
-            return text;
-        }
+        string Build(int? max) => OutputFeed.Compose(result, after, max, "Текущий лог").TrimEnd();
 
         var full = Build(null);
+        string? cut = null;
 
         // автокопия длиннее LogTrim.PerServer строк: с «*.txt» — файлом с полным логом, без неё — обрезкой
         if (auto && LogTrim.Count(full) > LogTrim.PerServer)
@@ -660,14 +709,22 @@ public partial class ResultsView : UserControl
                 return;
             }
 
+            var whole = full;
             full = Build(LogTrim.PerServer);
+            cut = CutNote(whole, full);
         }
 
         if (ClipboardText.CopyTerminalOutput(full + Environment.NewLine, auto: auto, tab))
         {
-            AppLog.Hint(finished is not null
-                ? $"{finished} — вывод скопирован в буфер обмена: {result.Title}."
-                : $"Вывод скопирован: {result.Title}.", level);
+            // автокопия целиком — молча: об окончании уже сказал итог, сбой буфера скажет сам
+            if (cut is not null)
+            {
+                AppLog.Hint(cut, level);
+            }
+            else if (!auto)
+            {
+                AppLog.Echo($"Вывод скопирован: {result.Title}.");
+            }
         }
     }
 

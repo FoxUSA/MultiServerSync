@@ -184,7 +184,7 @@ public partial class DownloadPage : Page
 
         if (ClipboardText.Copy(path))
         {
-            AppLog.Hint("Путь скопирован: " + path);
+            AppLog.Echo("Путь скопирован: " + path);
         }
     }
 
@@ -305,7 +305,7 @@ public partial class DownloadPage : Page
     {
         if (sender is FrameworkElement { DataContext: DownloadItem item } && ClipboardText.Copy(item.Path))
         {
-            AppLog.Hint("Путь скопирован: " + item.Path);
+            AppLog.Echo("Путь скопирован: " + item.Path);
         }
     }
 
@@ -363,9 +363,19 @@ public partial class DownloadPage : Page
 
         if (Workspace is { Downloads.Count: > 0 } workspace)
         {
-            var gone = workspace.Downloads.Select(i => $"{i.ServerLabel}: {i.Path}").ToList();
-            workspace.Downloads.Clear();
-            ActionLog.Info($"Список скачивания очищен: убрано {gone.Count}", null, AppSection.Download, workspace, gone);
+            // отмеченные, а без отметок — все строки окна
+            var picked = workspace.Downloads.Where(i => i.IsSelected).ToList();
+            var gone = picked.Count > 0 ? picked : workspace.Downloads.ToList();
+
+            foreach (var item in gone)
+            {
+                workspace.Downloads.Remove(item);
+            }
+
+            ActionLog.Info(workspace.Downloads.Count == 0
+                ? $"Список скачивания очищен: убрано {gone.Count}"
+                : $"Из списка скачивания убрано: {gone.Count} · осталось {workspace.Downloads.Count}",
+                null, AppSection.Download, workspace, gone.Select(i => $"{i.ServerLabel}: {i.Path}").ToList());
         }
     }
 

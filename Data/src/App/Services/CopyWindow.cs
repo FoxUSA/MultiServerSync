@@ -144,6 +144,14 @@ public sealed class CopyWindow : ObservableObject
 
     public bool IsNotPaneLocked => !_owner.IsPaneLocked;
 
+    /// <summary>У окна действуют исключения: свои или глобальные. Таблица показывает столбцы со звёздочкой.</summary>
+    public bool HasFilters => !_owner.ExcludesOf(this).IsEmpty;
+
+    /// <summary>Какие столбцы размера выбраны при исключениях: память вкладки, одна на её окна.</summary>
+    public IReadOnlyList<string>? SizeColumnsShown => _owner.SizeColumnsShown;
+
+    public void SetSizeColumnsShown(List<string> shown) => _owner.SetSizeColumnsShown(shown);
+
     public IReadOnlyList<string> Notices => IsLast ? _owner.Notices : [];
 
     public bool HasNotices => Notices.Count > 0;
@@ -199,6 +207,14 @@ public sealed class CopyWindow : ObservableObject
                 break;
             case nameof(Workspace.IsPaneLocked):
                 RaiseMany(nameof(IsPaneLocked), nameof(IsNotPaneLocked));
+                break;
+            case nameof(Workspace.ExcludeMasks):
+            case nameof(Workspace.UseGlobalExcludes):
+            case nameof(Workspace.HasGlobalExcludes):
+                Raise(nameof(HasFilters));
+                break;
+            case nameof(Workspace.SizeColumnsShown):
+                Raise(nameof(SizeColumnsShown));
                 break;
         }
     }

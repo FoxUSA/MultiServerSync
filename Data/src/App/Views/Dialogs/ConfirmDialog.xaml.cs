@@ -1,19 +1,19 @@
 using System.Windows;
+using System.Windows.Input;
 using Wpf.Ui.Controls;
 
 namespace MultiServerSync.Views.Dialogs;
 
 /// <summary>
 /// Подтверждение действия в оформлении программы. Кнопка согласия называет само действие
-/// («Удалить», «Закрыть набор»), а не безликое «Да»; фокус стоит на «Отмене»,
-/// так что случайный Enter ничего не сносит. Удаление и замену, о которых только что
-/// попросили сами, Enter подтверждает (enterConfirms). Esc — отмена всегда.
+/// («Удалить», «Закрыть набор»), а не безликое «Да». Enter — согласие, Esc — отмена.
+/// Зажатый Enter не считается: окно могло открыться от него же.
 /// </summary>
 public partial class ConfirmDialog : FluentWindow
 {
     private int _choice;
 
-    private ConfirmDialog(string headline, string detail, string confirmText, string? extraText, string cancelText, bool enterConfirms)
+    private ConfirmDialog(string headline, string detail, string confirmText, string? extraText, string cancelText)
     {
         InitializeComponent();
 
@@ -29,15 +29,9 @@ public partial class ConfirmDialog : FluentWindow
             ExtraButton.Visibility = Visibility.Visible;
         }
 
-        if (enterConfirms)
-        {
-            ConfirmButton.IsDefault = true;
-            Loaded += (_, _) => ConfirmButton.Focus();
-        }
-        else
-        {
-            Loaded += (_, _) => CancelButton.Focus();
-        }
+        ConfirmButton.IsDefault = true;
+        Loaded += (_, _) => ConfirmButton.Focus();
+        PreviewKeyDown += (_, e) => e.Handled = e.Key == Key.Enter && e.IsRepeat;
     }
 
     /// <summary>Спрашивает и возвращает true, только если нажали кнопку действия.</summary>
@@ -45,16 +39,15 @@ public partial class ConfirmDialog : FluentWindow
     /// <param name="detail">Что будет последствием. Пусто — строки нет.</param>
     /// <param name="confirmText">Подпись кнопки согласия: само действие.</param>
     /// <param name="cancelText">Подпись кнопки отказа.</param>
-    /// <param name="enterConfirms">Enter нажимает кнопку действия: удаление и замена, о которых только что попросили.</param>
-    public static bool Ask(Window? owner, string headline, string detail, string confirmText, string cancelText = "Отмена", bool enterConfirms = false) =>
-        Choose(owner, headline, detail, confirmText, null, null, out _, cancelText, enterConfirms) == 1;
+    public static bool Ask(Window? owner, string headline, string detail, string confirmText, string cancelText = "Отмена") =>
+        Choose(owner, headline, detail, confirmText, null, null, out _, cancelText) == 1;
 
     /// <summary>
     /// То же с третьей кнопкой между согласием и отказом. 0 — отказ (и Esc, и крестик),
     /// 1 — кнопка действия, 2 — третья кнопка.
     /// </summary>
-    public static int Choose(Window? owner, string headline, string detail, string confirmText, string? extraText, string cancelText = "Отмена", bool enterConfirms = false) =>
-        Choose(owner, headline, detail, confirmText, extraText, null, out _, cancelText, enterConfirms);
+    public static int Choose(Window? owner, string headline, string detail, string confirmText, string? extraText, string cancelText = "Отмена") =>
+        Choose(owner, headline, detail, confirmText, extraText, null, out _, cancelText);
 
     /// <summary>То же с галочкой слева от кнопок — например, «больше не спрашивать».</summary>
     /// <param name="optionText">Подпись галочки; пусто — галочки нет.</param>
@@ -67,10 +60,9 @@ public partial class ConfirmDialog : FluentWindow
         string? extraText,
         string? optionText,
         out bool option,
-        string cancelText = "Отмена",
-        bool enterConfirms = false)
+        string cancelText = "Отмена")
     {
-        var dialog = new ConfirmDialog(headline, detail, confirmText, extraText, cancelText, enterConfirms);
+        var dialog = new ConfirmDialog(headline, detail, confirmText, extraText, cancelText);
 
         if (!string.IsNullOrEmpty(optionText))
         {

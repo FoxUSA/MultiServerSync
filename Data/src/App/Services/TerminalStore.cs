@@ -62,9 +62,14 @@ public static class TerminalStore
                 Text = e.Text,
                 Scope = e.Scope,
                 Section = e.Section,
+                Tab = e.Tab,
                 IsServerLine = e.IsServerLine,
+                Output = e.Output,
             }));
         }
+
+        // логи прошлых запусков могли перерасти предел из настроек
+        Task.Run(JournalOutput.Trim);
 
         _loaded = true;
         _dirty = false;
@@ -103,7 +108,9 @@ public static class TerminalStore
                 Text = e.Text,
                 Scope = e.Scope,
                 Section = e.Section,
+                Tab = e.Tab,
                 IsServerLine = e.IsServerLine,
+                Output = e.Output,
             })
             .ToList();
 

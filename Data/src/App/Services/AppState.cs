@@ -49,6 +49,9 @@ public sealed class AppState : ObservableObject
     /// </summary>
     private Workspace? _commandBeforeJump;
     private Workspace? _jumpedTo;
+
+    /// <summary>Личная вкладка, только что созданная кнопкой: уйдут с неё пустой — её как не было.</summary>
+    private Workspace? _freshPersonal;
     private AppSection _section = AppSection.Servers;
 
     public static AppState Current { get; } = new();
@@ -1219,6 +1222,9 @@ public sealed class AppState : ObservableObject
     /// <summary>Открытая вкладка «Скачивания» — даже когда на экране другой раздел.</summary>
     public Workspace ActiveDownloadTab => _activeDownload ?? DownloadTabs[0];
 
+    /// <summary>Открытая вкладка «Проводника» — даже когда на экране другой раздел.</summary>
+    public Workspace ActiveExplorerTab => _activeExplorer ?? ExplorerTabs[0];
+
     /// <summary>Просьба показать вкладку другого раздела: окно переключает раздел и вкладку.</summary>
     public event Action<Workspace>? TabShowRequested;
 
@@ -1247,6 +1253,8 @@ public sealed class AppState : ObservableObject
     /// <summary>Щелчок по кнопке «Команды» из личной вкладки: обычная лента и прежняя вкладка.</summary>
     public void LeaveJump()
     {
+        DropUntouchedPersonal();
+
         if (_jumpedTo is not null && ReferenceEquals(_activeCommand, _jumpedTo))
         {
             ActiveWorkspace = CommandBeforeJump;
@@ -1258,6 +1266,8 @@ public sealed class AppState : ObservableObject
 
     private void ReturnFromJump()
     {
+        DropUntouchedPersonal();
+
         if (_jumpedTo is not null && ReferenceEquals(_activeCommand, _jumpedTo))
         {
             _activeCommand = CommandBeforeJump;
@@ -1266,6 +1276,27 @@ public sealed class AppState : ObservableObject
 
         _commandBeforeJump = null;
         _jumpedTo = null;
+    }
+
+    /// <summary>
+    /// Нажали «Создать команды после копирования», сходили в «Команды» и вернулись, ничего не написав:
+    /// вкладка как не создавалась — убирается молча, без журнала и отмены, свитч у родителя гаснет.
+    /// Личная, в которой что-то уже есть или идёт команда, остаётся.
+    /// </summary>
+    private void DropUntouchedPersonal()
+    {
+        var fresh = _freshPersonal;
+        _freshPersonal = null;
+
+        if (fresh is null || !CommandTabs.Contains(fresh) || !fresh.AllStepsEmpty || fresh.CommandBatch.HasResults || fresh.IsBusy)
+        {
+            return;
+        }
+
+        CommandTabs.Remove(fresh);
+        fresh.Owner?.UnlinkPersonal();
+        SaveWorkspaces();
+        AppLog.Debug($"Личная вкладка «{fresh.Title}» осталась пустой — убрана.");
     }
 
     /// <summary>Раздел, к которому относится вкладка.</summary>
@@ -1345,6 +1376,9 @@ public sealed class AppState : ObservableObject
         CommandTabs.Add(personal);
         copy.LinkPersonal(personal);
         SaveWorkspaces();
+
+        // уйдут с неё, не написав ни одной команды, — вкладка уберётся сама
+        _freshPersonal = personal;
 
         AppLog.Hint($"Создана личная вкладка команд для «{copy.Title}».");
         return personal;
@@ -1518,13 +1552,15 @@ public sealed class AppState : ObservableObject
         // закрыли личную — у родителя свитч гаснет
         workspace.Owner?.UnlinkPersonal();
 
+        var wasJumped = ReferenceEquals(workspace, _jumpedTo) && ReferenceEquals(_activeCommand, workspace);
+
         if (ReferenceEquals(_active, workspace) || ReferenceEquals(_activeCommand, workspace)
             || ReferenceEquals(_activeDownload, workspace) || ReferenceEquals(_activeExplorer, workspace))
         {
             // соседа — из той же ленты: архивные вкладки лежат в том же списке, и сосед по списку
             // мог оказаться архивным — тогда лента шла за ним и сама открывала архив.
             // Закрыли личную, на которую перешли, — вид кончился, раздел на прежней вкладке
-            ActiveWorkspace = ReferenceEquals(workspace, _jumpedTo)
+            ActiveWorkspace = wasJumped
                 ? CommandBeforeJump
                 : NeighborInStrip(tabs, index, workspace.IsArchived);
         }
@@ -1532,7 +1568,31 @@ public sealed class AppState : ObservableObject
         SaveWorkspaces();
         UndoJournal.TabClosed(place);
         ActionLog.Info($"Вкладка «{workspace.Title}» закрыта", null, place.Section);
+
+        // закрыли личную, на которой стояли, — назад туда, откуда в неё пришли: к её вкладке копирования
+        if (wasJumped && place.Owner is { } back)
+        {
+            ShowTab(back);
+        }
+
         return true;
+    }
+
+    /// <summary>Вкладка, что стоит сейчас в лентах; нет — она закрыта.</summary>
+    public Workspace? LiveTab(string id) => AllWorkspaces.FirstOrDefault(w => w.Id == id);
+
+    /// <summary>Закрытая вкладка из файла отмены: пока её не вернули, в лентах её нет и за файлами она не следит.</summary>
+    public Workspace RebuildTab(WorkspaceState state)
+    {
+        var tab = new Workspace(state.Id, state.Title, isMain: false);
+
+        tab.SyncServers(Servers);
+        tab.SelectServers(state.SelectedServerIds ?? []);
+        tab.SelectCommandServers(state.CommandServerIds ?? []);
+        tab.Restore(state);
+        tab.StopWatching();
+
+        return tab;
     }
 
     /// <summary>Вернуть закрытую вкладку на её место — ту же самую, с её терминалом и содержимым.</summary>
@@ -2187,7 +2247,7 @@ public sealed class AppState : ObservableObject
         }
         catch (Exception ex)
         {
-            AppLog.Error($"Не удалось прочитать {Path.GetFileName(path)}: {ex.Message}");
+            AppLog.General(LogLevel.Error, $"Не удалось прочитать {Path.GetFileName(path)}: {ex.Message}");
             return null;
         }
     }
@@ -2200,7 +2260,7 @@ public sealed class AppState : ObservableObject
         }
         catch (Exception ex)
         {
-            AppLog.Error($"Не удалось сохранить {Path.GetFileName(path)}: {ex.Message}");
+            AppLog.General(LogLevel.Error, $"Не удалось сохранить {Path.GetFileName(path)}: {ex.Message}");
         }
     }
 }

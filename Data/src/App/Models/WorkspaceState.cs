@@ -142,6 +142,12 @@ public sealed class WorkspaceState
     /// <summary>Замок: серверы, за которыми закреплена вкладка. null — замка нет.</summary>
     public List<string>? LockedServerIds { get; set; }
 
+    /// <summary>Какие столбцы размера показаны при исключениях, если выбирали сами. null — по умолчанию, со звёздочкой.</summary>
+    public List<string>? SizeColumnsShown { get; set; }
+
+    /// <summary>Галочка «Весь журнал».</summary>
+    public bool JournalWhole { get; set; }
+
     public bool? PaneShowUser { get; set; }
 
     /// <summary>

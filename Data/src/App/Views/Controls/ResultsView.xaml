@@ -112,10 +112,10 @@
             MinHeight="0"
             Margin="0,0,4,0"
             VerticalAlignment="Center"
-            Content="Сохранять лог"
+            Content="Сохранять вывод"
             FontSize="11"
             IsChecked="{Binding KeepLog, Mode=TwoWay}"
-            ToolTip="Своя у каждой вкладки. Отмечено — терминал вкладки хранит все запуски, пока галочку не снять. Снято — запуск позже срока «Хранить лог» после окончания прошлого начинает терминал заново." />
+            ToolTip="Своя у каждой вкладки. Отмечено — терминал вкладки хранит все запуски, пока галочку не снять. Снято — запуск позже срока «Хранить вывод» после окончания прошлого начинает терминал заново." />
         </StackPanel>
 
       <Grid
@@ -171,10 +171,12 @@
             <ui:SymbolIcon FontSize="17" Symbol="Copy24" />
           </ui:Button.Icon>
         </ui:Button>
+        <!--  без левого отступа темы (11): зазор до «Текущий лог» такой же, как между кнопками  -->
         <CheckBox
           MinWidth="0"
           MinHeight="0"
           Margin="0,0,4,0"
+          Padding="0,5,11,6"
           VerticalAlignment="Center"
           Content="авто"
           FontSize="11"
@@ -521,6 +523,10 @@
                 <SolidColorBrush x:Key="TextControlFocusedBorderBrush" Color="Transparent" />
               </RichTextBox.Resources>
             </RichTextBox>
+
+            <controls:CommandCountdown
+              x:Name="OutputCountdown"
+              DataContext="{Binding SelectedItem, ElementName=ResultsGrid}" />
 
             <!--  панель остаётся на месте, но пока открыто отдельное окно — вывод в нём  -->
             <TextBlock

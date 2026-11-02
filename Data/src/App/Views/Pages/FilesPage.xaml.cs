@@ -23,7 +23,16 @@ public partial class FilesPage : Page
         InitializeComponent();
 
         DataContext = AppState.Current.ActiveWorkspace;
-        AppState.Current.ActiveWorkspaceChanged += workspace => DataContext = workspace;
+        AppState.Current.ActiveWorkspaceChanged += workspace =>
+        {
+            DataContext = workspace;
+
+            // открыли другую вкладку — размер и файлы в её строках свежие
+            if (IsVisible && AppState.Current.Workspaces.Contains(workspace))
+            {
+                _ = workspace.RefreshItemsInfoAsync();
+            }
+        };
 
         Controls.CopyWindowLayout.Follow(WindowsScroll, WindowsList);
         Controls.CopyWindowLayout.Reorder(WindowsScroll, WindowsList, () => Workspace);
@@ -209,7 +218,7 @@ public partial class FilesPage : Page
     {
         if (sender is FrameworkElement { DataContext: TransferItem item } && ClipboardText.Copy(item.FullPath))
         {
-            AppLog.Hint("Путь скопирован: " + item.FullPath);
+            AppLog.Echo("Путь скопирован: " + item.FullPath);
         }
     }
 
@@ -226,7 +235,7 @@ public partial class FilesPage : Page
 
         if (ClipboardText.Copy(path))
         {
-            AppLog.Hint("Путь скопирован: " + path);
+            AppLog.Echo("Путь скопирован: " + path);
         }
     }
 
@@ -282,9 +291,14 @@ public partial class FilesPage : Page
             return;
         }
 
-        var gone = workspace.Items.Select(i => i.FullPath).ToList();
-        workspace.Items.Clear();
-        ActionLog.Info($"Список копирования очищен: убрано {gone.Count}", null, AppSection.Files, workspace, gone);
+        // отмеченные, а без отметок — все строки окна
+        var picked = workspace.Items.Where(i => i.IsSelected).ToList();
+        var gone = picked.Count > 0 ? picked : workspace.Items.ToList();
+        workspace.RemoveItems(gone);
+        ActionLog.Info(workspace.Items.Count == 0
+            ? $"Список копирования очищен: убрано {gone.Count}"
+            : $"Из списка копирования убрано: {gone.Count} · осталось {workspace.Items.Count}",
+            null, AppSection.Files, workspace, gone.Select(i => i.FullPath).ToList());
     }
 
     private void OnToggleAllItems(object sender, RoutedEventArgs e) => Workspace?.ToggleAllItems();
@@ -477,8 +491,7 @@ public partial class FilesPage : Page
     {
         var all = AppState.Current.Workspaces.ToList();
 
-        // широкое действие: копирование уходит со всех вкладок сразу — сначала спросить.
-        // По умолчанию фокус на «Отмене»
+        // широкое действие: копирование уходит со всех вкладок сразу — сначала спросить
         if (!ConfirmDialog.Ask(
                 Window.GetWindow(this),
                 $"Запустить копирование на всех вкладках ({all.Count})?",

@@ -144,25 +144,50 @@ public static class UpdateService
         return remote;
     }
 
-    /// <summary>Проверка при каждом запуске: в журнал — итог, в шапку окна — кнопка, если есть что ставить.</summary>
+    /// <summary>
+    /// Проверка при каждом запуске: в журнал — только если есть что ставить, тогда и кнопка в шапке окна.
+    /// Обновлений нет или byfox.dev не ответил — лишь строка в файле: на каждый запуск журнал не засоряем.
+    /// </summary>
     public static async Task CheckOnStartupAsync()
     {
+        NoteInstalled();
+
         try
         {
             var release = await CheckAsync();
 
             if (release is null)
             {
-                AppLog.Info($"Обновлений нет, установлена последняя версия {AppVersion.Version}.");
+                AppLog.Debug($"Обновлений нет, установлена последняя версия {AppVersion.Version}.");
                 return;
             }
 
-            AppLog.Success(
+            AppLog.General(LogLevel.Success,
                 $"Доступно обновление {release.Caption}. Установить — кнопкой «Обновление» в шапке окна.");
         }
         catch (Exception ex)
         {
-            AppLog.Warn("Проверить обновления не удалось: " + ex.Message);
+            AppLog.Debug("Проверить обновления не удалось: " + ex.Message);
+        }
+    }
+
+    /// <summary>Версия сменилась с прошлого запуска — обновление прошло: установку заканчивает лаунчер, сама программа уже закрыта.</summary>
+    private static void NoteInstalled()
+    {
+        var settings = AppState.Current.Settings;
+        var before = settings.LastRunVersion;
+
+        if (before == AppVersion.Version)
+        {
+            return;
+        }
+
+        settings.LastRunVersion = AppVersion.Version;
+        AppState.Current.SaveSettings();
+
+        if (before.Length > 0)
+        {
+            AppLog.General(LogLevel.Success, $"Программа обновлена: {before} → {AppVersion.Version}.");
         }
     }
 
@@ -264,7 +289,7 @@ public static class UpdateService
         progress.Report(new UpdateProgress(
             UpdateStage.Ready, $"Версия {version} скачана и готова к установке."));
 
-        AppLog.Success($"Обновление {version} скачано и подготовлено.");
+        AppLog.General(LogLevel.Success, $"Обновление {version} скачано и подготовлено.");
         return version;
     }
 
@@ -393,7 +418,7 @@ public static class UpdateService
         }
         else
         {
-            AppLog.Warn("В архиве нет лаунчера — обновится только папка Data.");
+            AppLog.General(LogLevel.Warning, "В архиве нет лаунчера — обновится только папка Data.");
         }
 
         progress.Report(new UpdateProgress(UpdateStage.Staging, "Готовим замену файлов…"));
@@ -500,7 +525,7 @@ public static class UpdateService
 
         Process.Start(info);
 
-        AppLog.Info("Программа закрывается: лаунчер устанавливает обновление.");
+        AppLog.General(LogLevel.Info, "Программа закрывается: лаунчер устанавливает обновление.");
         App.Quit();
     }
 

@@ -322,4 +322,19 @@
     </Setter>
   </Style>
 
+  <!--  узкий столбец галочек: галочка 16 и зазор 4 от границ столбца, без полей обычной ячейки  -->
+  <Style
+    x:Key="CheckColumnCellStyle"
+    BasedOn="{StaticResource FirstColumnCellStyle}"
+    TargetType="DataGridCell">
+    <Setter Property="Padding" Value="0" />
+  </Style>
+
+  <Style
+    x:Key="CheckColumnHeaderStyle"
+    BasedOn="{StaticResource FirstColumnHeaderStyle}"
+    TargetType="DataGridColumnHeader">
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+  </Style>
 </ResourceDictionary>

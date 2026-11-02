@@ -254,6 +254,7 @@
               <Grid Margin="0,4,0,0" GotKeyboardFocus="OnStepFocused">
                 <ui:TextBox
                   x:Name="Box"
+                  controls:EmptyAreaSelect.IsOn="True"
                   AcceptsReturn="True"
                   AcceptsTab="True"
                   ClearButtonEnabled="False"
@@ -523,7 +524,7 @@
         </ItemsControl>
       </ScrollViewer>
 
-      <!--  «не вставлено» — посреди окон, крупно: в углу окна такую плашку не замечали  -->
+      <!--  «не вставлено» — посреди окон: в углу окна такую плашку не замечали  -->
       <controls:ActionToast
         x:Name="PasteToast"
         Grid.Row="1"
@@ -574,7 +575,6 @@
           Style="{StaticResource DangerSwitchStyle}"
           ToolTip="Включено — «Выполнить» запускает команды сразу во всех командных вкладках, каждая со своими окнами и серверами, после вопроса. Личные вкладки копирования не запускаются. Итог по каждой — на её ярлыке" />
 
-        <controls:UndoButtons Margin="8,0,0,0" VerticalAlignment="Center" />
       </StackPanel>
 
       <TextBlock

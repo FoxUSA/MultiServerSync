@@ -69,7 +69,7 @@ public partial class MainWindow : FluentWindow
             JournalTab.IsChecked = true;
         }
 
-        // умный режим спрашивает посреди окна; фокус на «Отменить», так что случайный Enter не запустит
+        // умный режим спрашивает посреди окна
         SmartSwitch.IsChecked = settings.SmartMode;
         RunHistory.Choose = (headline, detail, confirm, extra) =>
             ConfirmDialog.Choose(this, headline, detail, confirm, extra, "Отменить");
@@ -114,7 +114,6 @@ public partial class MainWindow : FluentWindow
             FollowActive();
             TabStrip.SelectedItem = workspace;
             WatchSeenFailure();
-            ShowUndo();
         };
         AppState.Current.ArchiveChanged += _ => FollowActive();
 
@@ -150,10 +149,6 @@ public partial class MainWindow : FluentWindow
             if (e.PropertyName == nameof(AppState.Section))
             {
                 ShowSection();
-            }
-            else if (e.PropertyName == nameof(AppState.ActiveServerSet))
-            {
-                ShowUndo();
             }
         };
         ShowSection();
@@ -196,9 +191,6 @@ public partial class MainWindow : FluentWindow
             // записи загрузки плашкой не показываем — только то, что сделано после открытия окна
             AppLog.Written += ShowToast;
             PreviewMouseLeftButtonUp += RememberPressedButton;
-
-            UndoJournal.Changed += ShowUndo;
-            ShowUndo();
 
             _seenFailureTimer.Tick += (_, _) =>
             {
@@ -258,6 +250,7 @@ public partial class MainWindow : FluentWindow
 
         // сменили раздел — прежняя плашка уже не про то, что на экране
         Toast.HideNow();
+        CenterToasts.Clear();
         PageFrame.Navigate(page);
     }
 
@@ -317,19 +310,7 @@ public partial class MainWindow : FluentWindow
         _unseenFailures.RemoveWhere(tab => State.SectionOfTab(tab) == section);
         ShowSectionMarks();
         WatchSeenFailure();
-        ShowUndo();
     }
-
-    /// <summary>Значок в ряду разделов: виден, пока в открытом разделе есть закрытая или переименованная вкладка.</summary>
-    private void ShowUndo()
-    {
-        var action = UndoJournal.TabActionName();
-
-        TabActionButton.Visibility = action is null ? Visibility.Collapsed : Visibility.Visible;
-        TabActionButton.ToolTip = $"Отменить: {action}";
-    }
-
-    private void OnUndoTabAction(object sender, RoutedEventArgs e) => UndoJournal.UndoTabAction();
 
     /// <summary>В поле ввода клавиши отменяют его собственный набор, а не действие вкладки.</summary>
     private void UndoKey(bool undo)
@@ -349,24 +330,29 @@ public partial class MainWindow : FluentWindow
         }
     }
 
-    /// <summary>Вкладки, кончившие ошибкой, пока их раздел был не на экране. Гаснут, когда в раздел заходят.</summary>
+    /// <summary>Вкладки с ошибкой или предупреждением, пока их раздел был не на экране. Гаснут, когда в раздел заходят.</summary>
     private readonly HashSet<Workspace> _unseenFailures = new();
 
     private readonly System.Windows.Threading.DispatcherTimer _seenFailureTimer = new() { Interval = TimeSpan.FromSeconds(2) };
 
-    /// <summary>Открытая вкладка с красной рамкой, если человек сейчас в программе и видит её.</summary>
+    private static bool IsError(Workspace tab) => tab.Status is WorkspaceStatus.Failed or WorkspaceStatus.Partial;
+
+    /// <summary>Статус с рамкой, которая ждёт человека: красной при ошибке, оранжевой при предупреждении.</summary>
+    private static bool NeedsAttention(Workspace tab) => IsError(tab) || tab.Status == WorkspaceStatus.Warning;
+
+    /// <summary>Открытая вкладка с красной или оранжевой рамкой, если человек сейчас в программе и видит её.</summary>
     private Workspace? SeenFailure()
     {
         var tab = State.ActiveWorkspace;
 
-        return IsActive && tab.Status is WorkspaceStatus.Failed or WorkspaceStatus.Partial && State.SectionOfTab(tab) == State.Section
+        return IsActive && NeedsAttention(tab) && State.SectionOfTab(tab) == State.Section
             ? tab
             : null;
     }
 
     /// <summary>
-    /// Красная рамка нужна, чтобы человек узнал об ошибке: на вкладке перед глазами она быстро гаснет,
-    /// а на той, куда он ещё не перешёл, или пока он в другой программе — стоит и ждёт.
+    /// Красная и оранжевая рамки нужны, чтобы человек узнал об итоге: на вкладке перед глазами они быстро гаснут,
+    /// а на той, куда он ещё не перешёл, или пока он в другой программе — стоят и ждут.
     /// </summary>
     private void WatchSeenFailure()
     {
@@ -415,7 +401,7 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        if (tab.Status is WorkspaceStatus.Failed or WorkspaceStatus.Partial && State.SectionOfTab(tab) != State.Section)
+        if (NeedsAttention(tab) && State.SectionOfTab(tab) != State.Section)
         {
             _unseenFailures.Add(tab);
         }
@@ -434,7 +420,8 @@ public partial class MainWindow : FluentWindow
 
     /// <summary>
     /// Рамка на кнопке раздела, которого нет на экране: красная — там что-то кончилось ошибкой
-    /// без человека, иначе зелёная, пока там что-то идёт. У открытого раздела рамки нет — всё видно на ярлыках.
+    /// без человека, оранжевая — предупреждением, иначе зелёная, пока там что-то идёт.
+    /// У открытого раздела рамки нет — всё видно на ярлыках.
     /// </summary>
     private void ShowSectionMarks()
     {
@@ -442,6 +429,7 @@ public partial class MainWindow : FluentWindow
         Mark(CommandSection, AppSection.Command, State.CommandTabs.Where(t => !t.IsPersonal));
         Mark(FilesSection, AppSection.Files, State.Workspaces);
         Mark(DownloadSection, AppSection.Download, State.DownloadTabs);
+        ShowArchiveMark();
 
         void Mark(DependencyObject button, AppSection section, IEnumerable<Workspace> tabs)
         {
@@ -449,9 +437,15 @@ public partial class MainWindow : FluentWindow
 
             if (State.Section != section)
             {
-                if (tabs.Any(_unseenFailures.Contains))
+                var unseen = tabs.Where(_unseenFailures.Contains).ToList();
+
+                if (unseen.Any(IsError))
                 {
                     status = WorkspaceStatus.Failed;
+                }
+                else if (unseen.Count > 0)
+                {
+                    status = WorkspaceStatus.Warning;
                 }
                 else if (tabs.Any(t => t.Status == WorkspaceStatus.Running))
                 {
@@ -461,6 +455,27 @@ public partial class MainWindow : FluentWindow
 
             Controls.SectionMark.SetStatus(button, status);
         }
+    }
+
+    /// <summary>
+    /// Рамка на значке архива: ярлыков архивных вкладок на основной ленте нет, и без неё работа в архиве не видна.
+    /// Красная — там ошибка, оранжевая — предупреждение, иначе зелёная мигает, пока что-то идёт. Открыт сам архив — ярлыки на виду.
+    /// </summary>
+    private void ShowArchiveMark()
+    {
+        var status = WorkspaceStatus.None;
+
+        if (State.ShowsWorkspaceTabs && !_archiveMode)
+        {
+            var archived = State.Tabs.Where(t => t.IsArchived && !t.IsPersonal).ToList();
+
+            status = archived.Any(t => t.Status is WorkspaceStatus.Failed or WorkspaceStatus.Partial) ? WorkspaceStatus.Failed
+                : archived.Any(t => t.Status == WorkspaceStatus.Warning) ? WorkspaceStatus.Warning
+                : archived.Any(t => t.Status == WorkspaceStatus.Running) ? WorkspaceStatus.Running
+                : WorkspaceStatus.None;
+        }
+
+        Controls.SectionMark.SetStatus(ArchiveRing, status);
     }
 
     /// <summary>
@@ -687,6 +702,7 @@ public partial class MainWindow : FluentWindow
         ComputerJournalBox.IsChecked = prefs.ComputerJournal;
         ProgramTerminalBox.IsChecked = prefs.ProgramTerminal;
         ProgramJournalBox.IsChecked = prefs.ProgramJournal;
+        LogsLimitBox.Value = State.Settings.LogsMaxMb;
 
         // только те строки, что в разделе бывают
         var (server, computer) = OutputKinds(section);
@@ -702,6 +718,32 @@ public partial class MainWindow : FluentWindow
                 cell.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
             }
         }
+    }
+
+    /// <summary>
+    /// Окошко закрыли — применить предел логов. Он удаляет файлы, поэтому не на каждую набранную
+    /// цифру. Берётся текст поля: в закрывшемся окошке набранное значением ещё не стало.
+    /// </summary>
+    private void OnOutputPrefsClosed(object? sender, EventArgs e)
+    {
+        var settings = State.Settings;
+
+        if (!int.TryParse(LogsLimitBox.Text.Replace(" ", string.Empty), out var typed))
+        {
+            return;
+        }
+
+        var megabytes = (int)Math.Clamp(typed, LogsLimitBox.Minimum, LogsLimitBox.Maximum);
+
+        if (megabytes == settings.LogsMaxMb)
+        {
+            return;
+        }
+
+        settings.LogsMaxMb = megabytes;
+        State.SaveSettings();
+        Task.Run(JournalOutput.Trim);
+        ActionLog.Info($"Предел логов на диске: {megabytes} МБ");
     }
 
     /// <summary>
@@ -1059,7 +1101,9 @@ public partial class MainWindow : FluentWindow
         ExplorerServerLock.Visibility = picked.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         ExplorerServerLockIcon.Symbol = tab.IsPaneLocked ? SymbolRegular.LockClosed24 : SymbolRegular.LockOpen24;
         ExplorerServerLock.ToolTip = tab.IsPaneLocked
-            ? "Вкладка закреплена за сервером — щелчок снимает замок"
+            ? tab.ExplorerLockedPath is { Length: > 0 } lockedPath && explorer
+                ? $"Вкладка закреплена за сервером и папкой {lockedPath} — щелчок снимает замок"
+                : "Вкладка закреплена за сервером — щелчок снимает замок"
             : tab.LockTip;
         ExplorerServerTag.Visibility = Visibility.Visible;
     }
@@ -1091,7 +1135,7 @@ public partial class MainWindow : FluentWindow
     private void OnExplorerTagTabChanged(object? sender, PropertyChangedEventArgs e)
     {
         // отметки серверов поднимают и то и другое — подпись перечитывается по любому
-        if (e.PropertyName is nameof(Workspace.ExplorerServer) or nameof(Workspace.SelectionInfo) or nameof(Workspace.IsPaneLocked))
+        if (e.PropertyName is nameof(Workspace.ExplorerServer) or nameof(Workspace.SelectionInfo) or nameof(Workspace.IsPaneLocked) or nameof(Workspace.ExplorerLockedPath))
         {
             ShowExplorerServer();
         }
@@ -1345,6 +1389,10 @@ public partial class MainWindow : FluentWindow
             _tabReorder.FixedCount = _archiveMode ? 0 : 1;
         }
 
+        // личная вкладка одна на ленте: лента ужимается до её ярлыка, рядом встаёт стрелка назад
+        TabStripColumn.Width = _personalShown is null ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
+        BackToOwner.Visibility = _personalShown is null ? Visibility.Collapsed : Visibility.Visible;
+
         TabStrip.SelectedItem = State.ActiveWorkspace;
         UpdateArchiveButton();
     }
@@ -1376,6 +1424,7 @@ public partial class MainWindow : FluentWindow
         ArchiveButton.ToolTip = mode
             ? $"Открыт архив. Щелчок здесь или двойной щелчок по пустому месту ряда разделов — назад к основной ленте. Правый щелчок по ярлыку или перетаскивание сюда — вернуть {what} в основную ленту"
             : $"Архив: щелчок здесь или двойной щелчок по пустому месту ряда разделов — открыть. Убрать сюда {what} — правый щелчок по ярлыку или перетащить ярлык на этот значок";
+        ShowArchiveMark();
     }
 
     /// <summary>
@@ -1595,11 +1644,25 @@ public partial class MainWindow : FluentWindow
         return null;
     }
 
-    /// <summary>Плашка о нажатии: отказ — под нажатой кнопкой, всё остальное посередине окна.</summary>
-    private void ShowToast(LogEntry entry) =>
-        Toast.Show(entry, entry.Level is LogLevel.Warning or LogLevel.Error && DateTime.UtcNow - _pressedAt < PressedButtonLife
-            ? _pressedButton
-            : null);
+    /// <summary>Плашка о нажатии: отказ — под нажатой кнопкой, всё остальное столбиком посередине окна.</summary>
+    private void ShowToast(LogEntry entry)
+    {
+        if (entry.ShownInPlace || entry.IsServerLine)
+        {
+            return;
+        }
+
+        if (entry.Level is LogLevel.Warning or LogLevel.Error
+            && DateTime.UtcNow - _pressedAt < PressedButtonLife
+            && _pressedButton is { } button)
+        {
+            Toast.Show(entry, button);
+        }
+        else
+        {
+            CenterToasts.Show(entry);
+        }
+    }
 
     /// <summary>Запуск без отмеченных серверов: строки целевых серверов мигают тусклым оранжевым.</summary>
     public void FlashTargets()
@@ -1639,55 +1702,10 @@ public partial class MainWindow : FluentWindow
         scale.BeginAnimation(ScaleTransform.ScaleYProperty, pulse);
     }
 
-    /// <summary>
-    /// Свитч на ярлыке копирования. Первое включение создаёт пустую личную вкладку команд
-    /// и сразу ведёт на неё; дальше свитч только включает и выключает запуск после копирования.
-    /// </summary>
-    private void OnAfterCopySwitch(object sender, RoutedEventArgs e)
+    /// <summary>Стрелка справа от ярлыка личной вкладки — назад, к её вкладке копирования.</summary>
+    private void OnBackToOwner(object sender, RoutedEventArgs e)
     {
-        e.Handled = true;
-
-        if (sender is not FrameworkElement { DataContext: Workspace copy })
-        {
-            return;
-        }
-
-        if (!copy.AfterCopyEnabled)
-        {
-            ActionLog.Info($"Команды после копирования выключены: «{copy.Title}»", null, AppSection.Files, copy);
-            return;
-        }
-
-        if (copy.Personal is { } personal)
-        {
-            ActionLog.Info($"Команды после копирования включены: «{copy.Title}»", null, AppSection.Files, copy);
-            return;
-        }
-
-        personal = State.CreatePersonalTab(copy);
-        copy.RaiseChain();
-        State.JumpToPersonal(personal);
-        ShowTab(personal, typeof(CommandPage));
-    }
-
-    /// <summary>Стрелка на ярлыке копирования — в её личные команды.</summary>
-    private void OnGoPersonal(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-
-        if (sender is FrameworkElement { DataContext: Workspace { Personal: { } personal } })
-        {
-            State.JumpToPersonal(personal);
-            ShowTab(personal, typeof(CommandPage));
-        }
-    }
-
-    /// <summary>Стрелка на личной вкладке — назад, к её вкладке копирования.</summary>
-    private void OnGoOwner(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-
-        if (sender is FrameworkElement { DataContext: Workspace { Owner: { } owner } })
+        if (State.PersonalShown is { Owner: { } owner })
         {
             ShowTab(owner, State.DownloadTabs.Contains(owner) ? typeof(DownloadPage) : typeof(FilesPage));
         }

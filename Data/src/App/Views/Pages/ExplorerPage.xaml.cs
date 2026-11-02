@@ -157,6 +157,11 @@ public partial class ExplorerPage : Page
         {
             _ = AttachRemoteAsync(tab);
         }
+
+        if (e.PropertyName == nameof(Workspace.ExplorerLockedPath))
+        {
+            RemotePane.ShowLockLimits();
+        }
     }
 
     private async Task AttachRemoteAsync(Workspace tab)
@@ -188,6 +193,13 @@ public partial class ExplorerPage : Page
             state.Remote.Focus = string.Empty;
         }
 
+        // под замком панель стоит в закреплённой папке, что бы ни помнила вкладка
+        if (tab.ExplorerLockedPath is { Length: > 0 } lockedPath && state.Remote.Path != lockedPath)
+        {
+            state.Remote.Path = lockedPath;
+            state.Remote.Focus = string.Empty;
+        }
+
         var title = string.IsNullOrWhiteSpace(server.User) ? server.PaneLabel : $"{server.PaneLabel} ({server.User})";
         await RemotePane.AttachAsync(_remote, state.Remote, title, ShellIcons.Server);
         UpdateTransferButtons();
@@ -209,6 +221,7 @@ public partial class ExplorerPage : Page
         if (ReferenceEquals(pane, RemotePane))
         {
             _tab.RaiseExplorerPath();
+            _tab.AdoptExplorerLock();
         }
 
         _saveDelay.Stop();
@@ -414,8 +427,7 @@ public partial class ExplorerPage : Page
                 "Заменить",
                 "Пропустить их",
                 "Больше не спрашивать, заменять сразу",
-                out var dontAsk,
-                enterConfirms: true);
+                out var dontAsk);
 
             if (choice == 1 && dontAsk)
             {
@@ -554,8 +566,7 @@ public partial class ExplorerPage : Page
                     $"В папке уже есть {clashes.Count} с такими же именами",
                     $"{list}\n\nПапки при замене сливаются: совпадающие файлы заменяются, лишние в назначении остаются.",
                     "Заменить",
-                    "Пропустить их",
-                    enterConfirms: true);
+                    "Пропустить их");
 
                 if (choice == 0)
                 {
@@ -681,7 +692,7 @@ public partial class ExplorerPage : Page
         }
         catch (Exception ex)
         {
-            AppLog.Error(ex.Message, _tab?.Title);
+            ActionLog.Error(ex.Message, ActionLog.Where(pane.Source), AppSection.Explorer, _tab);
         }
     }
 
@@ -720,7 +731,7 @@ public partial class ExplorerPage : Page
                     }
                 }
 
-                AppLog.Hint($"{(command == PaneCommand.Cut ? "Вырезано" : "Скопировано")} в буфер: {Count(picked)}");
+                AppLog.Echo($"{(command == PaneCommand.Cut ? "Вырезано" : "Скопировано")} в буфер: {Count(picked)}");
                 break;
 
             case PaneCommand.Paste:

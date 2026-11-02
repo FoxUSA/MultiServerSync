@@ -8,6 +8,8 @@ public sealed class SavedTransferItem
     public string Path { get; set; } = string.Empty;
 
     public bool IsSelected { get; set; } = true;
+
+    public RowMemory? Smart { get; set; }
 }
 
 /// <summary>Окно «Копирования» или «Скачивания» в файле вкладки: свой список, путь или папка, параметры.</summary>
@@ -155,6 +157,12 @@ public sealed class AppSettings
     /// </summary>
     public int OutputLifeSeconds { get; set; } = 300;
 
+    /// <summary>Предел папки логов, МБ: файлы дней и полный вывод записей журнала. Старые файлы удаляются первыми.</summary>
+    public int LogsMaxMb { get; set; } = 10;
+
+    /// <summary>Запись журнала, чей лог был открыт при выходе.</summary>
+    public DateTime? JournalShown { get; set; }
+
     /// <summary>Размер шрифта вывода — лупой над выводом или Ctrl + колесо.</summary>
     public double OutputFontSize { get; set; } = 12;
 
@@ -276,11 +284,17 @@ public sealed class AppSettings
 
     public bool WindowMaximized { get; set; }
 
+    /// <summary>Версия прошлого запуска: сменилась — обновление прошло, об этом запись в журнале.</summary>
+    public string LastRunVersion { get; set; } = string.Empty;
+
     /// <summary>Внизу был открыт «Журнал», а не «Терминал».</summary>
     public bool BottomOnJournal { get; set; }
 
-    /// <summary>Фильтр журнала по разделу — подпись пункта; пусто — «Все разделы».</summary>
+    /// <summary>Фильтр журнала по действию — подпись пункта; пусто — «Все действия».</summary>
     public string JournalFilter { get; set; } = string.Empty;
+
+    /// <summary>Строка поиска журнала — как была при выходе.</summary>
+    public string JournalSearch { get; set; } = string.Empty;
 
     public bool JournalAutoScroll { get; set; } = true;
 

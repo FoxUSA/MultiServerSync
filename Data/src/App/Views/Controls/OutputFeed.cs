@@ -18,6 +18,8 @@ public sealed class OutputFeed
 {
     public const string ChainHeader = "═════ Команды после копирования ═════";
 
+    public const string CopyHeader = "═════ Копирование ═════";
+
     public static readonly DependencyProperty ResultProperty = DependencyProperty.RegisterAttached(
         "Result",
         typeof(OperationResult),
@@ -178,25 +180,24 @@ public sealed class OutputFeed
 
     private void Push() => OutputColoring.SetText(_box, Compose(_row, _after));
 
-    /// <summary>Вывод сервера и, если есть, вывод его команд после копирования — одним текстом.</summary>
-    public static string Compose(OperationResult? row, OperationResult? after)
+    /// <summary>
+    /// Вывод сервера и, если есть, вывод его команд после копирования — одним текстом.
+    /// Один вид на всё: тем же текстом вывод показан в терминале и уходит в буфер.
+    /// </summary>
+    /// <param name="maxLines">Автокопия: не длиннее стольких строк, середина вырезается.</param>
+    /// <param name="trimmedBy">Какая кнопка отдаст лог целиком — для пометки о вырезанном.</param>
+    public static string Compose(OperationResult? row, OperationResult? after, int? maxLines = null, string trimmedBy = "")
     {
-        var text = row?.Output ?? string.Empty;
-
-        // итог запуска — под выводом, той же строкой, что в скопированном логе
-        if (row?.TimeLine is { } rowTime && text.TrimEnd().Length > 0)
+        if (row is null)
         {
-            text = text.TrimEnd() + Environment.NewLine + rowTime + Environment.NewLine;
+            return string.Empty;
         }
 
-        if (after?.Output.TrimEnd() is not { Length: > 0 } afterText)
-        {
-            return text;
-        }
+        var text = row.Report(maxLines, trimmedBy);
 
-        return text.TrimEnd() + Environment.NewLine + Environment.NewLine
-            + ChainHeader + Environment.NewLine + afterText
-            + (after.TimeLine is { } time ? Environment.NewLine + time : string.Empty)
-            + Environment.NewLine;
+        return after is null || after.Output.TrimEnd().Length == 0
+            ? text
+            : CopyHeader + Environment.NewLine + text + Environment.NewLine
+                + ChainHeader + Environment.NewLine + after.Report(maxLines, trimmedBy);
     }
 }

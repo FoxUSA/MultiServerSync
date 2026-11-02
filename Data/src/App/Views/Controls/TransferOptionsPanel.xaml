@@ -32,6 +32,20 @@
       <Setter Property="VerticalContentAlignment" Value="Center" />
       <Setter Property="FontSize" Value="12" />
     </Style>
+
+    <!--  кнопка нажата — оранжевая рамка. Отдельным слоем: шаблон ui:Button свою рамку перекрашивает сам  -->
+    <Style x:Key="UnsentRingStyle" TargetType="Border">
+      <Setter Property="BorderBrush" Value="#E07A1F" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="IsHitTestVisible" Value="False" />
+      <Setter Property="Visibility" Value="Collapsed" />
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding UnsentOn}" Value="True">
+          <Setter Property="Visibility" Value="Visible" />
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
   </UserControl.Resources>
 
   <Border
@@ -163,6 +177,22 @@
           Style="{StaticResource OptionStyle}"
           ToolTip="Сняли — копирование, которое перезапишет файлы в папке назначения, сначала спросит. Одинаковые файлы при сверке по дате или сумме заменой не считаются."
           Visibility="Collapsed" />
+        <!--  только на «Копировании» и «Скачивании»: у «Проводника» строк с галочками нет  -->
+        <Grid
+          x:Name="UnsentBlock"
+          Grid.Row="3"
+          Grid.Column="1"
+          Grid.ColumnSpan="3"
+          HorizontalAlignment="Right"
+          VerticalAlignment="Center">
+          <ui:Button
+            x:Name="UnsentButton"
+            Height="24"
+            Padding="8,0"
+            Click="OnUnsent"
+            FontSize="11" />
+          <Border Style="{StaticResource UnsentRingStyle}" />
+        </Grid>
       </Grid>
       </StackPanel>
     </StackPanel>

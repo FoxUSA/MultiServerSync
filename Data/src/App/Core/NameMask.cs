@@ -20,6 +20,25 @@ public static class NameMask
             .Select(p => p.Contains('*') || p.Contains('?') ? p : "*" + p + "*")
             .ToList();
 
+    /// <summary>
+    /// Поиск в тексте, а не в имени: набранное — одна маска целиком, пробелы её не делят
+    /// («принял соединение» — фраза). Со звёздочкой и «?» совпадает любая часть текста.
+    /// </summary>
+    public static bool FoundIn(string text, string? mask)
+    {
+        if (IsEmpty(mask))
+        {
+            return true;
+        }
+
+        var part = mask!.Trim();
+
+        // обратная косая в маске — знак экранирования, а в тексте бывают пути Windows
+        return part.Contains('*') || part.Contains('?')
+            ? FileSystemName.MatchesSimpleExpression("*" + part.Replace("\\", "\\\\") + "*", text, ignoreCase: true)
+            : text.Contains(part, StringComparison.OrdinalIgnoreCase);
+    }
+
     public static bool Matches(string name, string? mask)
     {
         if (IsEmpty(mask))

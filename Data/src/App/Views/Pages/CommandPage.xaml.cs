@@ -62,7 +62,6 @@ public partial class CommandPage : Page
         DataContextChanged += OnWorkspaceSwitched;
         Attach(Workspace);
 
-        PasteToast.Large = true;
         Loaded += (_, _) => ListenClipboard();
         ClipboardWatch.Changed += () => HasClipboardText = ClipboardWatch.HasText;
 
@@ -330,7 +329,7 @@ public partial class CommandPage : Page
         if (e.AddedItems.Count > 0 && HistoryBox.SelectedItem is string text && ActiveStep is { } step)
         {
             step.Text = text;
-            ActionLog.Info("Подставлена команда из истории: " + OneLine(text), null, AppSection.Command, Workspace, [text.TrimEnd()]);
+            AppLog.Echo("Подставлена команда из истории: " + OneLine(text));
         }
     }
 
@@ -372,7 +371,7 @@ public partial class CommandPage : Page
         }
 
         step.Text = text.Replace("\r\n", "\n", StringComparison.Ordinal).Trim();
-        ActionLog.Info($"Вставлено из буфера ({step.Text.Length} символов): {OneLine(step.Text)}", null, AppSection.Command, Workspace, [step.Text.TrimEnd()]);
+        AppLog.Echo($"Вставлено из буфера ({step.Text.Length} символов): {OneLine(step.Text)}");
 
         Workspace?.FocusStep(step);
         FocusStep(step);
@@ -422,14 +421,13 @@ public partial class CommandPage : Page
         if (snippet.IsMulti)
         {
             workspace.SetSteps(snippet.AsSteps());
-            ActionLog.Info($"Из избранного раскрыто окон: {workspace.Steps.Count} — {snippet.Comment}", null, AppSection.Command, workspace,
-                workspace.Steps.Select(s => $"#{s.Number}: {OneLine(s.Text)}"));
+            AppLog.Echo($"Из избранного раскрыто окон: {workspace.Steps.Count} — {snippet.Comment}");
         }
         else
         {
             var sudo = ActiveStep?.UseSudo ?? false;
             workspace.SetSteps([new SavedCommandStep { Text = snippet.Command, UseSudo = sudo }]);
-            ActionLog.Info($"Подставлена команда из избранного: {snippet.Comment}", null, AppSection.Command, Workspace);
+            AppLog.Echo($"Подставлена команда из избранного: {snippet.Comment}");
         }
     }
 
@@ -709,8 +707,7 @@ public partial class CommandPage : Page
     {
         var all = AppState.Current.CommandTabs.Where(t => !t.IsPersonal).ToList();
 
-        // широкое действие: команды уходят со всех вкладок сразу — сначала спросить.
-        // По умолчанию фокус на «Отмене»
+        // широкое действие: команды уходят со всех вкладок сразу — сначала спросить
         if (!ConfirmDialog.Ask(
                 Window.GetWindow(this),
                 $"Запустить команды на всех вкладках ({all.Count})?",

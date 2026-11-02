@@ -76,10 +76,10 @@
         Grid.Column="2"
         Margin="10,0,10,0"
         VerticalAlignment="Center"
-        Content="Сохранять лог"
+        Content="Сохранять вывод"
         FontSize="11"
         IsChecked="{Binding DataContext.KeepLog, ElementName=StatusHost, Mode=TwoWay}"
-        ToolTip="Своя у каждой вкладки. Отмечено — терминал вкладки хранит все запуски, пока галочку не снять. Снято — запуск позже срока «Хранить лог» после окончания прошлого начинает терминал заново." />
+        ToolTip="Своя у каждой вкладки. Отмечено — терминал вкладки хранит все запуски, пока галочку не снять. Снято — запуск позже срока «Хранить вывод» после окончания прошлого начинает терминал заново." />
 
       <controls:OutputZoom
         Grid.Column="3"
@@ -111,6 +111,11 @@
         </ui:Button.Icon>
       </ui:Button>
     </Grid>
+
+    <controls:CommandCountdown
+      Grid.Row="2"
+      Panel.ZIndex="1"
+      Margin="0,0,28,6" />
 
     <Border
       Grid.Row="2"

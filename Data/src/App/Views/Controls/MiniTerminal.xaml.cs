@@ -395,7 +395,7 @@ public partial class MiniTerminal : UserControl
         }
 
         step.Text = text.Replace("\r\n", "\n", StringComparison.Ordinal).Trim();
-        ActionLog.Info($"Вставлено из буфера ({step.Text.Length} символов): {CommandPage.OneLine(step.Text)}", null, AppState.Current.Section, Tab, [step.Text.TrimEnd()]);
+        AppLog.Echo($"Вставлено из буфера ({step.Text.Length} символов): {CommandPage.OneLine(step.Text)}");
         FocusStep(step);
     }
 
@@ -527,6 +527,35 @@ public partial class MiniTerminal : UserControl
         }
 
         var personal = tab.Personal ?? AppState.Current.CreatePersonalTab(tab);
+        AppState.Current.JumpToPersonal(personal);
+        AppState.Current.ShowTab(personal);
+    }
+
+    /// <summary>
+    /// Свитч «после копирования». Первое включение создаёт пустую личную вкладку команд
+    /// и сразу ведёт на неё; дальше свитч только включает и выключает запуск после копирования.
+    /// </summary>
+    private void OnAfterCopySwitch(object sender, RoutedEventArgs e)
+    {
+        if (Tab is not { IsCopyTab: true } copy)
+        {
+            return;
+        }
+
+        if (!copy.AfterCopyEnabled)
+        {
+            ActionLog.Info($"Команды после копирования выключены: «{copy.Title}»", null, AppSection.Files, copy);
+            return;
+        }
+
+        if (copy.Personal is { } personal)
+        {
+            ActionLog.Info($"Команды после копирования включены: «{copy.Title}»", null, AppSection.Files, copy);
+            return;
+        }
+
+        personal = AppState.Current.CreatePersonalTab(copy);
+        copy.RaiseChain();
         AppState.Current.JumpToPersonal(personal);
         AppState.Current.ShowTab(personal);
     }

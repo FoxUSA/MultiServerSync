@@ -64,14 +64,15 @@ public static class DownloadService
         Action<long, long>? progress = null,
         ConfirmReplace? confirmReplace = null)
     {
-        return Task.Run(
-            () =>
+        return SshService.RunStoppable(
+            connected =>
             {
                 var meter = new TransferMeter(progress, ct);
 
                 using var ssh = SshService.NewSsh(server, settings);
                 using var sftp = SshService.NewSftp(server, settings);
                 SshService.ConnectBoth(ssh, sftp);
+                connected();
 
                 var exclude = options.Excludes();
                 var entries = new List<Entry>();
@@ -219,14 +220,15 @@ public static class DownloadService
         Action<string> report,
         CancellationToken ct)
     {
-        return Task.Run(
-            () =>
+        return SshService.RunStoppable(
+            connected =>
             {
                 var clock = new StageClock();
 
                 using var ssh = SshService.NewSsh(server, settings);
                 using var sftp = SshService.NewSftp(server, settings);
                 SshService.ConnectBoth(ssh, sftp);
+                connected();
                 clock.Mark("подключение");
 
                 var exclude = options.Excludes();

@@ -74,7 +74,8 @@
         Click="OnClearItems"
         Content="Очистить"
         Icon="{ui:SymbolIcon Delete24}"
-        Style="{StaticResource ToolButtonStyle}" />
+        Style="{StaticResource ToolButtonStyle}"
+        ToolTip="Убрать отмеченные строки, а если отметок нет — все. Файлы не трогаются" />
       <ui:Button
         Click="OnRefreshItems"
         Content="Обновить"
@@ -89,7 +90,6 @@
         Style="{StaticResource ToolButtonStyle}"
         ToolTip="Показать или скрыть названия окон. Название меняется двойным щелчком по его плашке"
         Visibility="{Binding IsMultiWindow, Converter={StaticResource BoolToVis}}" />
-      <controls:UndoButtons VerticalAlignment="Center" />
     </StackPanel>
 
       <TextBlock
@@ -148,38 +148,48 @@
                       ItemsSource="{Binding Items}"
                       Loaded="OnWindowGridLoaded"
                       MouseDoubleClick="OnGridDoubleClick"
+                      RowHeight="24"
                       RowStyle="{StaticResource AppDataGridRowStyle}"
                       Style="{StaticResource AppDataGridStyle}"
                       VerticalScrollBarVisibility="Auto">
                       <DataGrid.Columns>
                     <DataGridTemplateColumn
-                      Width="40"
-                      MinWidth="40"
-                      CellStyle="{StaticResource FirstColumnCellStyle}"
-                      HeaderStyle="{StaticResource FirstColumnHeaderStyle}">
+                      Width="26"
+                      MinWidth="26"
+                      CanUserResize="False"
+                      CellStyle="{StaticResource CheckColumnCellStyle}"
+                      HeaderStyle="{StaticResource CheckColumnHeaderStyle}">
                       <DataGridTemplateColumn.Header>
-                        <CheckBox
-                          MinWidth="0"
-                          MinHeight="0"
-                          Margin="0"
-                          Padding="0"
+                        <Viewbox
+                          Width="16"
+                          Height="16"
                           HorizontalAlignment="Center"
-                          VerticalAlignment="Center"
-                          Click="OnToggleAllItems"
-                          IsChecked="{Binding DataContext.AllItemsSelected, RelativeSource={RelativeSource AncestorType=DataGrid}, Mode=OneWay}"
-                          IsThreeState="True"
-                          ToolTip="Отметить или снять все объекты" />
-                      </DataGridTemplateColumn.Header>
-                      <DataGridTemplateColumn.CellTemplate>
-                        <DataTemplate>
+                          VerticalAlignment="Center">
                           <CheckBox
                             MinWidth="0"
                             MinHeight="0"
                             Margin="0"
                             Padding="0"
+                            Click="OnToggleAllItems"
+                            IsChecked="{Binding DataContext.AllItemsSelected, RelativeSource={RelativeSource AncestorType=DataGrid}, Mode=OneWay}"
+                            IsThreeState="True"
+                            ToolTip="Отметить или снять все объекты" />
+                        </Viewbox>
+                      </DataGridTemplateColumn.Header>
+                      <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                          <Viewbox
+                            Width="16"
+                            Height="16"
                             HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            VerticalAlignment="Center">
+                            <CheckBox
+                              MinWidth="0"
+                              MinHeight="0"
+                              Margin="0"
+                              Padding="0"
+                              IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                          </Viewbox>
                         </DataTemplate>
                       </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
@@ -203,6 +213,24 @@
                       Binding="{Binding SizeText}"
                       Header="Размер"
                       SortMemberPath="SizeBytes" />
+                    <!--  какие из четырёх видны — решает SizeColumns  -->
+                    <DataGridTextColumn
+                      Width="Auto"
+                      Binding="{Binding KeptSizeText}"
+                      Header="Размер*"
+                      SortMemberPath="KeptBytes"
+                      Visibility="Collapsed" />
+                    <DataGridTextColumn
+                      Width="Auto"
+                      Binding="{Binding FilesText}"
+                      Header="Файлов"
+                      SortMemberPath="Files" />
+                    <DataGridTextColumn
+                      Width="Auto"
+                      Binding="{Binding KeptFilesText}"
+                      Header="Файлов*"
+                      SortMemberPath="KeptFiles"
+                      Visibility="Collapsed" />
                     <DataGridTextColumn
                       Width="Auto"
                       Binding="{Binding ModifiedText}"

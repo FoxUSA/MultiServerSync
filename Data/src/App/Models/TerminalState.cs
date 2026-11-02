@@ -78,6 +78,46 @@ public sealed class TerminalFile
     public Dictionary<string, TerminalTabState> Tabs { get; set; } = new();
 }
 
+/// <summary>
+/// Действие с вкладкой для отмены — UserData\tab-actions.json. Вкладка, которой сейчас нет в лентах,
+/// лежит здесь целиком, без вывода терминала: иначе после перезапуска её было бы неоткуда вернуть.
+/// </summary>
+public sealed class TabActionState
+{
+    public AppSection Section { get; set; }
+
+    /// <summary>Уже отменено: шаг ждёт стрелки «вернуть».</summary>
+    public bool Undone { get; set; }
+
+    public string What { get; set; } = string.Empty;
+
+    public DateTime At { get; set; }
+
+    public string TabId { get; set; } = string.Empty;
+
+    /// <summary>Переименование: прежнее и новое название. Нет — вкладку добавили или закрыли.</summary>
+    public string? Before { get; set; }
+
+    public string? After { get; set; }
+
+    /// <summary>Вкладку добавили; иначе закрыли.</summary>
+    public bool Added { get; set; }
+
+    public int Index { get; set; }
+
+    public WorkspaceState? Tab { get; set; }
+
+    public string? PersonalId { get; set; }
+
+    public WorkspaceState? Personal { get; set; }
+
+    public int PersonalIndex { get; set; }
+
+    public string? OwnerId { get; set; }
+
+    public bool OwnerEnabled { get; set; }
+}
+
 /// <summary>Запись журнала на диске — UserData\journal.json.</summary>
 public sealed class JournalEntryState
 {
@@ -91,5 +131,9 @@ public sealed class JournalEntryState
 
     public AppSection? Section { get; set; }
 
+    public string? Tab { get; set; }
+
     public bool IsServerLine { get; set; }
+
+    public JournalOutputMark? Output { get; set; }
 }

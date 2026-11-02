@@ -53,7 +53,7 @@ public partial class App : Application
 
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
-            AppLog.Error("Необработанная ошибка: " + (args.ExceptionObject as Exception)?.Message);
+            AppLog.General(LogLevel.Error, "Необработанная ошибка: " + (args.ExceptionObject as Exception)?.Message);
 
         base.OnStartup(e);
 
@@ -137,7 +137,7 @@ public partial class App : Application
 
     private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
-        AppLog.Error("Ошибка интерфейса: " + e.Exception.Message);
+        AppLog.General(LogLevel.Error, "Ошибка интерфейса: " + e.Exception.Message);
         MessageBox.Show(e.Exception.ToString(), "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
         e.Handled = true;
     }

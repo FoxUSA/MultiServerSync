@@ -404,11 +404,12 @@ public static class SshService
         Action<bool>? onWaiting = null,
         Action<string>? onTail = null)
     {
-        return Task.Run(
-            () =>
+        return RunStoppable(
+            connected =>
             {
                 using var client = NewSsh(server, settings);
                 client.Connect();
+                connected();
 
                 // Скрипт идёт через stdin, но сервер забирает ровно его байты во временный файл
                 // и запускает уже оттуда — ввод после этого свободен для ответов команде
@@ -645,8 +646,8 @@ public static class SshService
         Action<long, long>? progress = null,
         ConfirmReplace? confirmReplace = null)
     {
-        return Task.Run(
-            () =>
+        return RunStoppable(
+            connected =>
             {
                 var stats = new Counters();
                 var clock = new StageClock();
@@ -666,6 +667,7 @@ public static class SshService
                 using var ssh = NewSsh(server, settings);
                 using var sftp = NewSftp(server, settings);
                 ConnectBoth(ssh, sftp);
+                connected();
                 clock.Mark("подключение");
 
                 if (options.MatchByDate && !options.MatchByHash)
@@ -816,8 +818,8 @@ public static class SshService
         CancellationToken ct,
         Action<UploadStep>? step = null)
     {
-        return Task.Run(
-            () =>
+        return RunStoppable(
+            connected =>
             {
                 var clock = new StageClock();
 
@@ -837,6 +839,7 @@ public static class SshService
                 using var ssh = NewSsh(server, settings);
                 using var sftp = NewSftp(server, settings);
                 ConnectBoth(ssh, sftp);
+                connected();
                 clock.Mark("подключение");
 
                 if (!options.MatchByHash)
@@ -946,6 +949,39 @@ public static class SshService
         {
             ThrowFirst(ae);
         }
+    }
+
+    /// <summary>
+    /// Работа с сервером, которую можно остановить и во время подключения: Connect отмену не слышит
+    /// и держал бы «Остановить» до своего таймаута. Остановили раньше — задача сразу кончается отменой,
+    /// а брошенный поток дождётся Connect и закроет подключение: <c>connected</c> бросит ту же отмену.
+    /// </summary>
+    /// <param name="work">Получает <c>connected</c> — вызвать сразу после подключения.</param>
+    internal static async Task<T> RunStoppable<T>(Func<Action, T> work, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var connected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var run = Task.Run(
+            () => work(() =>
+            {
+                ct.ThrowIfCancellationRequested();
+                connected.TrySetResult();
+            }),
+            CancellationToken.None);
+
+        using (ct.Register(() => connected.TrySetCanceled(ct)))
+        {
+            await Task.WhenAny(connected.Task, run);
+        }
+
+        if (connected.Task.IsCanceled && !run.IsCompleted)
+        {
+            throw new OperationCanceledException(ct);
+        }
+
+        return await run;
     }
 
     /// <summary>
@@ -1351,9 +1387,7 @@ public static class SshService
 
             case SshAuthenticationException:
                 return $"Сервер отклонил вход для пользователя «{server.User}». "
-                    + "Проверьте логин и пароль. Если они верны — на сервере может быть выключен вход по паролю "
-                    + "(в /etc/ssh/sshd_config: PasswordAuthentication no) или запрещён вход root "
-                    + "(PermitRootLogin prohibit-password) — тогда нужен вход по ключу или другой пользователь.";
+                    + "Проверьте логин и пароль.";
 
             case SocketException socket:
                 return socket.SocketErrorCode switch
@@ -1361,7 +1395,7 @@ public static class SshService
                     SocketError.ConnectionRefused =>
                         $"Порт {server.Port} на {server.Host} закрыт: SSH-сервер не слушает этот порт.",
                     SocketError.TimedOut or SocketError.HostUnreachable or SocketError.NetworkUnreachable =>
-                        $"{server.Host}:{server.Port} не отвечает: хост недоступен или закрыт фаерволом.",
+                        $"{server.Host}:{server.Port} не отвечает.",
                     SocketError.HostNotFound =>
                         $"Имя «{server.Host}» не разрешается в адрес (DNS).",
                     _ => $"Сеть: {socket.Message}",
@@ -1371,14 +1405,9 @@ public static class SshService
                 return $"Истёк таймаут подключения к {server.Host}:{server.Port}. "
                     + "Увеличьте таймаут в настройках или проверьте доступность хоста.";
 
-            // соединение открылось, но SSH-приветствия не пришло. Так бывает, когда на компьютере
-            // VPN или прокси в режиме туннеля (Clash, mihomo и т. п.) сам принимает соединение
-            // и не пропускает его дальше, — тогда так отвечают сразу все серверы
+            // соединение открылось, но SSH-приветствия не пришло. Причину отсюда не узнать, поэтому только факт
             case SshConnectionException when ex.Message.Contains("identification string", StringComparison.OrdinalIgnoreCase):
-                return $"{server.Host}:{server.Port} принял соединение, но не ответил как SSH-сервер и сразу закрыл его. "
-                    + "Если так со всеми серверами — соединение режет VPN, прокси или фаервол на этом компьютере "
-                    + "(например, Clash/mihomo в режиме TUN): пустите эти адреса или порт напрямую. "
-                    + "Если только с этим — на порту не SSH или сервер не пускает ваш адрес.";
+                return $"{server.Host}:{server.Port} принял соединение и закрыл его без ответа SSH.";
 
             case SshConnectionException:
                 return "Соединение разорвано сервером: " + ex.Message;
@@ -2974,8 +3003,8 @@ public static class SshService
         Action<string> report,
         CancellationToken ct)
     {
-        return Task.Run(
-            () =>
+        return RunStoppable(
+            connected =>
             {
                 // свои суммы считаем, пока сервер считает свои, — на всех ядрах. Обычно большая
                 // часть уже в кэше со сверки перед копированием, остальное дочитывается тут
@@ -2988,6 +3017,7 @@ public static class SshService
 
                 using var client = NewSsh(server, settings);
                 client.Connect();
+                connected();
 
                 var remote = RemoteSums(client, files.Select(f => f.RemotePath).ToList(), ct, out var complaint);
 

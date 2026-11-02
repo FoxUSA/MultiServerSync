@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Media;
 using MultiServerSync.Core;
@@ -37,10 +38,17 @@ public sealed class LogEntry
     /// <summary>Отклик интерфейса: только плашка, в журнал не идёт.</summary>
     public bool IsHint { get; init; }
 
+    /// <summary>Шум вроде «скопировано»: только плашка, и в файл лога тоже не идёт.</summary>
+    public bool IsEcho { get; init; }
+
     /// <summary>Строка одного сервера посреди операции: в журнал идёт, плашку не дёргает — итог придёт отдельно.</summary>
     public bool IsServerLine { get; init; }
 
-    public string TimeText => Time.ToString("HH:mm:ss");
+    /// <summary>Где лежит полный лог записи — открывается щелчком по строке. Нет — есть только сам текст.</summary>
+    public JournalOutputMark? Output { get; init; }
+
+    /// <summary>С датой: журнал переживает перезапуск, и строки разных дней идут подряд.</summary>
+    public string TimeText => Time.ToString("dd.MM HH:mm:ss");
 
     public string SectionText => NameOf(Section);
 
@@ -57,6 +65,51 @@ public sealed class LogEntry
     };
 
     public string ScopeText => Scope ?? string.Empty;
+
+    /// <summary>Вкладка, где сделано действие: своя пометка или из текста записи («· вкладка «Основная»»).</summary>
+    public string? Tab { get; init; }
+
+    private static readonly Regex TabInText = new("· вкладка «(.+?)»", RegexOptions.Compiled);
+
+    private string? _tabText;
+
+    /// <summary>Название вкладки записи; пусто — запись не от вкладки.</summary>
+    public string TabText => _tabText ??= Tab ?? TabIn(Text) ?? string.Empty;
+
+    /// <summary>Вкладка из текста вида «Копирование · вкладка «Основная»».</summary>
+    public static string? TabIn(string text) => TabInText.Match(text) is { Success: true } found ? found.Groups[1].Value : null;
+
+    private string? _action;
+
+    /// <summary>Столбец «Действие»: копирование, команда, удаление файла…</summary>
+    public string ActionText => _action ??= JournalAction.Of(Text);
+
+    /// <summary>Шапка лога записи: сервер, раздел, вкладка — как в выводе терминала.</summary>
+    public string PlaceText
+    {
+        get
+        {
+            var parts = new List<string>();
+
+            if (Scope is { } scope)
+            {
+                // «Компьютер» и «3 сервер(ов)» — не имя сервера
+                parts.Add(scope == ActionLog.Computer.Name || scope.EndsWith("сервер(ов)", StringComparison.Ordinal) ? scope : "Сервер: " + scope);
+            }
+
+            parts.Add("Раздел: " + SectionText);
+
+            if (TabText is { Length: > 0 } tab)
+            {
+                parts.Add("Вкладка: " + tab);
+            }
+
+            return string.Join(" · ", parts);
+        }
+    }
+
+    /// <summary>По чему ищет строка поиска журнала: всё, что видно в строке таблицы, и сервер записи.</summary>
+    public string SearchText => $"{TimeText} {SectionText} {ActionText} {ScopeText} {Text}";
 
     public string Line => Scope is null ? Text : $"[{Scope}] {Text}";
 
@@ -98,7 +151,7 @@ public static class AppLog
         set => Ambient.Value = value;
     }
 
-    public static void Info(string text, string? scope = null, AppSection? section = null) => Write(LogLevel.Info, text, scope, section);
+    public static void Info(string text, string? scope = null, AppSection? section = null, string? details = null) => Write(LogLevel.Info, text, scope, section, details);
 
     public static void Success(string text, string? scope = null, AppSection? section = null) => Write(LogLevel.Success, text, scope, section);
 
@@ -106,8 +159,15 @@ public static class AppLog
 
     public static void Error(string text, string? scope = null, AppSection? section = null) => Write(LogLevel.Error, text, scope, section);
 
-    public static void Write(LogLevel level, string text, string? scope = null, AppSection? section = null) =>
-        Add(new LogEntry { Time = DateTime.Now, Level = level, Text = text, Scope = scope, Section = Resolve(section) });
+    /// <param name="details">Полный лог записи: показывается щелчком по строке журнала.</param>
+    /// <param name="tab">Вкладка, если её нет в самом тексте записи.</param>
+    public static void Write(LogLevel level, string text, string? scope = null, AppSection? section = null, string? details = null, string? tab = null)
+    {
+        var time = DateTime.Now;
+        var resolved = Resolve(section);
+
+        Add(new LogEntry { Time = time, Level = level, Text = text, Scope = scope, Section = resolved, Tab = tab, Output = SaveDetails(time, text, scope, resolved, details) });
+    }
 
     /// <summary>
     /// Отклик на щелчок по интерфейсу: плашка в углу и строка в файле, но не журнал.
@@ -116,9 +176,37 @@ public static class AppLog
     public static void Hint(string text, LogLevel level = LogLevel.Info) =>
         Add(new LogEntry { Time = DateTime.Now, Level = level, Text = text, Section = Resolve(null), IsHint = true });
 
+    /// <summary>
+    /// «Скопировано», «вставлено»: человеку видно, что нажатие сработало, а в логах это мусор —
+    /// ни в журнал, ни в терминал, ни в файл, только плашка.
+    /// </summary>
+    public static void Echo(string text, LogLevel level = LogLevel.Info) =>
+        Add(new LogEntry { Time = DateTime.Now, Level = level, Text = text, Section = Resolve(null), IsHint = true, IsEcho = true });
+
+    /// <summary>Запись самой программы, а не раздела: обновление, сбой. Открытый раздел тут ни при чём, в столбце — «Программа».</summary>
+    public static void General(LogLevel level, string text) =>
+        Add(new LogEntry { Time = DateTime.Now, Level = level, Text = text });
+
+    /// <summary>
+    /// Запуск операции — только строка в файле дня. Журнал и плашка получат её итог, а по файлу видно,
+    /// что запуск был, даже если итога не дождались (программу закрыли посреди команды).
+    /// </summary>
+    public static void Started(string text, string? scope = null) =>
+        AppendToFile(new LogEntry { Time = DateTime.Now, Level = LogLevel.Info, Text = text, Scope = scope, Section = Resolve(null) });
+
     /// <summary>Итог одного сервера посреди операции на нескольких: в журнал, без плашки.</summary>
-    public static void ServerLine(LogLevel level, string text, string scope) =>
-        Add(new LogEntry { Time = DateTime.Now, Level = level, Text = text, Scope = scope, Section = Resolve(null), IsServerLine = true });
+    public static void ServerLine(LogLevel level, string text, string scope, string? details = null)
+    {
+        var time = DateTime.Now;
+        var resolved = Resolve(null);
+
+        Add(new LogEntry { Time = time, Level = level, Text = text, Scope = scope, Section = resolved, IsServerLine = true, Output = SaveDetails(time, text, scope, resolved, details) });
+    }
+
+    private static JournalOutputMark? SaveDetails(DateTime time, string text, string? scope, AppSection? section, string? details) =>
+        details is null
+            ? null
+            : JournalOutput.Save(time, $"{LogEntry.NameOf(section)} · {(scope is null ? text : $"[{scope}] {text}")}", details);
 
     /// <summary>
     /// Отладочная запись — только в файл UserData\logs: разбирать по ней, что случилось,
@@ -134,12 +222,19 @@ public static class AppLog
     public static LogEntry WarnInPlace(string text) =>
         Add(new LogEntry { Time = DateTime.Now, Level = LogLevel.Warning, Text = text, Section = Resolve(null), ShownInPlace = true, IsHint = true });
 
+    /// <summary>Итог, который человек уже видит в открытом окне: в журнал идёт, плашка главного окна его не повторяет.</summary>
+    public static void InPlace(LogLevel level, string text, string? scope = null) =>
+        Add(new LogEntry { Time = DateTime.Now, Level = level, Text = text, Scope = scope, Section = Resolve(null), ShownInPlace = true });
+
     private static AppSection? Resolve(AppSection? section) =>
         section ?? Ambient.Value ?? (AppState.Current is { TabsLoaded: true } state ? state.Section : null);
 
     private static LogEntry Add(LogEntry entry)
     {
-        AppendToFile(entry);
+        if (!entry.IsEcho)
+        {
+            AppendToFile(entry);
+        }
 
         var dispatcher = Application.Current?.Dispatcher;
         if (dispatcher is null || dispatcher.CheckAccess())
@@ -157,13 +252,15 @@ public static class AppLog
     public static void Clear()
     {
         Entries.Clear();
+        JournalOutput.DeleteAll();
         TerminalStore.MarkDirty();
     }
 
     /// <summary>Журнал прошлых запусков программы — под записями этого, свежие сверху.</summary>
     public static void Restore(IEnumerable<LogEntry> saved)
     {
-        foreach (var entry in saved)
+        // шум, записанный прежними версиями, обратно не встаёт
+        foreach (var entry in saved.Where(e => !JournalAction.IsNoise(e.Text)))
         {
             if (Entries.Count >= MaxEntriesInUi)
             {

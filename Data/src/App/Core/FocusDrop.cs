@@ -21,7 +21,7 @@ public static class FocusDrop
     {
         if (window is UIElement { IsKeyboardFocusWithin: false } && InField)
         {
-            Keyboard.ClearFocus();
+            Drop();
         }
     }
 
@@ -31,8 +31,22 @@ public static class FocusDrop
     {
         if (InField && !OnControl(e.OriginalSource as DependencyObject))
         {
-            Keyboard.ClearFocus();
+            Drop();
         }
+    }
+
+    /// <summary>
+    /// Снять и логический фокус: одна ClearFocus оставляет у поля IsFocused — оно выглядит
+    /// активным, и при возврате в окно курсор снова в нём.
+    /// </summary>
+    private static void Drop()
+    {
+        if (Keyboard.FocusedElement is DependencyObject field && FocusManager.GetFocusScope(field) is { } scope)
+        {
+            FocusManager.SetFocusedElement(scope, null);
+        }
+
+        Keyboard.ClearFocus();
     }
 
     private static bool OnControl(DependencyObject? node)

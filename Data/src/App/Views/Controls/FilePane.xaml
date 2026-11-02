@@ -267,6 +267,7 @@
                 Height="16" />
             </Button>
             <Button
+              x:Name="HomeButton"
               Click="OnHome"
               Style="{StaticResource PathIconButtonStyle}"
               ToolTip="Домашняя папка">
@@ -409,12 +410,14 @@
               <ui:SymbolIcon FontSize="20" Symbol="ArrowRight24" />
             </Button>
             <Button
+              x:Name="UpButton"
               Click="OnUp"
               Style="{StaticResource GroupIconButtonStyle}"
               ToolTip="На уровень вверх (Backspace)">
               <ui:SymbolIcon FontSize="20" Symbol="ArrowUp24" />
             </Button>
             <Button
+              x:Name="RootButton"
               Click="OnRoot"
               Style="{StaticResource GroupIconButtonStyle}"
               ToolTip="В корень: на сервере — /, на компьютере — корень диска, из него — «Этот компьютер»">
@@ -723,6 +726,7 @@
           PreviewMouseMove="OnListMouseMove"
           PreviewMouseRightButtonDown="OnListRightDown"
           PreviewTextInput="OnListTextInput"
+          RowHeight="22"
           RowStyle="{StaticResource PaneRowStyle}"
           SelectionChanged="OnListSelected"
           Sorting="OnListSorting"
@@ -734,37 +738,46 @@
             <!--  галочки — то же выделение, что мышью: щелчок по галочке добавляет или снимает строку  -->
             <DataGridTemplateColumn
               x:Name="CheckColumn"
-              Width="40"
-              MinWidth="40"
+              Width="26"
+              MinWidth="26"
+              CanUserResize="False"
               CanUserSort="False"
-              CellStyle="{StaticResource FirstColumnCellStyle}"
-              HeaderStyle="{StaticResource FirstColumnHeaderStyle}">
+              CellStyle="{StaticResource CheckColumnCellStyle}"
+              HeaderStyle="{StaticResource CheckColumnHeaderStyle}">
               <DataGridTemplateColumn.Header>
-                <CheckBox
-                  x:Name="AllCheck"
-                  MinWidth="0"
-                  MinHeight="0"
-                  Margin="0"
-                  Padding="0"
+                <Viewbox
+                  Width="16"
+                  Height="16"
                   HorizontalAlignment="Center"
-                  VerticalAlignment="Center"
-                  Click="OnCheckAll"
-                  Focusable="False"
-                  IsThreeState="True"
-                  ToolTip="Выделить все или снять выделение" />
-              </DataGridTemplateColumn.Header>
-              <DataGridTemplateColumn.CellTemplate>
-                <DataTemplate>
+                  VerticalAlignment="Center">
                   <CheckBox
-                    x:Name="RowCheck"
+                    x:Name="AllCheck"
                     MinWidth="0"
                     MinHeight="0"
                     Margin="0"
                     Padding="0"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
+                    Click="OnCheckAll"
                     Focusable="False"
-                    IsChecked="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=DataGridRow}, Mode=OneWay}" />
+                    IsThreeState="True"
+                    ToolTip="Выделить все или снять выделение" />
+                </Viewbox>
+              </DataGridTemplateColumn.Header>
+              <DataGridTemplateColumn.CellTemplate>
+                <DataTemplate>
+                  <Viewbox
+                    Width="16"
+                    Height="16"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center">
+                    <CheckBox
+                      x:Name="RowCheck"
+                      MinWidth="0"
+                      MinHeight="0"
+                      Margin="0"
+                      Padding="0"
+                      Focusable="False"
+                      IsChecked="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=DataGridRow}, Mode=OneWay}" />
+                  </Viewbox>
                   <DataTemplate.Triggers>
                     <DataTrigger Binding="{Binding IsParent}" Value="True">
                       <Setter TargetName="RowCheck" Property="Visibility" Value="Hidden" />
@@ -776,7 +789,7 @@
             <DataGridTemplateColumn
               x:Name="NameColumn"
               Width="*"
-              MinWidth="160"
+              MinWidth="250"
               Header="Имя"
               SortMemberPath="Name">
               <DataGridTemplateColumn.CellTemplate>
@@ -823,6 +836,7 @@
                       Padding="3,1"
                       VerticalAlignment="Center"
                       CaretBrush="{DynamicResource TextFillColorPrimaryBrush}"
+                      FontSize="12"
                       Foreground="{DynamicResource TextFillColorPrimaryBrush}"
                       KeyDown="OnRenameKeyDown"
                       LostKeyboardFocus="OnRenameLostFocus"
@@ -852,9 +866,10 @@
               SortMemberPath="Where"
               Visibility="Collapsed" />
             <DataGridTextColumn
-              Binding="{Binding TypeText}"
-              Header="Тип"
-              SortMemberPath="Type" />
+              x:Name="ModifiedColumn"
+              Binding="{Binding ModifiedText}"
+              Header="Изменено"
+              SortMemberPath="Modified" />
             <DataGridTextColumn
               Binding="{Binding SizeText}"
               Header="Размер"
@@ -865,10 +880,6 @@
                 </Style>
               </DataGridTextColumn.ElementStyle>
             </DataGridTextColumn>
-            <DataGridTextColumn
-              Binding="{Binding ModifiedText}"
-              Header="Изменено"
-              SortMemberPath="Modified" />
             <DataGridTextColumn
               x:Name="RightsColumn"
               Binding="{Binding Permissions}"
@@ -885,6 +896,12 @@
               Binding="{Binding LinkText}"
               Header="Куда ведёт"
               SortMemberPath="LinkTarget" />
+            <!--  последний: ему остаётся всё, что не заняли остальные, и он первым отдаёт место  -->
+            <DataGridTextColumn
+              x:Name="TypeColumn"
+              Binding="{Binding TypeText}"
+              Header="Тип"
+              SortMemberPath="Type" />
           </DataGrid.Columns>
         </DataGrid>
 

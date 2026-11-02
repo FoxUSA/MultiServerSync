@@ -125,12 +125,57 @@ public sealed class OperationResult : ObservableObject
 
     public string ScopedFullTitle => Scope.Length == 0 ? FullTitle : $"{Scope} · {FullTitle}";
 
-    /// <summary>Подпись для текста в буфер обмена: имя и адрес сервера, в сводке — ещё и вкладка.</summary>
-    public string CaptionFor(bool summary) =>
-        summary && Scope.Length > 0 ? $"{Scope} · {WithWindow(Server.Caption)}" : WithWindow(Server.Caption);
+    /// <summary>
+    /// Шапка вывода: сервер с адресом, раздел и вкладка. Один вид в терминале, в буфере и в журнале —
+    /// чтобы лог было с чем связать, где бы его ни читали.
+    /// </summary>
+    public string Header
+    {
+        get
+        {
+            var who = Server.IsPseudo ? Server.Name : "Сервер: " + FullTitle;
 
-    /// <summary>Шапка вывода в буфере обмена — чтобы скопированный лог было с чем связать.</summary>
-    public string CopyHeader(bool summary) => $"Сервер: {CaptionFor(summary)}:";
+            return (Parent ?? this).Batch is { } batch ? $"{who} · {batch.PlaceText}" : who;
+        }
+    }
+
+    /// <summary>Строка журнала в поле вывода: текст уже с шапкой, своя ей не нужна.</summary>
+    internal bool IsBare { get; init; }
+
+    /// <summary>Шапка, вывод и итог — тем же видом в терминале и в буфере.</summary>
+    /// <param name="maxLines">Автокопия: не длиннее стольких строк, середина вырезается.</param>
+    /// <param name="trimmedBy">Какая кнопка отдаст лог целиком — для пометки о вырезанном.</param>
+    public string Report(int? maxLines = null, string trimmedBy = "")
+    {
+        var output = Output;
+
+        if (IsBare)
+        {
+            return output;
+        }
+
+        if (maxLines is { } max)
+        {
+            output = LogTrim.Lines(output.TrimEnd(), max, trimmedBy);
+        }
+
+        var text = new StringBuilder(Header).AppendLine();
+
+        if (output.TrimEnd().Length == 0)
+        {
+            return Status is OperationStatus.Success or OperationStatus.Failed or OperationStatus.Cancelled
+                ? text.AppendLine($"(вывода нет · {StatusText})").ToString()
+                : text.ToString();
+        }
+
+        // итог запуска — под выводом; пока идёт, вывод только дописывается
+        if (TimeLine is { } time)
+        {
+            return text.AppendLine(output.TrimEnd()).AppendLine(time).ToString();
+        }
+
+        return output.EndsWith('\n') ? text.Append(output).ToString() : text.AppendLine(output).ToString();
+    }
 
     public string User => Server.User;
 
@@ -154,6 +199,10 @@ public sealed class OperationResult : ObservableObject
             {
                 TerminalStore.MarkDirty();
                 TrackTime(value == OperationStatus.Running);
+
+                // отсчёт живёт только в своём запуске: закончилась команда — он исчезает
+                _countdownEndUtc = null;
+                RaiseMany(nameof(HasCountdown), nameof(CountdownText));
 
                 // полоса прошлой передачи новому запуску не нужна: свою он выставит сам
                 if (value == OperationStatus.Running)
@@ -200,6 +249,12 @@ public sealed class OperationResult : ObservableObject
         set { if (Set(ref _duration, value)) { RaiseMany(nameof(StatusText), nameof(DurationText), nameof(ElapsedText), nameof(TimeLine)); } }
     }
 
+    /// <summary>
+    /// Строка команды: в общем списке с копированием и действиями голое «успешно» ни о чём не говорит,
+    /// поэтому «Терминал: успешно». Сама команда — в выводе, её текст есть только у строк команд цепочки.
+    /// </summary>
+    private const string CommandMark = "Терминал: ";
+
     /// <summary>Короткий статус для компактной таблицы.</summary>
     public string ShortStatus
     {
@@ -207,7 +262,7 @@ public sealed class OperationResult : ObservableObject
         {
             if (StepNumber > 0)
             {
-                return StepStatus;
+                return CommandMark + StepStatus;
             }
 
             var text = Status switch
@@ -225,7 +280,7 @@ public sealed class OperationResult : ObservableObject
             };
 
             // не резать по буквам: столбец сам ставит «…» по своей ширине, целиком — в подсказке и в выводе
-            return text;
+            return !IsAction && Batch?.RunsCommands == true ? CommandMark + text : text;
         }
     }
 
@@ -582,6 +637,22 @@ public sealed class OperationResult : ObservableObject
         ? "идёт " + Clock(DateTime.UtcNow - _startedUtc)
         : Duration > TimeSpan.Zero ? "за " + Clock(Duration) : string.Empty;
 
+    private DateTime? _countdownEndUtc;
+
+    /// <summary>Команда пошла, и в ней есть таймер: отсчёт в углу поля вывода. 0 — таймера нет, прежний отсчёт снимается.</summary>
+    public void StartCountdown(int seconds)
+    {
+        _countdownEndUtc = seconds > 0 ? DateTime.UtcNow.AddSeconds(seconds) : null;
+        RaiseMany(nameof(HasCountdown), nameof(CountdownText));
+    }
+
+    /// <summary>Есть что показать: идёт команда с таймером. Дошло до нуля, а команда ещё работает — стоит ноль.</summary>
+    public bool HasCountdown => IsRunning && _countdownEndUtc is not null;
+
+    public string CountdownText => HasCountdown
+        ? Math.Max(0, Math.Ceiling((_countdownEndUtc!.Value - DateTime.UtcNow).TotalSeconds)).ToString("0")
+        : string.Empty;
+
     private static string Clock(TimeSpan time) => time.TotalHours >= 1
         ? $"{(int)time.TotalHours}:{time.Minutes:00}:{time.Seconds:00}"
         : $"{time.Minutes}:{time.Seconds:00}";
@@ -615,7 +686,7 @@ public sealed class OperationResult : ObservableObject
 
         foreach (var result in running)
         {
-            result.RaiseMany(nameof(ElapsedText), nameof(DurationText));
+            result.RaiseMany(nameof(ElapsedText), nameof(DurationText), nameof(CountdownText));
         }
     }
 

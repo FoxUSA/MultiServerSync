@@ -72,6 +72,9 @@ public static class AppPaths
     /// <summary>Записи журнала — переживают перезапуск.</summary>
     public static string JournalFile => Path.Combine(UserDataDir, "journal.json");
 
+    /// <summary>Отмена действий с самими вкладками — закрытых и переименованных: переживает перезапуск.</summary>
+    public static string TabActionsFile => Path.Combine(UserDataDir, "tab-actions.json");
+
     /// <summary>Запомненные ключи серверов, как known_hosts у ssh.</summary>
     public static string KnownHostsFile => Path.Combine(UserDataDir, "known_hosts.json");
 

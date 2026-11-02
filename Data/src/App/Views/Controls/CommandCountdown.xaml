@@ -1,0 +1,34 @@
+<UserControl
+  x:Class="MultiServerSync.Views.Controls.CommandCountdown"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  Margin="0,0,16,6"
+  HorizontalAlignment="Right"
+  VerticalAlignment="Bottom"
+  IsHitTestVisible="False">
+  <!--
+    Сколько секунд осталось по таймеру команды (sleep, timeout) — в правом нижнем углу поля вывода.
+    Цвет как у истёкшего окошка «Хранить вывод», только секунды. DataContext — строка сервера.
+  -->
+  <Border
+    Padding="7,1,7,2"
+    Background="#38E07A1F"
+    BorderBrush="#80E07A1F"
+    BorderThickness="1"
+    CornerRadius="4">
+    <Border.Style>
+      <Style TargetType="Border">
+        <Setter Property="Visibility" Value="Collapsed" />
+        <Style.Triggers>
+          <DataTrigger Binding="{Binding HasCountdown}" Value="True">
+            <Setter Property="Visibility" Value="Visible" />
+          </DataTrigger>
+        </Style.Triggers>
+      </Style>
+    </Border.Style>
+    <TextBlock
+      FontSize="11"
+      Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+      Text="{Binding CountdownText}" />
+  </Border>
+</UserControl>

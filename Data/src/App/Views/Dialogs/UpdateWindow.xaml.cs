@@ -178,13 +178,13 @@ public partial class UpdateWindow : FluentWindow
         {
             Fail("Обновление отменено. Временная папка удалена, программа не менялась.");
             UpdateService.ClearTemp();
-            AppLog.Info("Обновление отменено.");
+            AppLog.General(LogLevel.Info, "Обновление отменено.");
         }
         catch (Exception ex)
         {
             Fail("Не получилось: " + ex.Message + " Программа не менялась.");
             UpdateService.ClearTemp();
-            AppLog.Error("Обновление не удалось: " + ex.Message);
+            AppLog.General(LogLevel.Error, "Обновление не удалось: " + ex.Message);
         }
         finally
         {

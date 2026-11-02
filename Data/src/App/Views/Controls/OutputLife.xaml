@@ -46,13 +46,13 @@
     x:Name="Root"
     VerticalAlignment="Center"
     Orientation="Horizontal"
-    ToolTip="Новый запуск, пока отсчёт не дошёл до нуля, дописывается в терминал ниже. После нуля — начинает терминал заново. Само по себе ничего не стирается. С «Сохранять лог» вкладка хранит всё">
+    ToolTip="Новый запуск, пока отсчёт не дошёл до нуля, дописывается в терминал ниже. После нуля — начинает терминал заново. Само по себе ничего не стирается. С «Сохранять вывод» вкладка хранит всё">
     <TextBlock
       Margin="0,0,4,0"
       VerticalAlignment="Center"
       FontSize="11"
       Foreground="{DynamicResource TextFillColorPrimaryBrush}"
-      Text="Хранить лог" />
+      Text="Хранить вывод" />
 
     <Button
       Click="OnLess"
@@ -81,7 +81,7 @@
               <!--  приглушённо: уведомление не тревожное  -->
               <Setter Property="Background" Value="#38E07A1F" />
               <Setter Property="BorderBrush" Value="#80E07A1F" />
-              <Setter Property="ToolTip" Value="Следующий вывод очистит лог. Задайте срок заново — отсчёт пойдёт снова" />
+              <Setter Property="ToolTip" Value="Следующий запуск начнёт терминал заново. Задайте срок заново — отсчёт пойдёт снова" />
             </DataTrigger>
           </Style.Triggers>
         </Style>

@@ -188,6 +188,8 @@ public static class CopyWindowLayout
 
         // порядок в таблице выбирается щелчком по заголовку и не сбрасывается
         GridSort.Keep(grid, sortKey);
+        SizeColumns.Attach(grid);
+        DragChecks.Attach(grid);
 
         var buttons = area.Children.OfType<StackPanel>().First();
 

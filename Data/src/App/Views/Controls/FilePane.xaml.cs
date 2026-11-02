@@ -422,6 +422,53 @@ public partial class FilePane : UserControl
 
     public string CurrentPath => _current;
 
+    /// <summary>Папка, из которой панель сервера не уходит под замком вкладки; null — не закреплена.</summary>
+    private string? LockedRoot => IsRemote && Tab?.ExplorerLockedPath is { Length: > 0 } root ? root : null;
+
+    private bool OutsideLock(string path) =>
+        LockedRoot is { } root && _source is { } source && source.Normalize(path) != root;
+
+    /// <summary>Переход из закреплённой замком папки не выполняется — и об этом плашка.</summary>
+    private bool RefusedByLock(string path)
+    {
+        if (!OutsideLock(path))
+        {
+            return false;
+        }
+
+        AppLog.Hint($"Замок держит папку {LockedRoot} — чтобы перейти в другую, требуется снять замок.", LogLevel.Warning);
+        return true;
+    }
+
+    /// <summary>Замок включили или сняли — адрес, строка «..» и кнопки переходов показывают, куда можно уйти.</summary>
+    public void ShowLockLimits()
+    {
+        if (_source is not { } source)
+        {
+            return;
+        }
+
+        if (!_searching && !_busy)
+        {
+            var parent = source.Parent(_current);
+            var wanted = parent is not null && !OutsideLock(parent);
+            var row = _rows.FirstOrDefault(r => r.IsParent);
+
+            if (row is not null && !wanted)
+            {
+                _rows.Remove(row);
+            }
+            else if (row is null && wanted)
+            {
+                _rows.Add(new PaneRow(new FsEntry("..", parent!, true, 0, default), source.IsRemote, isParent: true));
+            }
+
+            ShowPath(_current);
+        }
+
+        UpdateNavButtons();
+    }
+
     /// <summary>Отмеченные галочками строки без «..».</summary>
     public IReadOnlyList<FsEntry> SelectedEntries => List.SelectedItems
         .OfType<PaneRow>()
@@ -591,6 +638,13 @@ public partial class FilePane : UserControl
                 break;
             }
 
+            // закреплённой замком папки больше нет: уходить из неё нельзя, панель так и говорит
+            if (OutsideLock(parent))
+            {
+                ShowMessage(StatusText.Text);
+                break;
+            }
+
             target = parent;
         }
 
@@ -649,6 +703,12 @@ public partial class FilePane : UserControl
         }
 
         var target = source.Normalize(path);
+
+        if (RefusedByLock(target))
+        {
+            return NavResult.Failed;
+        }
+
         var version = ++_navVersion;
 
         CancelSearch();
@@ -740,6 +800,13 @@ public partial class FilePane : UserControl
         if (version != _navVersion || !ReferenceEquals(source, _source))
         {
             return NavResult.Stale;
+        }
+
+        // замок включили, пока папка читалась
+        if (RefusedByLock(target))
+        {
+            _ = UpdateStatusAsync(_current, version);
+            return NavResult.Failed;
         }
 
         if (record && !string.Equals(_current, target, StringComparison.Ordinal))
@@ -883,7 +950,7 @@ public partial class FilePane : UserControl
         {
             _rows.Clear();
 
-            if (source.Parent(_current) is { } parent)
+            if (source.Parent(_current) is { } parent && !OutsideLock(parent))
             {
                 _rows.Add(new PaneRow(new FsEntry("..", parent, true, 0, default), source.IsRemote, isParent: true));
             }
@@ -1547,9 +1614,10 @@ public partial class FilePane : UserControl
 
     /// <summary>
     /// Столбец, растянутый руками за границу в шапке, держит свою ширину — она запоминается во
-    /// вкладке. Остальные — по содержимому, чтобы дата и размер не обрезались. Не хватает места —
-    /// сначала ужимается «Имя» до своего минимума (у длинного имени есть подсказка), и только
-    /// потом поровну остальные столбцы «по содержимому». Места с запасом — остаток отдаётся имени.
+    /// вкладке. Остальные — по содержимому, чтобы дата и размер не обрезались, а «Типу» — всё, что
+    /// осталось. Не хватает места — ужимается сперва «Тип», потом «Имя» до своего минимума (у длинного
+    /// имени есть подсказка), и только потом остальные в одной доле, а «Изменено» — вдвое меньшей.
+    /// «Тип» скрыт или растянут руками — остаток отдаётся имени.
     /// </summary>
     private void FitColumns()
     {
@@ -1568,7 +1636,9 @@ public partial class FilePane : UserControl
 
         var visible = List.Columns.Where(c => c != CheckColumn && c.Visibility == Visibility.Visible).ToList();
         var manual = visible.Where(c => !double.IsNaN(UserWidth(c))).ToList();
-        var auto = visible.Where(c => c != NameColumn && double.IsNaN(UserWidth(c))).ToList();
+        var auto = visible.Where(c => c != NameColumn && c != TypeColumn && double.IsNaN(UserWidth(c))).ToList();
+        var nameAuto = double.IsNaN(UserWidth(NameColumn));
+        var typeAuto = TypeColumn.Visibility == Visibility.Visible && double.IsNaN(UserWidth(TypeColumn));
 
         foreach (var column in manual)
         {
@@ -1578,19 +1648,34 @@ public partial class FilePane : UserControl
         var left = room - manual.Sum(UserWidth);
         var wanted = auto.Sum(c => _natural.GetValueOrDefault(c, 80));
 
-        // имя растянуто руками — остаток делят только столбцы по содержимому
-        var name = double.IsNaN(UserWidth(NameColumn)) ? NameColumn.MinWidth : 0;
-        var share = wanted <= 0 || name + wanted <= left ? 1 : Math.Max(0, left - name) / wanted;
+        // столбцы по содержимому ужимаются, только когда имя и тип уже на минимуме
+        var floor = (nameAuto ? NameColumn.MinWidth : 0) + (typeAuto ? TypeColumn.MinWidth : 0);
+        var weighted = auto.Sum(c => _natural.GetValueOrDefault(c, 80) * ShrinkWeight(c));
+        var loss = weighted <= 0 || floor + wanted <= left ? 0 : (wanted - Math.Max(0, left - floor)) / weighted;
 
         foreach (var column in auto)
         {
-            SetWidth(column, Math.Max(column.MinWidth, _natural.GetValueOrDefault(column, 80) * share));
+            SetWidth(column, Math.Max(column.MinWidth, _natural.GetValueOrDefault(column, 80) * Math.Max(0, 1 - loss * ShrinkWeight(column))));
         }
 
-        if (double.IsNaN(UserWidth(NameColumn)))
+        var rest = left - auto.Sum(c => c.Width.DisplayValue);
+
+        if (nameAuto)
         {
-            SetWidth(NameColumn, Math.Max(NameColumn.MinWidth, left - auto.Sum(c => c.Width.DisplayValue)));
+            var name = typeAuto
+                ? Math.Min(_natural.GetValueOrDefault(NameColumn, NameColumn.MinWidth), rest - TypeColumn.MinWidth)
+                : rest;
+
+            SetWidth(NameColumn, Math.Max(NameColumn.MinWidth, name));
+            rest -= NameColumn.Width.DisplayValue;
         }
+
+        if (typeAuto)
+        {
+            SetWidth(TypeColumn, Math.Max(TypeColumn.MinWidth, rest));
+        }
+
+        double ShrinkWeight(DataGridColumn column) => column == ModifiedColumn ? 0.5 : 1;
 
         static void SetWidth(DataGridColumn column, double value)
         {
@@ -1704,6 +1789,8 @@ public partial class FilePane : UserControl
                 Style = (Style)FindResource("CrumbButtonStyle"),
                 ToolTip = source.Display(target),
             };
+
+            LockMute.SetIsOn(button, OutsideLock(target));
 
             button.Click += async (_, _) =>
             {
@@ -1829,7 +1916,7 @@ public partial class FilePane : UserControl
 
         if (ClipboardText.Copy(path))
         {
-            AppLog.Hint("Путь скопирован: " + path);
+            AppLog.Echo("Путь скопирован: " + path);
         }
     }
 
@@ -1953,6 +2040,14 @@ public partial class FilePane : UserControl
     {
         BackButton.IsEnabled = _back.Count > 0;
         ForwardButton.IsEnabled = _forward.Count > 0;
+
+        var atLockedRoot = _current == LockedRoot;
+
+        LockMute.SetIsOn(BackButton, _back.Count > 0 && OutsideLock(_back.Peek()));
+        LockMute.SetIsOn(ForwardButton, _forward.Count > 0 && OutsideLock(_forward.Peek()));
+        LockMute.SetIsOn(UpButton, atLockedRoot);
+        LockMute.SetIsOn(RootButton, atLockedRoot);
+        LockMute.SetIsOn(HomeButton, _source is { } source && OutsideLock(source.HomePath));
     }
 
     private async void OnBack(object sender, RoutedEventArgs e) => await GoBackAsync();
@@ -2014,7 +2109,7 @@ public partial class FilePane : UserControl
 
     private async Task GoBackAsync()
     {
-        if (_back.Count == 0)
+        if (_back.Count == 0 || RefusedByLock(_back.Peek()))
         {
             return;
         }
@@ -2030,7 +2125,7 @@ public partial class FilePane : UserControl
 
     private async Task GoForwardAsync()
     {
-        if (_forward.Count == 0)
+        if (_forward.Count == 0 || RefusedByLock(_forward.Peek()))
         {
             return;
         }
@@ -2512,7 +2607,7 @@ public partial class FilePane : UserControl
             ReplaceEntry(row, renamed);
 
             await PendingFs.RunAsync(source, [before.FullPath, target], label, () => source.RenameAsync(before.FullPath, target));
-            Log($"Переименовано: {before.Name} → {name}",
+            Log($"{(before.IsDirectory ? "Переименована папка" : "Переименован файл")}: {before.Name} → {name}",
                 details: [$"где: {source.Display(parent)}", $"было: {before.Name}", $"стало: {name}"]);
         }
         catch (Exception ex)
@@ -2564,8 +2659,7 @@ public partial class FilePane : UserControl
             source.IsRemote
                 ? $"На сервере корзины нет — восстановить будет нельзя. Папки удаляются со всем содержимым.\n\n{names}"
                 : names,
-            source.IsRemote ? "Удалить" : "В корзину",
-            enterConfirms: true);
+            source.IsRemote ? "Удалить" : "В корзину");
 
         if (!ok)
         {
@@ -2837,7 +2931,7 @@ public partial class FilePane : UserControl
         }
 
         ClipboardText.Copy(string.Join(Environment.NewLine, paths));
-        AppLog.Hint(paths.Count == 1 ? $"Путь скопирован: {paths[0]}" : $"Путей скопировано: {paths.Count}");
+        AppLog.Echo(paths.Count == 1 ? $"Путь скопирован: {paths[0]}" : $"Путей скопировано: {paths.Count}");
     }
 
     private async Task GoToLinkTargetAsync(FsEntry link)
@@ -2938,8 +3032,7 @@ public partial class FilePane : UserControl
 
         _marqueeFrom = from;
         _marqueeIndex = index;
-        _marqueeOnEmpty = row is null;
-        _marqueeBase = Keyboard.Modifiers.HasFlag(ModifierKeys.Control) ? List.SelectedItems.Cast<object>().ToList() : [];
+        _marqueeBase = new HashSet<object>(List.SelectedItems.Cast<object>());
 
         // рамка держится за строку, а не за точку на экране: список при протяжке прокручивается
         var anchor = row ?? LastRow();
@@ -3279,6 +3372,13 @@ public partial class FilePane : UserControl
             return;
         }
 
+        // из закреплённой замком папки не уходим — дерево возвращается к открытой
+        if (RefusedByLock(node.FullPath))
+        {
+            _ = RevealInTreeAsync(_current, _navVersion);
+            return;
+        }
+
         await OpenFolderAsync(node.FullPath);
     }
 
@@ -3500,11 +3600,10 @@ public partial class FilePane : UserControl
     private double _marqueeOffset;
 
     private bool _marqueeOn;
-    private bool _marqueeOnEmpty;
     private bool _marqueeCapturing;
 
-    /// <summary>Что было выделено до рамки с Ctrl: рамка добавляет к нему, а не заменяет.</summary>
-    private List<object> _marqueeBase = [];
+    /// <summary>Что было отмечено до рамки: под рамкой галочка переворачивается, вне её остаётся как была.</summary>
+    private HashSet<object> _marqueeBase = [];
 
     private DispatcherTimer? _marqueeScroll;
 
@@ -3549,12 +3648,7 @@ public partial class FilePane : UserControl
             return;
         }
 
-        // щелчок по пустому месту под строками снимает выделение, как в проводнике
-        if (_marqueeFrom is not null && _marqueeOnEmpty && Keyboard.Modifiers == ModifierKeys.None)
-        {
-            List.UnselectAll();
-        }
-
+        // щелчок мимо строк галочек не трогает: они копятся, и случайный промах их не сбрасывает
         _marqueeFrom = null;
     }
 
@@ -3612,15 +3706,16 @@ public partial class FilePane : UserControl
         Marquee.Width = Math.Abs(x - fromX);
         Marquee.Height = Math.Abs(y - anchorY);
 
-        // строки между началом и концом рамки; «..» не выделяется
+        // под рамкой галочка наоборот, остальные как были; «..» не отмечается. Берём только то, что сейчас
+        // в списке: строка могла уйти прямо во время протяжки, а чужую таблица не примет
         var current = IndexAt(y);
         var first = Math.Min(_marqueeIndex, current);
-        var last = Math.Min(Math.Max(_marqueeIndex, current), List.Items.Count - 1);
-        var wanted = new HashSet<object>(_marqueeBase);
+        var last = Math.Max(_marqueeIndex, current);
+        var wanted = new HashSet<object>();
 
-        for (var i = first; i <= last; i++)
+        for (var i = 0; i < List.Items.Count; i++)
         {
-            if (List.Items[i] is PaneRow { IsParent: false } item)
+            if (List.Items[i] is PaneRow { IsParent: false } item && _marqueeBase.Contains(item) != (i >= first && i <= last))
             {
                 wanted.Add(item);
             }

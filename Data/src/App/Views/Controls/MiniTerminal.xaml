@@ -48,6 +48,7 @@
             <Grid Margin="0,4,0,0">
               <ui:TextBox
                 x:Name="Box"
+                controls:EmptyAreaSelect.IsOn="True"
                 AcceptsReturn="True"
                 AcceptsTab="True"
                 ClearButtonEnabled="False"
@@ -172,7 +173,17 @@
                   Content="{Binding DataContext.PersonalButtonText, RelativeSource={RelativeSource AncestorType=UserControl}}"
                   FontSize="12"
                   Icon="{ui:SymbolIcon ArrowRight24}"
-                  ToolTip="Личная вкладка в разделе «Команды»: выполняется после копирования, когда включён свитч на ярлыке" />
+                  ToolTip="Личная вкладка в разделе «Команды»: выполняется после копирования, когда включён свитч справа" />
+                <!--  свитч «после копирования»: включён — красным, как «Везде». Первое включение создаёт
+                      личную вкладку и ведёт в неё  -->
+                <ui:ToggleSwitch
+                  x:Name="AfterCopySwitch"
+                  Margin="8,0,0,0"
+                  VerticalAlignment="Center"
+                  Click="OnAfterCopySwitch"
+                  IsChecked="{Binding DataContext.AfterCopyEnabled, RelativeSource={RelativeSource AncestorType=UserControl}, Mode=TwoWay}"
+                  Style="{StaticResource DangerSwitchStyle}"
+                  ToolTip="Команды после копирования: выполнить личные команды этой вкладки на серверах, где копирование прошло" />
               </StackPanel>
             </Grid>
 
@@ -190,6 +201,7 @@
               <!--  после скачивания команды сами не идут  -->
               <DataTrigger Binding="{Binding DataContext.IsCopyTab, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="False">
                 <Setter TargetName="GoPersonal" Property="Visibility" Value="Collapsed" />
+                <Setter TargetName="AfterCopySwitch" Property="Visibility" Value="Collapsed" />
               </DataTrigger>
             </DataTemplate.Triggers>
           </DataTemplate>

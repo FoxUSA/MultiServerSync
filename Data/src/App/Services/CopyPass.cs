@@ -59,7 +59,7 @@ public static class CopyPass
             generation = ++_generation;
         }
 
-        // без своей плашки: следом плашка «Вывод скопирован», она и так перекроет
+        // без своей плашки: об окончании уже сказал итог, о вставке скажет Pass
         Subscribe();
         _ = ExpireAsync(generation);
     }
@@ -333,7 +333,7 @@ public static class CopyPass
         Thread.Sleep(80);
         Press(VkReturn);
 
-        AppLog.Hint("CopyPass: лог вставлен и отправлен.", LogLevel.Success);
+        AppLog.Echo("CopyPass: лог вставлен и отправлен.", LogLevel.Success);
     }
 
     private static bool ClipboardHoldsOurLog()

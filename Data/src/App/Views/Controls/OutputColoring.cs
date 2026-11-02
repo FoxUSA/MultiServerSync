@@ -122,7 +122,14 @@ public static class OutputColoring
         }
         else if (line.StartsWith("── ", StringComparison.Ordinal))
         {
+            // заголовок блока: параметры, команда, вывод, итог
+            run.SetResourceReference(TextElement.ForegroundProperty, "AccentTextFillColorPrimaryBrush");
             run.FontWeight = FontWeights.SemiBold;
+        }
+        else if (line.StartsWith("$ ", StringComparison.Ordinal))
+        {
+            // сама команда — цветом блока, чтобы не сливалась с тем, что она вывела
+            run.SetResourceReference(TextElement.ForegroundProperty, "AccentTextFillColorPrimaryBrush");
         }
         else if (line.StartsWith("пропуск (", StringComparison.Ordinal))
         {

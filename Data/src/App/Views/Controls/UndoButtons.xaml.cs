@@ -4,7 +4,7 @@ using MultiServerSync.Services;
 
 namespace MultiServerSync.Views.Controls;
 
-/// <summary>Стрелки показывают память открытой вкладки и что именно они вернут; делать нечего — тусклые.</summary>
+/// <summary>Стрелки показывают, что именно они отменят или вернут: последнее действие во вкладке или с вкладками раздела; делать нечего — тусклые.</summary>
 public partial class UndoButtons : UserControl
 {
     public UndoButtons()

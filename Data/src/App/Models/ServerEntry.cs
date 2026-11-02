@@ -223,22 +223,6 @@ public sealed class ServerEntry : ObservableObject
             ? $"{Host}:{Port}"
             : $"{Name} ({Host}:{Port})";
 
-    /// <summary>Подпись для текста, который уходит наружу: порт показывается только нестандартный.</summary>
-    [JsonIgnore]
-    public string Caption
-    {
-        get
-        {
-            if (IsPseudo)
-            {
-                return Name;
-            }
-
-            var address = Port is 22 or <= 0 ? Host : $"{Host}:{Port}";
-            return string.IsNullOrWhiteSpace(Name) ? address : $"{Name} ({address})";
-        }
-    }
-
     /// <summary>Короткая подпись для списка в боковой панели.</summary>
     [JsonIgnore]
     public string PaneLabel => string.IsNullOrWhiteSpace(Name) ? Host : Name;

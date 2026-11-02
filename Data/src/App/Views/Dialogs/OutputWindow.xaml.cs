@@ -112,25 +112,16 @@ public partial class OutputWindow : FluentWindow
             return;
         }
 
-        var text = result.Output.TrimEnd();
-
-        if (text.Length == 0)
+        if (result.Output.TrimEnd().Length == 0)
         {
             AppLog.Hint($"У сервера {result.Title} вывода пока нет.", LogLevel.Warning);
             return;
         }
 
-        if (result.TimeLine is { } time)
+        // в буфер — ровно то, что показано в окне
+        if (ClipboardText.CopyTerminalOutput(Views.Controls.OutputFeed.Compose(result, AppState.Current.AfterRowOf(result))))
         {
-            text += Environment.NewLine + time;
-        }
-
-        // имя и адрес сервера сверху — иначе в буфере не понять, к чему лог
-        text = result.CopyHeader((StatusHost.DataContext as OperationBatch)?.IsSummary == true) + Environment.NewLine + text;
-
-        if (ClipboardText.CopyTerminalOutput(text + Environment.NewLine))
-        {
-            AppLog.Hint($"Вывод скопирован: {result.Title}.");
+            AppLog.Echo($"Вывод скопирован: {result.Title}.");
         }
     }
 

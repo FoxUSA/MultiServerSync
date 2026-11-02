@@ -271,7 +271,7 @@ public partial class ServerEditDialog : FluentWindow
 
             var info = string.IsNullOrWhiteSpace(outcome.StdOut) ? outcome.StdErr : outcome.StdOut;
             Show(InfoBarSeverity.Success, "Подключение работает", info.Trim());
-            AppLog.Success($"Проверка из диалога прошла: {probe.Display}");
+            AppLog.InPlace(LogLevel.Success, $"Проверка из диалога прошла: {probe.Display}");
         }
         catch (Exception ex)
         {
@@ -297,7 +297,7 @@ public partial class ServerEditDialog : FluentWindow
             }
 
             Show(InfoBarSeverity.Error, "Не подключилось", explained);
-            AppLog.Error($"Проверка из диалога не прошла: {explained}", probe.Display);
+            AppLog.InPlace(LogLevel.Error, $"Проверка из диалога не прошла: {explained}", probe.Display);
         }
         finally
         {

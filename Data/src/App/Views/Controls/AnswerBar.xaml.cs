@@ -50,7 +50,7 @@ public partial class AnswerBar : UserControl
 
         if (all)
         {
-            var targets = BatchSource?.Invoke()?.Results.Where(r => r.Input is { IsOpen: true }).ToList() ?? [];
+            var targets = BatchSource?.Invoke()?.AllRows.Where(r => r.Input is { IsOpen: true }).ToList() ?? [];
 
             if (targets.Count == 0)
             {
