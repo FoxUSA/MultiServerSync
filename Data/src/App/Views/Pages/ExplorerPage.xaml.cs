@@ -784,7 +784,7 @@ public partial class ExplorerPage : Page
                 break;
 
             case PaneCommand.Compare:
-                await CompareAsync(pane);
+                await CompareAsync(pane, picked);
                 break;
 
             case PaneCommand.Run when pane.Source is RemoteSource remote && focused is { IsDirectory: false }:
@@ -872,67 +872,113 @@ public partial class ExplorerPage : Page
     }
 
     /// <summary>
-    /// Два файла — по одному в каждой панели. Подробный отчёт (пути, размер, дата, SHA-256,
-    /// в чём разница) — в терминал внизу, строкой сервера; в журнал — только итог.
+    /// Выбранное в этой панели против одноимённого в папке, открытой в соседней: строка, по которой
+    /// щёлкнули, или всё отмеченное. Галочки и курсор соседней панели ни на что не влияют.
+    /// Исключения действуют как при копировании: исключённого для сравнения нет, даже если выбрали его самого.
+    /// У одного файла с парой — подробный отчёт (пути, размер, дата, SHA-256, в чём разница), остальное —
+    /// общей сверкой «Копирования» и «Скачивания». Вывод — в терминал внизу, в журнал — только итог.
     /// </summary>
-    private async Task CompareAsync(FilePane pane)
+    private async Task CompareAsync(FilePane pane, IReadOnlyList<FsEntry> picked)
     {
-        var mine = pane.FocusedEntry;
-        var theirs = Other(pane).FocusedEntry;
+        var other = Other(pane);
 
-        if (mine is not { IsDirectory: false } || theirs is not { IsDirectory: false } || pane.Source is null || Other(pane).Source is null)
+        if (picked.Count == 0)
         {
-            AppLog.Hint("Для сравнения поставьте курсор на файл в каждой панели.", LogLevel.Warning);
             return;
         }
 
-        if (_tab is not { } tab || _remote is not { } remote)
+        if (_tab is not { } tab || _remote is not { } remote || pane.Source is not { } mine || other.Source is not { } theirs)
         {
             AppLog.Hint("Сервер не выбран — выберите его кнопкой слева от пути в правой панели.", LogLevel.Warning);
             return;
         }
 
-        // слева в отчёте всегда компьютер, справа сервер — как панели на экране
-        var (local, localSource, server, serverSource) = pane.Source is LocalSource
-            ? (mine, pane.Source, theirs, Other(pane).Source!)
-            : (theirs, Other(pane).Source!, mine, pane.Source);
+        var folder = other.CurrentPath;
 
-        await tab.CompareAsync(remote.Server, async (result, ct) =>
+        if (folder.Length == 0)
+        {
+            AppLog.Hint("Слева открыт «Этот компьютер» — откройте папку, с которой сравнивать.", LogLevel.Warning);
+            return;
+        }
+
+        var server = remote.Server;
+        var paths = picked.Select(p => p.FullPath).ToList();
+
+        await tab.CompareAsync(server, async (result, ct) =>
         {
             result.Message = "сравнение…";
-            result.Append($"Сравнение файлов");
-            result.Append($"  компьютер: {local.FullPath}");
-            result.Append($"             {TransferItem.Format(local.Length)} · {local.Modified:dd.MM.yyyy HH:mm:ss}");
-            result.Append($"  сервер:    {server.FullPath}");
-            result.Append($"             {TransferItem.Format(server.Length)} · {server.Modified:dd.MM.yyyy HH:mm:ss}");
 
-            var a = localSource.HashAsync(local.FullPath, ct);
-            var b = serverSource.HashAsync(server.FullPath, ct);
-            var (ha, hb) = (await a, await b);
+            // на компьютере имена без учёта регистра, на сервере — с учётом
+            var names = theirs is LocalSource ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            var twin = picked is [{ IsDirectory: false } file] && !tab.CurrentOptions.Excludes().Excludes(file.Name, isDirectory: false)
+                ? (await theirs.ListAsync(folder, refresh: true)).FirstOrDefault(e => !e.IsDirectory && string.Equals(e.Name, file.Name, names))
+                : null;
 
-            result.Append($"  SHA-256 компьютер: {ha}");
-            result.Append($"  SHA-256 сервер:    {hb}");
-
-            var same = string.Equals(ha, hb, StringComparison.OrdinalIgnoreCase);
-            var differences = new List<string>();
-
-            if (local.Length != server.Length)
+            if (twin is not null)
             {
-                differences.Add($"размер на {TransferItem.Format(Math.Abs(local.Length - server.Length))}");
+                await CompareTwoAsync(picked[0], mine, twin, theirs, server, result, ct);
+                return;
             }
 
-            if (Math.Abs((local.Modified - server.Modified).TotalSeconds) >= 2)
+            if (mine is LocalSource)
             {
-                differences.Add(local.Modified > server.Modified ? "на компьютере новее" : "на сервере новее");
+                await tab.CompareLocalAsync(server, paths, folder, result, ct);
+            }
+            else
+            {
+                await tab.CompareRemoteAsync(server, paths, folder, result, ct);
             }
 
-            result.Append(same
-                ? $"Итог: одинаковые по содержимому{(differences.Count > 0 ? " (" + string.Join(", ", differences) + ")" : string.Empty)}"
-                : $"Итог: отличаются по содержимому{(differences.Count > 0 ? " — " + string.Join(", ", differences) : string.Empty)}");
-
-            result.Message = same ? "одинаковые" : "отличаются";
-            AppLog.Info($"Сравнение {local.Name} и {server.Name}: {(same ? "одинаковые" : "отличаются")}", remote.Server.Display);
+            AppLog.Info($"Сравнение с {folder}: {result.Message}", server.Display);
         });
+    }
+
+    /// <summary>Файл и его пара: слева в отчёте всегда компьютер, справа сервер — как панели на экране.</summary>
+    private static async Task CompareTwoAsync(
+        FsEntry mine,
+        IFileSource mineSource,
+        FsEntry twin,
+        IFileSource twinSource,
+        ServerEntry target,
+        OperationResult result,
+        CancellationToken ct)
+    {
+        var (local, localSource, server, serverSource) = mineSource is LocalSource
+            ? (mine, mineSource, twin, twinSource)
+            : (twin, twinSource, mine, mineSource);
+
+        result.Append($"Сравнение файлов");
+        result.Append($"  компьютер: {local.FullPath}");
+        result.Append($"             {TransferItem.Format(local.Length)} · {local.Modified:dd.MM.yyyy HH:mm:ss}");
+        result.Append($"  сервер:    {server.FullPath}");
+        result.Append($"             {TransferItem.Format(server.Length)} · {server.Modified:dd.MM.yyyy HH:mm:ss}");
+
+        var a = localSource.HashAsync(local.FullPath, ct);
+        var b = serverSource.HashAsync(server.FullPath, ct);
+        var (ha, hb) = (await a, await b);
+
+        result.Append($"  SHA-256 компьютер: {ha}");
+        result.Append($"  SHA-256 сервер:    {hb}");
+
+        var same = string.Equals(ha, hb, StringComparison.OrdinalIgnoreCase);
+        var differences = new List<string>();
+
+        if (local.Length != server.Length)
+        {
+            differences.Add($"размер на {TransferItem.Format(Math.Abs(local.Length - server.Length))}");
+        }
+
+        if (Math.Abs((local.Modified - server.Modified).TotalSeconds) >= 2)
+        {
+            differences.Add(local.Modified > server.Modified ? "на компьютере новее" : "на сервере новее");
+        }
+
+        result.Append(same
+            ? $"Итог: одинаковые по содержимому{(differences.Count > 0 ? " (" + string.Join(", ", differences) + ")" : string.Empty)}"
+            : $"Итог: отличаются по содержимому{(differences.Count > 0 ? " — " + string.Join(", ", differences) : string.Empty)}");
+
+        result.Message = same ? "одинаковые" : "отличаются";
+        AppLog.Info($"Сравнение {local.Name}: {(same ? "одинаковые" : "отличаются")}", target.Display);
     }
 
     /// <summary>Команда — в основную вкладку «Команды» с этим сервером, и туда же переход.</summary>

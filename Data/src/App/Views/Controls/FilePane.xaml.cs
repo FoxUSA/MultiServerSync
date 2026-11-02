@@ -440,29 +440,16 @@ public partial class FilePane : UserControl
         return true;
     }
 
-    /// <summary>Замок включили или сняли — адрес, строка «..» и кнопки переходов показывают, куда можно уйти.</summary>
+    /// <summary>Замок включили или сняли — адрес и кнопки переходов показывают, куда можно уйти. Строка «..» остаётся: вид тот же, переход откажет плашкой.</summary>
     public void ShowLockLimits()
     {
-        if (_source is not { } source)
+        if (_source is null)
         {
             return;
         }
 
         if (!_searching && !_busy)
         {
-            var parent = source.Parent(_current);
-            var wanted = parent is not null && !OutsideLock(parent);
-            var row = _rows.FirstOrDefault(r => r.IsParent);
-
-            if (row is not null && !wanted)
-            {
-                _rows.Remove(row);
-            }
-            else if (row is null && wanted)
-            {
-                _rows.Add(new PaneRow(new FsEntry("..", parent!, true, 0, default), source.IsRemote, isParent: true));
-            }
-
             ShowPath(_current);
         }
 
@@ -950,7 +937,7 @@ public partial class FilePane : UserControl
         {
             _rows.Clear();
 
-            if (source.Parent(_current) is { } parent && !OutsideLock(parent))
+            if (source.Parent(_current) is { } parent)
             {
                 _rows.Add(new PaneRow(new FsEntry("..", parent, true, 0, default), source.IsRemote, isParent: true));
             }
@@ -2867,7 +2854,7 @@ public partial class FilePane : UserControl
         Line();
         Add(Wpf.Ui.Controls.SymbolRegular.Link24, "Скопировать путь", string.Empty, CopyPath);
 
-        if (single is { IsDirectory: false })
+        if (picked.Count > 0)
         {
             Add(Wpf.Ui.Controls.SymbolRegular.BranchCompare24, "Сравнить с соседней панелью", string.Empty, () => Ask(PaneCommand.Compare));
         }

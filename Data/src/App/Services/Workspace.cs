@@ -864,6 +864,36 @@ public sealed class Workspace : ObservableObject
         await CompareBatch.RunAsync("Сравнение файлов", [server], (_, result, ct) => work(result, ct), maxParallel: 1);
     }
 
+    /// <summary>Сравнение в «Проводнике» — всегда по содержимому, что бы ни стояло в параметрах; исключения те же.</summary>
+    private UploadOptions ByContent => CurrentOptions with { Overwrite = true, MatchByDate = false, MatchByHash = true };
+
+    /// <summary>Файлы и папки компьютера против одноимённых в папке сервера: та же сверка, что у «Сравнить» в «Копировании».</summary>
+    public async Task CompareLocalAsync(ServerEntry server, IReadOnlyList<string> paths, string remoteDir, OperationResult result, CancellationToken ct)
+    {
+        result.Append(BlockParams);
+        result.Append($"Сравнение с {remoteDir} — ничего не копируется");
+        result.Append($"объектов: {paths.Count}");
+        result.Append("── сравнение ──");
+
+        var items = await Task.Run(() => paths.Select(p => new TransferItem(p)).ToList(), ct);
+        var stats = await SshService.CompareUploadAsync(server, AppState.Current.Settings, items, remoteDir, ByContent, _localHashes, line => result.Append(line), ct);
+
+        ReportCompare(result, stats, "на сервере");
+    }
+
+    /// <summary>Файлы и папки сервера против одноимённых в папке компьютера: та же сверка, что у «Сравнить» в «Скачивании».</summary>
+    public async Task CompareRemoteAsync(ServerEntry server, IReadOnlyList<string> paths, string localDir, OperationResult result, CancellationToken ct)
+    {
+        result.Append(BlockParams);
+        result.Append($"Сравнение с {localDir} — ничего не скачивается");
+        result.Append($"путей: {paths.Count}");
+        result.Append("── сравнение ──");
+
+        var stats = await DownloadService.CompareAsync(server, AppState.Current.Settings, paths, localDir, ByContent, line => result.Append(line), ct);
+
+        ReportCompare(result, stats, "здесь");
+    }
+
     /// <summary>Что показывает терминал внизу окна: результат последней запущенной операции.</summary>
     public OperationBatch ResultsBatch => _resultsBatch ?? CommandBatch;
 
