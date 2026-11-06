@@ -76,12 +76,9 @@ public sealed class CommandStep : ObservableObject
     /// <summary>Окно не единственное: можно убрать, и номер имеет смысл.</summary>
     public bool IsMulti => _count > 1;
 
-    /// <summary>«Весь набор в избранное» — только у первого окна и только когда окон несколько.</summary>
-    public bool CanSaveSet => IsFirst && IsMulti;
-
     public string NumberText => $"#{_number}";
 
-    /// <summary>В окне пусто: запуск, очистка и избранное у него без дела.</summary>
+    /// <summary>В окне пусто: запуск и очистка у него без дела.</summary>
     public bool IsEmpty => string.IsNullOrWhiteSpace(_text);
 
     private bool _tailEmpty = true;
@@ -106,7 +103,7 @@ public sealed class CommandStep : ObservableObject
     {
         _number = number;
         _count = count;
-        RaiseMany(nameof(Number), nameof(IsFirst), nameof(HasBelow), nameof(IsMulti), nameof(CanSaveSet), nameof(NumberText));
+        RaiseMany(nameof(Number), nameof(IsFirst), nameof(HasBelow), nameof(IsMulti), nameof(NumberText));
     }
 
     // ── прогон ──────────────────────────────────────────────────────────────

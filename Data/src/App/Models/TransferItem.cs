@@ -158,7 +158,8 @@ public sealed class TransferItem : ObservableObject, IRowCheck
 
     private static DateTime Newest(DirectoryInfo dir, string relative, ExcludeFilter filter)
     {
-        var newest = dir.LastWriteTimeUtc;
+        // папка исключена, в неё заходят только ради «Включить» — её своя дата к отправке отношения не имеет
+        var newest = filter.OnlyForIncludes(relative) ? DateTime.MinValue : dir.LastWriteTimeUtc;
 
         foreach (var file in dir.EnumerateFiles())
         {

@@ -62,7 +62,7 @@
         MinWidth="0"
         VerticalAlignment="Center"
         Click="OnWholeClick"
-        Content="Весь журнал"
+        Content="Вся история"
         FontSize="11"
         ToolTip="Показать записи всех вкладок и разделов. Без галочки — только открытой вкладки" />
 

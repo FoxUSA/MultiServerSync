@@ -8,7 +8,7 @@
 
   <!--
     Мини-терминал на «Копировании» и «Скачивании»: своё окно вкладки, те же значки, что на «Команде», без
-    избранного и добавления окон. Над ним — серверы копирования: они отмечаются в панели слева, здесь только показ.
+    добавления окон; избранное — то же окно, что на «Команде». Над ним — серверы копирования: они отмечаются в панели слева, здесь только показ.
   -->
   <UserControl.Resources>
     <BooleanToVisibilityConverter x:Key="BoolToVis" />
@@ -74,61 +74,72 @@
                 IsHitTestVisible="False"
                 Opacity="0" />
 
+              <!--  значки в два ряда, как на «Команде»: запуск сверху, избранное под ним  -->
               <StackPanel
                 Margin="0,4,8,0"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Top"
-                Orientation="Horizontal"
                 SizeChanged="OnIconsResized">
-                <Button
-                  x:Name="Paste"
-                  Click="OnPaste"
-                  Style="{StaticResource EditorIconStyle}"
-                  ToolTip="Вставить из буфера — заменяет всё окно, чтобы вставка не приклеилась к прошлой команде">
-                  <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="ClipboardPaste24" />
-                </Button>
-                <!--  на одном месте запуск и остановка: пока команда идёт, ▶ становится ■  -->
-                <Button
-                  x:Name="RunOne"
-                  Click="OnRun"
-                  Style="{StaticResource EditorIconStyle}"
-                  ToolTip="Выполнить на серверах над окном, без копирования"
-                  Visibility="{Binding DataContext.CommandBatch.IsIdle, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolToVis}}">
-                  <ui:SymbolIcon
-                    FontSize="{StaticResource IconGlyphSize}"
-                    Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
-                    Symbol="Play24" />
-                </Button>
-                <Button
-                  Click="OnStop"
-                  Style="{StaticResource EditorIconStyle}"
-                  ToolTip="{x:Static controls:StopButton.Hint}"
-                  Visibility="{Binding DataContext.CommandBatch.IsRunning, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolToVis}}">
-                  <ui:SymbolIcon
-                    FontSize="{StaticResource IconGlyphSize}"
-                    Foreground="#E0574A"
-                    Symbol="Stop24" />
-                </Button>
-                <Button
-                  x:Name="CopyOut"
-                  Click="OnCopyOutput"
-                  Style="{StaticResource EditorIconStyle}"
-                  ToolTip="Копировать вывод (Ctrl+Shift+C) — то же, что «Текущий лог» в терминале">
-                  <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Copy24" />
-                </Button>
-                <Border
-                  Width="1"
-                  Height="20"
-                  Margin="3,0,1,0"
-                  VerticalAlignment="Center"
-                  Background="{DynamicResource ControlStrokeColorDefaultBrush}" />
-                <Button
-                  x:Name="Clear"
-                  Click="OnClear"
-                  Style="{StaticResource EditorIconStyle}"
-                  ToolTip="Очистить окно">
-                  <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Delete24" />
-                </Button>
+                <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                  <Button
+                    x:Name="Paste"
+                    Click="OnPaste"
+                    Style="{StaticResource EditorIconStyle}"
+                    ToolTip="Вставить из буфера — заменяет всё окно, чтобы вставка не приклеилась к прошлой команде">
+                    <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="ClipboardPaste24" />
+                  </Button>
+                  <!--  на одном месте запуск и остановка: пока команда идёт, ▶ становится ■  -->
+                  <Button
+                    x:Name="RunOne"
+                    Click="OnRun"
+                    Style="{StaticResource EditorIconStyle}"
+                    ToolTip="Выполнить на серверах над окном, без копирования"
+                    Visibility="{Binding DataContext.CommandBatch.IsIdle, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolToVis}}">
+                    <ui:SymbolIcon
+                      FontSize="{StaticResource IconGlyphSize}"
+                      Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
+                      Symbol="Play24" />
+                  </Button>
+                  <Button
+                    Click="OnStop"
+                    Style="{StaticResource EditorIconStyle}"
+                    ToolTip="{x:Static controls:StopButton.Hint}"
+                    Visibility="{Binding DataContext.CommandBatch.IsRunning, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolToVis}}">
+                    <ui:SymbolIcon
+                      FontSize="{StaticResource IconGlyphSize}"
+                      Foreground="#E0574A"
+                      Symbol="Stop24" />
+                  </Button>
+                  <Button
+                    x:Name="CopyOut"
+                    Click="OnCopyOutput"
+                    Style="{StaticResource EditorIconStyle}"
+                    ToolTip="Копировать вывод (Ctrl+Shift+C) — то же, что «Текущий лог» в журнале">
+                    <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Copy24" />
+                  </Button>
+                  <Border
+                    Width="1"
+                    Height="20"
+                    Margin="3,0,1,0"
+                    VerticalAlignment="Center"
+                    Background="{DynamicResource ControlStrokeColorDefaultBrush}" />
+                  <Button
+                    x:Name="Clear"
+                    Click="OnClear"
+                    Style="{StaticResource EditorIconStyle}"
+                    ToolTip="Очистить окно">
+                    <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Delete24" />
+                  </Button>
+                </StackPanel>
+                <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                  <Button
+                    x:Name="Book"
+                    Click="OnPickSnippet"
+                    Style="{StaticResource EditorIconStyle}"
+                    ToolTip="Избранное: команда по щелчку встаёт в окно, там же — добавить эту команду в избранное.">
+                    <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Heart24" />
+                  </Button>
+                </StackPanel>
               </StackPanel>
 
               <!--  низ справа: статус и секундомер  -->

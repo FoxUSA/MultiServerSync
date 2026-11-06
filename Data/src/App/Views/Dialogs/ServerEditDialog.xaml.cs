@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Input;
 using MultiServerSync.Models;
 using MultiServerSync.Services;
+using MultiServerSync.Views.Controls;
 using Wpf.Ui.Controls;
 
 namespace MultiServerSync.Views.Dialogs;
@@ -9,6 +10,23 @@ namespace MultiServerSync.Views.Dialogs;
 public partial class ServerEditDialog : FluentWindow
 {
     private readonly ServerEntry _target;
+
+    /// <summary>
+    /// Правка сервера поверх окна, откуда позвали — «Серверы» или двойной щелчок в панели слева:
+    /// сохранили — в servers.json и в журнал. Возвращает, сохранили ли.
+    /// </summary>
+    public static bool EditExisting(Window? owner, ServerEntry entry, AppSection section, Workspace? tab)
+    {
+        if (new ServerEditDialog(entry, isNew: false) { Owner = owner }.ShowDialog() != true)
+        {
+            return false;
+        }
+
+        AppState.Current.SaveServers();
+        ActionLog.Info($"Изменён сервер: {entry.Display}", entry, section, tab,
+            [$"пользователь: {entry.User}", $"адрес: {entry.Host}:{entry.Port}"]);
+        return true;
+    }
 
     public ServerEditDialog(ServerEntry entry, bool isNew)
     {
@@ -43,7 +61,19 @@ public partial class ServerEditDialog : FluentWindow
             NameBox.Focus();
             NameBox.SelectAll();
         };
+
+        // «Сохранить» — только когда что-то поменяли
+        _initial = Fingerprint();
+        SaveGate.Watch(this, SaveButton, () => Fingerprint() != _initial);
     }
+
+    /// <summary>Поля окна, как их было при открытии: с чем сравнивать, есть ли что сохранять.</summary>
+    private readonly string _initial;
+
+    private string Fingerprint() => string.Join('\u0001',
+        NameBox.Text.Trim(), HostBox.Text.Trim(), PortBox.Value ?? 0, UserBox.Text.Trim(), PasswordBox.Password,
+        KeyBox.Text.Trim(), KeyPassBox.Password, (JumpBox.SelectedItem as JumpOption)?.Id ?? string.Empty,
+        NotesBox.Text.Trim(), ShowNotesBox.IsChecked == true);
 
     private ServerEntry Snapshot() => new()
     {
@@ -309,6 +339,12 @@ public partial class ServerEditDialog : FluentWindow
 
     private void OnSave(object sender, RoutedEventArgs e)
     {
+        if (Fingerprint() == _initial)
+        {
+            Toast.Show(AppLog.WarnInPlace(SaveGate.Nothing), SaveGate.Anchor(SaveButton, Toast.Parent as System.Windows.Media.Visual ?? this));
+            return;
+        }
+
         if (!Validate(out var error))
         {
             Show(InfoBarSeverity.Warning, "Не хватает данных", error);

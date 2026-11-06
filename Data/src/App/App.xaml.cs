@@ -63,6 +63,9 @@ public partial class App : Application
         // щелчок по пустому месту снимает курсор с поля ввода
         FocusDrop.Register();
 
+        // крестик и другие кнопки заголовка подсвечиваются под курсором всегда, а не через раз
+        TitleBarHover.Register();
+
         startup.Mark("подготовка");
         AppState.Current.Load();
         startup.Mark("загрузка серверов и вкладок");

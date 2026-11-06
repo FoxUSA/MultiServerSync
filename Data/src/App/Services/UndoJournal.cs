@@ -215,12 +215,6 @@ public static class UndoJournal
                 return false;
             }
 
-            if (Tab.HeldSteps is not null)
-            {
-                AppLog.Hint("Идёт правка записи избранного — сначала закончите её.", LogLevel.Warning);
-                return false;
-            }
-
             // галочки у строк, порядок и названия окон замок разрешает, остальное — нет
             return !Tab.IsContentLocked || Before.Content == After.Content || !Tab.BlockedByLock();
         }
@@ -370,9 +364,19 @@ public static class UndoJournal
         return stacks;
     }
 
-    public static string? UndoName() => Next(undo: true)?.Step.What;
+    public static string? UndoName() => Local is { } local ? local.UndoName : Next(undo: true)?.Step.What;
 
-    public static string? RedoName() => Next(undo: false)?.Step.What;
+    public static string? RedoName() => Local is { } local ? local.RedoName : Next(undo: false)?.Step.What;
+
+    /// <summary>
+    /// Своя память стрелок у вкладки-фильтра «Проводника»: галочки и режимы, пока вкладка открыта.
+    /// Открыли заново — память с чистого листа.
+    /// </summary>
+    public static ExplorerFilter? Local =>
+        AppState.Current is { Section: AppSection.Explorer, ActiveWorkspace.FilterOf: { } filter } ? filter : null;
+
+    /// <summary>Своя память стрелок поменялась — окну пора обновить стрелки.</summary>
+    public static void RaiseChanged() => Changed?.Invoke();
 
     /// <summary>Что сделают стрелки: самое последнее — действие в открытой вкладке или с вкладками её раздела.</summary>
     private static (Stacks Home, Step Step)? Next(bool undo)
@@ -561,6 +565,12 @@ public static class UndoJournal
 
     private static void Move(bool undo)
     {
+        if (Local is { } local)
+        {
+            local.Step(undo);
+            return;
+        }
+
         if (Next(undo) is not var (home, step) || !step.Ready())
         {
             return;

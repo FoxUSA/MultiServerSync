@@ -106,16 +106,17 @@ public partial class MainWindow : FluentWindow
         AppState.Current.ActiveWorkspaceChanged += workspace =>
         {
             // открыли вкладку из архива (или из основной ленты) — лента показывает её сторону
-            if (!workspace.IsPersonal)
-            {
-                (workspace.IsArchived ? _lastArchived : _lastMain)[State.TabsOf(workspace)] = workspace;
-            }
-
+            State.RememberInStrip(workspace);
             FollowActive();
             TabStrip.SelectedItem = workspace;
             WatchSeenFailure();
         };
         AppState.Current.ArchiveChanged += _ => FollowActive();
+        AppState.Current.ExplorerFilterLeft += OnExplorerFilterLeft;
+
+        // ярлыки ушли во второй ряд или вернулись в один — «+» и архив меняют раскладку
+        TabStrip.SizeChanged += (_, _) => ArrangeTabButtonsLater();
+        SetStrip.SizeChanged += (_, _) => ArrangeTabButtonsLater();
 
         // проводник просит открыть вкладку другого раздела — например, команду «здесь»
         AppState.Current.TabShowRequested += tab => ShowTab(tab, State.SectionOfTab(tab) switch
@@ -128,19 +129,7 @@ public partial class MainWindow : FluentWindow
 
         // лента наборов — основная или архив — идёт за набором выбранной таблицы, как лента вкладок
         SetupSetView();
-        AppState.Current.ActiveServerSetChanged += set =>
-        {
-            if (set.IsArchived)
-            {
-                _lastArchivedSet = set;
-            }
-            else
-            {
-                _lastMainSet = set;
-            }
-
-            FollowActiveSet();
-        };
+        AppState.Current.ActiveServerSetChanged += _ => FollowActiveSet();
         AppState.Current.SetArchiveChanged += _ => FollowActiveSet();
 
         // ряд разделов следит за открытым разделом: в раздел попадают и не кнопкой (из вкладки, из проводника)
@@ -289,6 +278,12 @@ public partial class MainWindow : FluentWindow
                 State.LeaveJump();
             }
 
+            // вкладка-фильтр тоже: кнопка «Проводник» — обычные вкладки
+            if (page == typeof(ExplorerPage))
+            {
+                State.CloseExplorerFilter();
+            }
+
             Navigate(page);
         }
     }
@@ -315,7 +310,8 @@ public partial class MainWindow : FluentWindow
     /// <summary>В поле ввода клавиши отменяют его собственный набор, а не действие вкладки.</summary>
     private void UndoKey(bool undo)
     {
-        if (Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase || !UndoJournal.Covers(State.Section))
+        if (Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase
+            || (!UndoJournal.Covers(State.Section) && UndoJournal.Local is null))
         {
             return;
         }
@@ -841,6 +837,50 @@ public partial class MainWindow : FluentWindow
         }
     }
 
+    /// <summary>Сервер, по которому щёлкнули дважды: окно правки откроется, когда отпустят кнопку.</summary>
+    private Models.ServerEntry? _paneServerToEdit;
+
+    /// <summary>
+    /// Двойной щелчок по серверу в панели слева — его окно правки поверх, без перехода в «Серверы». Любой сервер:
+    /// отмеченный или нет, под замком и приглушённый. Замок в строке — своя кнопка, её двойной щелчок не считается.
+    /// </summary>
+    private void OnPaneServerPress(object sender, MouseButtonEventArgs e)
+    {
+        _paneServerToEdit = null;
+
+        if (e.ClickCount != 2 || sender is not FrameworkElement { DataContext: Models.ServerCheck check })
+        {
+            return;
+        }
+
+        for (var node = e.OriginalSource as DependencyObject; node is not null && !ReferenceEquals(node, sender);
+             node = node is Visual ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node))
+        {
+            if (node is System.Windows.Controls.Button)
+            {
+                return;
+            }
+        }
+
+        _paneServerToEdit = check.Server;
+    }
+
+    /// <summary>
+    /// Окно — после отпускания: первый щелчок двойного уже переставил галочку, второй её вернёт, и только потом
+    /// открывается правка. Так двойной щелчок отметку не меняет.
+    /// </summary>
+    private void OnPaneServerRelease(object sender, MouseButtonEventArgs e)
+    {
+        if (_paneServerToEdit is not { } server)
+        {
+            return;
+        }
+
+        _paneServerToEdit = null;
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, new Action(() =>
+            ServerEditDialog.EditExisting(this, server, State.Section, State.ShowsWorkspaceTabs ? State.ActiveWorkspace : null)));
+    }
+
     /// <summary>Замок в строке целевого сервера: закрепить вкладку за ним или снять замок.</summary>
     private void OnPaneLockClick(object sender, RoutedEventArgs e)
     {
@@ -983,6 +1023,60 @@ public partial class MainWindow : FluentWindow
                 UpdateArchiveButton();
             },
         };
+
+        // после перетаскивания: его обработчики должны увидеть нажатие первыми
+        foreach (var strip in new[] { TabStrip, SetStrip })
+        {
+            strip.PreviewMouseLeftButtonDown += OnStripPress;
+            strip.PreviewMouseLeftButtonUp += OnStripRelease;
+        }
+    }
+
+    /// <summary>Невыбранный ярлык, на котором нажали: выберется, если отпустят на нём же, не перетащив.</summary>
+    private System.Windows.Controls.ListBoxItem? _pressedTab;
+
+    /// <summary>
+    /// Ярлык выбирается по отпусканию, а не по нажатию: иначе невыбранная вкладка открывалась целиком ещё до
+    /// перетаскивания — страница тяжёлая, и ярлык срывался с места рывком. Перетащили — вкладка не переключается.
+    /// Крестик, свитч и стрелки на ярлыке нажимаются как обычно.
+    /// </summary>
+    private void OnStripPress(object sender, MouseButtonEventArgs e)
+    {
+        _pressedTab = null;
+
+        if (e.ClickCount > 1
+            || sender is not System.Windows.Controls.ListBox strip
+            || System.Windows.Controls.ItemsControl.ContainerFromElement(strip, e.OriginalSource as DependencyObject)
+                is not System.Windows.Controls.ListBoxItem { IsSelected: false } container)
+        {
+            return;
+        }
+
+        for (var node = e.OriginalSource as DependencyObject; node is not null && !ReferenceEquals(node, container);
+             node = node is Visual ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node))
+        {
+            if (node is ButtonBase)
+            {
+                return;
+            }
+        }
+
+        _pressedTab = container;
+        e.Handled = true;
+    }
+
+    private void OnStripRelease(object sender, MouseButtonEventArgs e)
+    {
+        var pressed = _pressedTab;
+        _pressedTab = null;
+
+        // перетаскивание отпущено — его обработчик уже забрал отпускание
+        if (e.Handled || pressed is not { IsMouseOver: true } || sender is not System.Windows.Controls.ListBox strip)
+        {
+            return;
+        }
+
+        strip.SelectedItem = pressed.DataContext;
     }
 
     /// <summary>Кнопки разделов — в том порядке, в каком их расставили; незнакомые имена пропускаются.</summary>
@@ -1102,7 +1196,7 @@ public partial class MainWindow : FluentWindow
         ExplorerServerLockIcon.Symbol = tab.IsPaneLocked ? SymbolRegular.LockClosed24 : SymbolRegular.LockOpen24;
         ExplorerServerLock.ToolTip = tab.IsPaneLocked
             ? tab.ExplorerLockedPath is { Length: > 0 } lockedPath && explorer
-                ? $"Вкладка закреплена за сервером и папкой {lockedPath} — щелчок снимает замок"
+                ? $"Вкладка закреплена за сервером и папками {(tab.ExplorerLockedLocalPath is { Length: > 0 } local ? local + " и " : string.Empty)}{lockedPath}: внутрь можно, выше — нет. Щелчок снимает замок"
                 : "Вкладка закреплена за сервером — щелчок снимает замок"
             : tab.LockTip;
         ExplorerServerTag.Visibility = Visibility.Visible;
@@ -1208,52 +1302,68 @@ public partial class MainWindow : FluentWindow
     }
 
     /// <summary>
-    /// Правый щелчок по ярлыку вкладку не переключает, а переносит её в другую ленту: из основной —
-    /// в архив, из архива — обратно. Ярлык улетает к значку. У наборов серверов архива нет.
+    /// Правый щелчок по ярлыку вкладки или набора серверов вкладку не переключает, а открывает меню:
+    /// на основной ленте — «В архив», в архиве — «Из архива». Ярлык улетает к значку архива.
     /// </summary>
     private void OnTabStripRightDown(object sender, MouseButtonEventArgs e)
     {
         e.Handled = true;
 
-        if (ReferenceEquals(sender, SetStrip))
-        {
-            if (System.Windows.Controls.ItemsControl.ContainerFromElement(SetStrip, e.OriginalSource as DependencyObject)
-                is System.Windows.Controls.ListBoxItem { DataContext: ServerSet set } box)
-            {
-                var flightSet = FlyToArchive(box);
+        var strip = ReferenceEquals(sender, SetStrip) ? SetStrip : ReferenceEquals(sender, TabStrip) ? TabStrip : null;
 
-                if (!State.SetArchived(set, !set.IsArchived))
-                {
-                    flightSet?.Invoke();
-                }
-            }
-
-            return;
-        }
-
-        if (!ReferenceEquals(sender, TabStrip)
-            || System.Windows.Controls.ItemsControl.ContainerFromElement(TabStrip, e.OriginalSource as DependencyObject)
-                is not System.Windows.Controls.ListBoxItem { DataContext: Workspace workspace } container)
+        if (strip is null
+            || System.Windows.Controls.ItemsControl.ContainerFromElement(strip, e.OriginalSource as DependencyObject)
+                is not System.Windows.Controls.ListBoxItem { DataContext: ServerSet or Workspace } container)
         {
             return;
         }
 
-        if (workspace.IsMain)
+        var (archived, refusal) = container.DataContext switch
         {
-            AppLog.Hint("Основная вкладка в архив не убирается.", LogLevel.Warning);
-            return;
-        }
+            ServerSet set => (set.IsArchived, (string?)null),
+            Workspace { IsMain: true } => (false, "Основная вкладка в архив не убирается."),
+            Workspace { IsPersonal: true } => (false, "Личная вкладка в архив не убирается."),
+            Workspace workspace => (workspace.IsArchived, null),
+            _ => (false, null),
+        };
 
-        if (workspace.IsPersonal)
+        // только то, что подходит: на основной ленте — «В архив», в архиве — «Из архива»
+        var menu = new System.Windows.Controls.ContextMenu { PlacementTarget = container, Placement = PlacementMode.MousePoint };
+        menu.Items.Add(archived
+            ? ArchiveMenuItem("Из архива", SymbolRegular.TabArrowLeft24, enabled: true, null, () => MoveToOtherStrip(container))
+            : ArchiveMenuItem("В архив", SymbolRegular.Archive24, enabled: refusal is null, refusal, () => MoveToOtherStrip(container)));
+        menu.IsOpen = true;
+    }
+
+    private static System.Windows.Controls.MenuItem ArchiveMenuItem(string header, SymbolRegular icon, bool enabled, string? tip, Action click)
+    {
+        var item = new System.Windows.Controls.MenuItem
         {
-            AppLog.Hint("Личная вкладка в архив не убирается.", LogLevel.Warning);
-            return;
-        }
+            Header = header,
+            Icon = new SymbolIcon { Symbol = icon, FontSize = 16 },
+            IsEnabled = enabled,
+            ToolTip = tip,
+        };
 
+        System.Windows.Controls.ToolTipService.SetShowOnDisabled(item, tip is not null);
+        item.Click += (_, _) => click();
+        return item;
+    }
+
+    /// <summary>Вкладка или набор — в другую ленту: из основной в архив, из архива обратно. Ярлык улетает к значку.</summary>
+    private void MoveToOtherStrip(System.Windows.Controls.ListBoxItem container)
+    {
         // снимок ярлыка — до того, как он уйдёт из ленты
         var flight = FlyToArchive(container);
 
-        if (!State.SetArchived(workspace, !workspace.IsArchived))
+        var moved = container.DataContext switch
+        {
+            ServerSet set => State.SetArchived(set, !set.IsArchived),
+            Workspace workspace => State.SetArchived(workspace, !workspace.IsArchived),
+            _ => false,
+        };
+
+        if (!moved)
         {
             flight?.Invoke();
         }
@@ -1262,10 +1372,6 @@ public partial class MainWindow : FluentWindow
     // ── архив вкладок ─────────────────────────────────────────────────────────
 
     private readonly Dictionary<ObservableCollection<Workspace>, ListCollectionView> _tabViews = [];
-
-    /// <summary>Последняя открытая вкладка основной ленты и архива — в каждом разделе своя.</summary>
-    private readonly Dictionary<ObservableCollection<Workspace>, Workspace> _lastMain = [];
-    private readonly Dictionary<ObservableCollection<Workspace>, Workspace> _lastArchived = [];
 
     private Controls.TabReorder? _tabReorder;
 
@@ -1321,10 +1427,6 @@ public partial class MainWindow : FluentWindow
 
     /// <summary>Лента наборов показывает архив, а не основные наборы.</summary>
     private bool _setArchiveMode;
-
-    /// <summary>Последний открытый набор основной ленты и архива.</summary>
-    private ServerSet? _lastMainSet;
-    private ServerSet? _lastArchivedSet;
 
     private void SetupSetView()
     {
@@ -1398,8 +1500,8 @@ public partial class MainWindow : FluentWindow
     }
 
     /// <summary>
-    /// Значок под «+» — только у разделов с вкладками. В основной ленте — архив и число вкладок
-    /// в нём, в архиве — «назад к основной ленте».
+    /// Кнопка «Архив» рядом с «+» — только у разделов с вкладками и только когда в архиве что-то есть
+    /// (или он открыт). В основной ленте — значок архива, в архиве — «назад к основной ленте». Числа нет.
     /// </summary>
     private void UpdateArchiveButton()
     {
@@ -1411,13 +1513,10 @@ public partial class MainWindow : FluentWindow
         var what = sets ? "набор" : "вкладку";
 
         TabButtons.Visibility = _personalShown is null ? Visibility.Visible : Visibility.Collapsed;
-        shown &= _personalShown is null;
-        ArchiveButton.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
-        ArchiveRow.Height = shown ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        shown &= _personalShown is null && (archived > 0 || mode);
+        ArchiveHost.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
+        ArchiveButton.Visibility = ArchiveHost.Visibility;
         ArchiveIcon.Symbol = mode ? SymbolRegular.TabArrowLeft24 : SymbolRegular.Archive24;
-        ArchiveCount.Text = archived.ToString();
-        ArchiveCount.Visibility = archived > 0 && !mode ? Visibility.Visible : Visibility.Collapsed;
-        ArchiveButton.Opacity = archived > 0 || mode ? 1 : 0.6;
         ArchiveButton.Appearance = _dropOver ? ControlAppearance.Success
             : mode ? ControlAppearance.Primary
             : ControlAppearance.Secondary;
@@ -1425,6 +1524,51 @@ public partial class MainWindow : FluentWindow
             ? $"Открыт архив. Щелчок здесь или двойной щелчок по пустому месту ряда разделов — назад к основной ленте. Правый щелчок по ярлыку или перетаскивание сюда — вернуть {what} в основную ленту"
             : $"Архив: щелчок здесь или двойной щелчок по пустому месту ряда разделов — открыть. Убрать сюда {what} — правый щелчок по ярлыку или перетащить ярлык на этот значок";
         ShowArchiveMark();
+        ArrangeTabButtonsLater();
+    }
+
+    /// <summary>«+» и архив стоят друг над другом — ярлыки в несколько рядов.</summary>
+    private bool _buttonsStacked;
+
+    /// <summary>
+    /// После раскладки ленты: сразу при запуске и при новой вкладке ярлыков ещё нет, мерить нечего —
+    /// и кнопки оставались по-старому, пока не потянешь окно.
+    /// </summary>
+    private void ArrangeTabButtonsLater() =>
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(ArrangeTabButtons));
+
+    /// <summary>Место «+» рядом с архивом: ширина и отступ справа.</summary>
+    private const double PlusColumn = 44 + 4;
+
+    /// <summary>
+    /// Ярлыки в один ряд — «+» во всю высоту, архив справа от него. При такой раскладке ярлыки ушли бы во второй ряд —
+    /// «+» и архив одного размера друг над другом. Считается всегда по ширине ленты при старой раскладке:
+    /// иначе место, освобождённое столбиком, возвращало бы раскладку обратно, и кнопки прыгали.
+    /// </summary>
+    private void ArrangeTabButtons()
+    {
+        var strip = State.ShowsServerSetTabs ? SetStrip : TabStrip;
+        var stacked = false;
+
+        if (ArchiveHost.Visibility == Visibility.Visible && strip.Items.Count > 1
+            && strip.ItemContainerGenerator.ContainerFromIndex(0) is FrameworkElement first && first.DesiredSize.Width > 0)
+        {
+            var width = strip.ActualWidth - (_buttonsStacked ? PlusColumn : 0);
+            stacked = strip.Items.Count > Math.Max(1, (int)Math.Floor(width / first.DesiredSize.Width));
+        }
+
+        if (stacked == _buttonsStacked)
+        {
+            return;
+        }
+
+        _buttonsStacked = stacked;
+        System.Windows.Controls.Grid.SetRowSpan(TabButtons, stacked ? 1 : 2);
+        TabButtons.Width = stacked ? double.NaN : 44;
+        TabButtons.Height = stacked ? ArchiveHost.Height : double.NaN;
+        TabButtons.VerticalAlignment = stacked ? VerticalAlignment.Top : VerticalAlignment.Stretch;
+        System.Windows.Controls.Grid.SetRow(ArchiveHost, stacked ? 1 : 0);
+        System.Windows.Controls.Grid.SetColumn(ArchiveHost, stacked ? 0 : 1);
     }
 
     /// <summary>
@@ -1479,9 +1623,7 @@ public partial class MainWindow : FluentWindow
 
         if (_archiveMode)
         {
-            State.ActiveWorkspace = _lastMain.GetValueOrDefault(tabs) is { IsArchived: false } back && tabs.Contains(back)
-                ? back
-                : State.MainWorkspace;
+            State.ActiveWorkspace = State.LastInStrip(tabs, archived: false) ?? State.MainWorkspace;
             return;
         }
 
@@ -1493,9 +1635,7 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        State.ActiveWorkspace = _lastArchived.GetValueOrDefault(tabs) is { IsArchived: true } last && tabs.Contains(last)
-            ? last
-            : archived[0];
+        State.ActiveWorkspace = State.LastInStrip(tabs, archived: true) ?? archived[0];
     }
 
     /// <summary>Значок на «Серверах»: основная лента наборов ↔ архив, в выбранной таблице — последний открытый там набор.</summary>
@@ -1505,9 +1645,7 @@ public partial class MainWindow : FluentWindow
 
         if (_setArchiveMode)
         {
-            State.ActiveServerSet = _lastMainSet is { IsArchived: false } back && sets.Contains(back)
-                ? back
-                : sets.First(s => !s.IsArchived);
+            State.ActiveServerSet = State.LastInStrip(archived: false) ?? sets.First(s => !s.IsArchived);
             return;
         }
 
@@ -1519,9 +1657,7 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        State.ActiveServerSet = _lastArchivedSet is { IsArchived: true } last && sets.Contains(last)
-            ? last
-            : archived[0];
+        State.ActiveServerSet = State.LastInStrip(archived: true) ?? archived[0];
     }
 
     /// <summary>
@@ -1702,13 +1838,45 @@ public partial class MainWindow : FluentWindow
         scale.BeginAnimation(ScaleTransform.ScaleYProperty, pulse);
     }
 
+    /// <summary>Номер окна в панели серверов: фокус на окне — галочки ниже становятся его серверами.</summary>
+    private void OnPaneWindowClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: CopyWindow window })
+        {
+            State.ActiveWorkspace.ShowWindow(window);
+        }
+    }
+
     /// <summary>Стрелка справа от ярлыка личной вкладки — назад, к её вкладке копирования.</summary>
     private void OnBackToOwner(object sender, RoutedEventArgs e)
     {
-        if (State.PersonalShown is { Owner: { } owner })
+        if (State.PersonalShown is { Owner: { } owner } shown)
         {
+            // из вкладки-фильтра «Назад» ведёт в окно исключений, на «Проводник»: галочки сохраняются там
+            _backFromFilter = shown.FilterOf is not null;
             ShowTab(owner, State.DownloadTabs.Contains(owner) ? typeof(DownloadPage) : typeof(FilesPage));
         }
+    }
+
+    /// <summary>Из вкладки-фильтра ушли стрелкой «Назад».</summary>
+    private bool _backFromFilter;
+
+    /// <summary>
+    /// Вкладку-фильтр покинули: по «Назад» — всегда, иначе — если галочки поменяли, открывается окно исключений
+    /// на «Проводнике». «Сохранить» там пишет галочки в маски окон, «Отмена» их бросает.
+    /// </summary>
+    private void OnExplorerFilterLeft(ExplorerFilter filter)
+    {
+        var back = _backFromFilter;
+        _backFromFilter = false;
+
+        if (!back && !filter.HasChanges)
+        {
+            return;
+        }
+
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
+            ExcludeDialog.Edit(this, filter.Source, "копировании", viewOnly: filter.Source.IsPaneLocked, pending: filter)));
     }
 
     private void OnOpenSettings(object sender, RoutedEventArgs e) => Navigate(typeof(SettingsPage));
@@ -1978,7 +2146,7 @@ public partial class MainWindow : FluentWindow
 
         // вынесены ли вывод и запуски, пишется при их открытии и закрытии: при выходе
         // программа закрывает окна в своём порядке, и здесь их могло уже не быть
-        settings.LastSection = State.Section.ToString();
+        settings.LastSection = State.SectionToRemember().ToString();
 
         AppState.Current.SaveAll();
 

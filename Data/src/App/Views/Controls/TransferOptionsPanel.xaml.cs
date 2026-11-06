@@ -2,6 +2,8 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+using System.Windows.Media;
 using MultiServerSync.Services;
 using MultiServerSync.Views.Dialogs;
 
@@ -56,6 +58,7 @@ public partial class TransferOptionsPanel : UserControl
             }
 
             ApplyLock();
+            ApplyUnsent();
         };
 
         ModeGrid.SizeChanged += (_, _) => FitUnsent();
@@ -64,8 +67,8 @@ public partial class TransferOptionsPanel : UserControl
     }
 
     /// <summary>
-    /// Кнопка стоит в строке «сверять суммы», на свободном месте справа от неё. Узкому блоку места не хватает,
-    /// а подпись обрезаться не должна: тогда кнопка переходит в строку заголовка, высоту которой не меняет.
+    /// Свитч с подписью стоит в строке «сверять суммы», на свободном месте справа от неё. Узкому блоку места не хватает,
+    /// а подпись обрезаться не должна: тогда свитч переходит в строку заголовка, высоту которой не меняет.
     /// </summary>
     private void FitUnsent()
     {
@@ -98,6 +101,46 @@ public partial class TransferOptionsPanel : UserControl
         {
             ApplyLock();
         }
+        else if (e.PropertyName == nameof(Workspace.UnsentOn))
+        {
+            ApplyUnsent();
+        }
+    }
+
+    /// <summary>
+    /// Выключен — «Отметить незалитые». Включён — «Отмечены незалитые» и зелёный.
+    /// Галочки после включения правили руками — свитч и подпись тускло-красные, а если отметили уже залитое —
+    /// подпись «Отмечены залитые».
+    /// </summary>
+    private void ApplyUnsent()
+    {
+        if (Direction == TransferDirection.Both)
+        {
+            return;
+        }
+
+        var held = DataContext is Workspace { UnsentHeld: true };
+        var stale = held && DataContext is Workspace { UnsentOn: false };
+        var sentTicked = stale && DataContext is Workspace { UnsentSentTicked: true };
+        var download = Direction == TransferDirection.Download;
+        var what = sentTicked
+            ? (download ? "скачанные" : "залитые")
+            : (download ? "нескачанные" : "незалитые");
+
+        UnsentSwitch.IsChecked = held;
+        UnsentSwitch.Style = (Style)Resources[stale ? "UnsentStaleSwitchStyle" : "UnsentSwitchStyle"];
+        UnsentText.Text = (held ? "Отмечены " : "Отметить ") + what;
+
+        if (stale)
+        {
+            UnsentText.Foreground = (Brush)Resources["UnsentStaleTextBrush"];
+        }
+        else
+        {
+            UnsentText.ClearValue(TextBlock.ForegroundProperty);
+        }
+
+        FitUnsent();
     }
 
     /// <summary>
@@ -146,8 +189,7 @@ public partial class TransferOptionsPanel : UserControl
                 ExcludeButton.Visibility = Visibility.Collapsed;
                 ReplaceOption.Visibility = Visibility.Collapsed;
                 UnsentBlock.Visibility = Visibility.Visible;
-                UnsentButton.Content = "Отмечать нескачанные";
-                UnsentButton.ToolTip = "Пока кнопка включена, отмечены только нескачанные.";
+                UnsentBlock.ToolTip = "Пока свитч включён, отмечены только нескачанные. Красный — галочки поменяли руками.";
                 break;
 
             case TransferDirection.Both:
@@ -183,10 +225,11 @@ public partial class TransferOptionsPanel : UserControl
                 ExcludeButton.Visibility = Visibility.Collapsed;
                 ReplaceOption.Visibility = Visibility.Collapsed;
                 UnsentBlock.Visibility = Visibility.Visible;
-                UnsentButton.Content = "Отмечать незалитые";
-                UnsentButton.ToolTip = "Пока кнопка включена, отмечены только незалитые. Учитывает фильтры.";
+                UnsentBlock.ToolTip = "Пока свитч включён, отмечены только незалитые, с учётом фильтров. Красный — галочки поменяли руками.";
                 break;
         }
+
+        ApplyUnsent();
 
         // на страницах столбцы плотнее; у окна «Проводника» отступ из стиля
         foreach (var toggle in Toggles)
@@ -214,13 +257,19 @@ public partial class TransferOptionsPanel : UserControl
         {
             await workspace.ToggleUnsentAsync();
         }
+
+        // свитч переключился сам от щелчка; положение — по вкладке, даже если нажатие не прошло
+        ApplyUnsent();
     }
+
+    private void OnUnsentText(object sender, MouseButtonEventArgs e) => OnUnsent(sender, e);
 
     private void OnExcludes(object sender, RoutedEventArgs e)
     {
         if (DataContext is Workspace workspace)
         {
-            ExcludeDialog.Edit(Window.GetWindow(this), workspace, "копировании");
+            // кнопка видна только у «Проводника»: «Включить» там нет
+            ExcludeDialog.Edit(Window.GetWindow(this), workspace, "копировании", includes: false);
         }
     }
 }

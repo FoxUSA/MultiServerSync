@@ -11,21 +11,24 @@ using MultiServerSync.Views.Dialogs;
 namespace MultiServerSync.Views.Pages;
 
 /// <summary>
-/// Страница скачивания — зеркало копирования: вкладка делится на окна, в каждом таблица файлов и папок,
-/// каждая строка со своего сервера, папка здесь, те же правила «что качать» и исключения.
-/// Панель кнопок и параметры показывают окно в фокусе.
+/// Страница скачивания — зеркало копирования: вкладка делится на окна, таблица одна на все окна, строки окна —
+/// своей группой, каждая строка со своего сервера, папка у окна своя, те же правила «что качать» и исключения.
+/// Панель кнопок и параметры показывают окно в фокусе, фокус переходит щелчком по номеру окна.
 /// </summary>
 public partial class DownloadPage : Page
 {
+    /// <summary>Строки всех окон вкладки одним списком для общей таблицы.</summary>
+    private readonly Controls.WindowRows _rows = new(downloads: true);
+
     public DownloadPage()
     {
         InitializeComponent();
 
-        Controls.CopyWindowLayout.Follow(WindowsScroll, WindowsList);
-        Controls.CopyWindowLayout.Reorder(WindowsScroll, WindowsList, () => Workspace);
+        Controls.CopyWindowLayout.HookGroups(RowsGrid, _rows, ToggleWindowItems, FocusOn, AddWindowAfter, RemoveWindow, Rename);
         Controls.CopyWindowLayout.WatchFailures(this, () => Workspace);
         Controls.CopyWindowLayout.RestoreBand(BandRow, BandLeft);
 
+        DataContextChanged += (_, _) => RowsGrid.ItemsSource = _rows.Attach(Workspace);
         DataContext = AppState.Current.ActiveWorkspace;
         AppState.Current.ActiveWorkspaceChanged += workspace =>
         {
@@ -71,56 +74,61 @@ public partial class DownloadPage : Page
 
     private Workspace? Workspace => DataContext as Workspace;
 
-    /// <summary>Щелчок в окне переводит на него панель и параметры — раньше, чем сработает его кнопка.</summary>
-    private void OnWindowMouseDown(object sender, MouseButtonEventArgs e)
+    /// <summary>Окно элемента: строки папки, разделителя, строки таблицы или заглушки пустого окна.</summary>
+    private CopyWindow? WindowOf(object? sender) =>
+        _rows.WindowOf(sender is FrameworkElement element ? element.DataContext : sender);
+
+    /// <summary>Щелчок по номеру окна в таблице — фокус на нём: кнопки ряда, строка пути, сводка и параметры показывают его.</summary>
+    private void FocusOn(CopyWindow window)
     {
-        Core.FocusDrop.Leave(sender);
-        FocusWindowOf(sender);
+        Core.FocusDrop.Leave(this);
+        Workspace?.FocusWindow(window);
     }
 
-    private void OnWindowKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) => FocusWindowOf(sender);
-
-    private void FocusWindowOf(object sender)
+    /// <summary>Номер окна на разделителе: фокус на окне и все его строки отмечены — или, если уже все, сняты.</summary>
+    private void ToggleWindowItems(CopyWindow window)
     {
-        if (sender is FrameworkElement { DataContext: CopyWindow window })
+        FocusOn(window);
+
+        if (Workspace is { } workspace)
         {
-            Workspace?.FocusWindow(window);
+            workspace.SelectAllDownloads(workspace.AllDownloadsSelected != true);
         }
     }
 
+    /// <summary>Плюс единственного окна — под таблицей.</summary>
     private void OnAddWindow(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: CopyWindow after } && Workspace is { } workspace && !workspace.BlockedByLock())
+        if (Workspace is { } workspace)
         {
-            Controls.CopyWindowLayout.Show(WindowsList, workspace.AddCopyWindow(after));
+            AddWindowAfter(workspace.FocusedWindow);
         }
     }
 
-    private void OnRemoveWindow(object sender, RoutedEventArgs e)
+    private void AddWindowAfter(CopyWindow after)
     {
-        if (sender is FrameworkElement { DataContext: CopyWindow window } && Workspace is { } workspace && !workspace.BlockedByLock())
+        if (Workspace is { } workspace && !workspace.BlockedByLock())
+        {
+            Controls.CopyWindowLayout.Show(RowsGrid, _rows, workspace.AddCopyWindow(after));
+        }
+    }
+
+    private void RemoveWindow(CopyWindow window)
+    {
+        if (Workspace is { } workspace && !workspace.BlockedByLock())
         {
             workspace.RemoveCopyWindow(window);
         }
     }
 
-    /// <summary>Кнопка «Название»: плашки названий в окнах вкладки. Замок не держит: без плашек названия не сменить.</summary>
-    private void OnWindowNames(object sender, RoutedEventArgs e)
+    private void Rename(FrameworkElement plaque, CopyWindow window)
     {
         if (Workspace is { } workspace)
         {
-            workspace.ShowWindowNames = !workspace.ShowWindowNames;
+            Controls.CopyWindowLayout.Rename(plaque, window, workspace);
         }
     }
 
-    private void OnWindowNameDown(object sender, MouseButtonEventArgs e)
-    {
-        if (e.ClickCount == 2 && sender is FrameworkElement plaque && Workspace is { } workspace)
-        {
-            e.Handled = true;
-            Controls.CopyWindowLayout.Rename(plaque, workspace);
-        }
-    }
 
     private void OnWindowGridLoaded(object sender, RoutedEventArgs e)
     {
@@ -134,25 +142,24 @@ public partial class DownloadPage : Page
     /// Обзор сервера с выбором нескольких файлов и папок разом. Сервер меняется прямо в обзоре —
     /// строки встают с тем сервером, на котором их выбрали.
     /// </summary>
-    private void OnBrowseAdd(object sender, RoutedEventArgs e)
-    {
-        if (Workspace?.BlockedByLock() == true)
-        {
-            return;
-        }
+    private void OnBrowseAdd(object sender, RoutedEventArgs e) => BrowseInto(null);
 
+    /// <param name="into">Окно, куда встанут строки; null — окно в фокусе.</param>
+    private void BrowseInto(CopyWindow? into)
+    {
         if (Workspace is not { } workspace)
         {
             return;
         }
 
         var settings = AppState.Current.Settings;
+        var downloads = (into ?? workspace.FocusedWindow).Downloads;
 
         // обзор открывается на отмеченном слева сервере, из нескольких — на первом в списке;
         // ничего не отмечено — на сервере последней строки, как в прошлый раз
         var server =
             workspace.CopyTargets.FirstOrDefault()
-            ?? workspace.Downloads.LastOrDefault(d => d.Server is not null)?.Server
+            ?? downloads.LastOrDefault(d => d.Server is not null)?.Server
             ?? AppState.Current.Servers.FirstOrDefault(s => s.Id == settings.BrowseServerId)
             ?? AppState.Current.Servers.FirstOrDefault();
 
@@ -163,18 +170,18 @@ public partial class DownloadPage : Page
         }
 
         // папка — последней строки этого же сервера, иначе последняя открытая
-        var last = workspace.Downloads.LastOrDefault(d => d.Server == server);
+        var last = downloads.LastOrDefault(d => d.Server == server);
         var start = last is not null
             ? SshService.ParentRemote(last.Path)
             : settings.LastRemotePath;
 
-        Browse(workspace, server, start);
+        Browse(workspace, server, start, into);
     }
 
-    /// <summary>Значок в поле «Куда скачать»: папка вкладки — в буфер обмена.</summary>
+    /// <summary>Значок в поле «Куда скачать»: папка окна — в буфер обмена.</summary>
     private void OnCopyLocalFolder(object sender, RoutedEventArgs e)
     {
-        var path = Workspace?.LocalFolder?.Trim();
+        var path = WindowOf(sender)?.LocalFolder?.Trim();
 
         if (string.IsNullOrEmpty(path))
         {
@@ -188,14 +195,32 @@ public partial class DownloadPage : Page
         }
     }
 
-    /// <summary>Двойной щелчок: мимо строк — как «Выбрать на сервере» для этого окна, по строке — другой адрес для неё.</summary>
+    /// <summary>
+    /// Двойной щелчок: мимо строк — как «Выбрать на сервере» для окна в фокусе, по пустому окну — для этого окна,
+    /// по строке окна над его строками — «Обзор» папки этого окна, по строке — другой адрес для неё.
+    /// </summary>
     private void OnGridDoubleClick(object sender, MouseButtonEventArgs e) =>
-        Controls.CopyWindowLayout.DoubleClick(e, () => OnBrowseAdd(sender, e), row => PickForRow((DownloadItem)row));
+        Controls.CopyWindowLayout.DoubleClick(e, () => BrowseInto(null), row =>
+        {
+            if (row is DownloadItem item)
+            {
+                PickForRow(item);
+            }
+            else if (row is System.Windows.Data.CollectionViewGroup && WindowOf(row) is { } picked)
+            {
+                // строка окна над его строками — «Обзор» папки этого окна: первый щелчок уже дал ему фокус
+                OnPickFolder(picked, e);
+            }
+            else if (WindowOf(row) is { } window)
+            {
+                BrowseInto(window);
+            }
+        });
 
     /// <summary>Тот же обзор, с папки этой строки и на её сервере: первое выбранное встаёт на её место, остальное — новыми строками.</summary>
     private void PickForRow(DownloadItem item)
     {
-        if (Workspace is not { } workspace || workspace.BlockedByLock())
+        if (Workspace is not { } workspace)
         {
             return;
         }
@@ -214,30 +239,25 @@ public partial class DownloadPage : Page
         var first = dialog.SelectedItems[0];
         var path = SshService.NormalizeRemote(first.FullPath);
 
-        // тот же адрес — ничего не меняется и в журнал не идёт
-        if (dialog.Server.Id != item.ServerId || path != item.Path)
+        // тот же адрес — ничего не меняется
+        if ((dialog.Server.Id != item.ServerId || path != item.Path)
+            && workspace.ReplaceDownload(item, dialog.Server.Id, path, first.IsDirectory, first.Length, first.Modified) is { } problem)
         {
-            if (workspace.ReplaceDownload(item, dialog.Server.Id, path, first.IsDirectory, first.Length, first.Modified) is { } problem)
-            {
-                AppLog.Hint("Путь не сменён: " + problem + ".", LogLevel.Warning);
-            }
-            else
-            {
-                LogReplaced(workspace, item, dialog.Server, path);
-            }
+            AppLog.Hint("Путь не сменён: " + problem + ".", LogLevel.Warning);
         }
 
         if (dialog.SelectedItems.Count > 1)
         {
-            AddPicked(workspace, dialog.Server, dialog.SelectedItems.Skip(1).ToList());
+            AddPicked(workspace, dialog.Server, dialog.SelectedItems.Skip(1).ToList(), WindowOf(item));
         }
 
         Check();
     }
 
+    /// <summary>Под замком обзор только показывает: «Выбрать» отказывает, и сюда ничего не приходит.</summary>
     private RemoteBrowserWindow? PickOnServer(ServerEntry server, string start)
     {
-        var dialog = new RemoteBrowserWindow(server, start, pickMany: true)
+        var dialog = new RemoteBrowserWindow(server, start, pickMany: true, viewOnly: Workspace?.IsPaneLocked == true)
         {
             Owner = Window.GetWindow(this),
         };
@@ -246,57 +266,45 @@ public partial class DownloadPage : Page
     }
 
     /// <summary>Обзор с выбором нескольких файлов и папок; выбранное встаёт строками с сервером обзора.</summary>
-    private void Browse(Workspace workspace, ServerEntry server, string start)
+    private void Browse(Workspace workspace, ServerEntry server, string start, CopyWindow? into)
     {
         if (PickOnServer(server, start) is not { } dialog)
         {
             return;
         }
 
-        AddPicked(workspace, dialog.Server, dialog.SelectedItems);
+        AddPicked(workspace, dialog.Server, dialog.SelectedItems, into);
 
         // у новых папок сразу видны число файлов и размер
         Check();
     }
 
-    private static void AddPicked(Workspace workspace, ServerEntry server, IReadOnlyList<FsEntry> picked)
+    private static void AddPicked(Workspace workspace, ServerEntry server, IReadOnlyList<FsEntry> picked, CopyWindow? into = null)
     {
-        var added = workspace.AddDownloads(server, picked.Select(i => (i.FullPath, i.IsDirectory, i.Length, i.Modified)));
+        var window = into ?? workspace.FocusedWindow;
 
-        if (added > 0)
-        {
-            ActionLog.Info($"Добавлено для скачивания: {added} · всего {workspace.Downloads.Count}", server, AppSection.Download, workspace,
-                picked.Select(i => (i.IsDirectory ? "папка " : "файл ") + i.FullPath));
-        }
-        else
+        // правка списка в журнал не идёт
+        if (workspace.AddDownloads(server, picked.Select(i => (i.FullPath, i.IsDirectory, i.Length, i.Modified)), window) == 0)
         {
             AppLog.Hint("Всё выбранное уже есть в списке.");
         }
     }
 
-    private static void LogReplaced(Workspace workspace, DownloadItem item, ServerEntry? server, string path) =>
-        ActionLog.Info($"Путь строки сменён: {item.Name} → {path.TrimEnd('/').Split('/').Last()}", server, AppSection.Download, workspace,
-            [$"было: {item.Path}", $"стало: {path}"]);
-
     private void OnToggleAll(object sender, RoutedEventArgs e)
     {
         if (Workspace is { } workspace)
         {
-            // галочка в шапке трёхпозиционная — после «частично» щелчок отмечает все
-            workspace.SelectAllDownloads(workspace.AllDownloadsSelected != true);
+            // галочка в общей шапке трёхпозиционная и про все окна — после «частично» щелчок отмечает все
+            workspace.SelectAllWindowsDownloads(workspace.AllWindowsDownloadsSelected != true);
         }
     }
 
+    /// <summary>Под замком исключения открываются только посмотреть.</summary>
     private void OnExcludes(object sender, RoutedEventArgs e)
     {
-        if (Workspace?.BlockedByLock() == true)
-        {
-            return;
-        }
-
         if (Workspace is { } workspace)
         {
-            ExcludeDialog.Edit(Window.GetWindow(this), workspace, "скачивании");
+            ExcludeDialog.Edit(Window.GetWindow(this), workspace, "скачивании", viewOnly: workspace.IsPaneLocked);
         }
     }
 
@@ -332,10 +340,7 @@ public partial class DownloadPage : Page
         if (workspace.ReplaceDownloadPath(item, dialog.Value) is { } problem)
         {
             AppLog.Hint("Путь не сменён: " + problem + ".", LogLevel.Warning);
-            return;
         }
-
-        LogReplaced(workspace, item, item.Server, dialog.Value);
     }
 
     /// <summary>Корзина в конце строки: строка уходит из списка, на сервере ничего не удаляется.</summary>
@@ -348,9 +353,7 @@ public partial class DownloadPage : Page
 
         if (sender is FrameworkElement { DataContext: DownloadItem item } && Workspace is { } workspace)
         {
-            workspace.Downloads.Remove(item);
-            ActionLog.Info($"Убрана строка: {item.Name}", item.Server, AppSection.Download, workspace,
-                [item.Path, $"в списке осталось: {workspace.Downloads.Count}"]);
+            (WindowOf(item) ?? workspace.FocusedWindow).Downloads.Remove(item);
         }
     }
 
@@ -379,37 +382,34 @@ public partial class DownloadPage : Page
         }
     }
 
+    /// <summary>«Обзор» в строке папки окна. Под замком папки можно посмотреть, но выбранная не встаёт: отказ плашкой.</summary>
     private void OnPickFolder(object sender, RoutedEventArgs e)
     {
-        if (Workspace?.BlockedByLock() == true)
-        {
-            return;
-        }
-
         if (Workspace is not { } workspace)
         {
             return;
         }
 
+        var window = WindowOf(sender) ?? workspace.FocusedWindow;
         var dialog = new Microsoft.Win32.OpenFolderDialog
         {
             Title = "Куда скачать",
         };
 
-        if (Directory.Exists(workspace.LocalFolder))
+        if (Directory.Exists(window.LocalFolder))
         {
-            dialog.InitialDirectory = workspace.LocalFolder;
+            dialog.InitialDirectory = window.LocalFolder;
         }
 
-        if (dialog.ShowDialog(Window.GetWindow(this)) == true)
+        if (dialog.ShowDialog(Window.GetWindow(this)) == true && !workspace.BlockedByLock())
         {
-            workspace.LocalFolder = dialog.FolderName;
+            window.LocalFolder = dialog.FolderName;
         }
     }
 
     private void OnOpenFolder(object sender, RoutedEventArgs e)
     {
-        var folder = Workspace?.LocalFolder.Trim() ?? string.Empty;
+        var folder = (WindowOf(sender) ?? Workspace?.FocusedWindow)?.LocalFolder.Trim() ?? string.Empty;
 
         if (!Directory.Exists(folder))
         {

@@ -19,7 +19,20 @@ public sealed class SavedCopyWindow
 
     public string RemotePath { get; set; } = string.Empty;
 
+    /// <summary>Целевые серверы окна копирования. Null — файл прежней версии: как у окна #1.</summary>
+    public List<string>? ServerIds { get; set; }
+
+    /// <summary>Набор серверов окна копирования и память наборов (одиночный выбор). Null — как у окна #1.</summary>
+    public string? PaneSetId { get; set; }
+
+    public bool PaneAllSets { get; set; }
+
+    public List<PaneScopeState>? PaneScopes { get; set; }
+
     public string Name { get; set; } = string.Empty;
+
+    /// <summary>Строки окна свёрнуты.</summary>
+    public bool Collapsed { get; set; }
 
     public List<SavedDownloadItem>? Downloads { get; set; }
 
@@ -43,7 +56,8 @@ public sealed class SavedCopyWindow
 /// <summary>
 /// Шестерёнка у «Терминал / Журнал»: какие разовые действия раздела писать в терминал и в журнал.
 /// Сервер — действия на сервере, Компьютер — на этом ПК, Программа — списки, вкладки, наборы.
-/// Ошибки и предупреждения пишутся всегда, запуски «Выполнить» это не трогает.
+/// Ошибки и предупреждения пишутся всегда, запуски «Выполнить» это не трогает. Действия программы по умолчанию
+/// не пишутся (сказано 2026-11-06: человеку они ни к чему) — только в файл лога.
 /// </summary>
 public sealed class ActionOutputPrefs
 {
@@ -55,9 +69,9 @@ public sealed class ActionOutputPrefs
 
     public bool ComputerJournal { get; set; } = true;
 
-    public bool ProgramTerminal { get; set; } = true;
+    public bool ProgramTerminal { get; set; }
 
-    public bool ProgramJournal { get; set; } = true;
+    public bool ProgramJournal { get; set; }
 }
 
 public sealed class AppSettings
@@ -100,11 +114,11 @@ public sealed class AppSettings
     /// </summary>
     public ObservableCollection<string> RemotePathHistory { get; set; } = new();
 
-    public ObservableCollection<string> CommandHistory { get; set; } = new();
-
     /// <summary>Избранные команды: команда плюс название, что она делает.</summary>
     public ObservableCollection<CommandSnippet> CommandBook { get; set; } = new();
 
+    /// <summary>Вкладки избранного по порядку: пустые тоже живут, пока их не удалят.</summary>
+    public ObservableCollection<string> CommandBookGroups { get; set; } = new();
     /// <summary>Id сервера, который открывается в обзоре папок по умолчанию.</summary>
     public string BrowseServerId { get; set; } = string.Empty;
 
@@ -215,6 +229,12 @@ public sealed class AppSettings
     public bool ExcludeDialogOnGlobal { get; set; }
 
     /// <summary>
+    /// Вкладка окна исключений, на которой его закрыли: 0 — «Проводник», 1 — «Эта вкладка», 2 — «Глобально».
+    /// Нет — из старых настроек, по <see cref="ExcludeDialogOnGlobal"/>.
+    /// </summary>
+    public int? ExcludeDialogTab { get; set; }
+
+    /// <summary>
     /// Куда писать разовые действия — у каждого раздела своё (ключ — имя раздела). Раздела нет —
     /// всё включено.
     /// </summary>
@@ -303,6 +323,9 @@ public sealed class AppSettings
 
     /// <summary>Список запусков был вынесен в отдельное окно.</summary>
     public bool RunsDetached { get; set; }
+
+    /// <summary>В «Проводнике» окно вывода было перевёрнуто окном команды.</summary>
+    public bool ExplorerCommandOpen { get; set; }
 
     public double OutputWidth { get; set; } = 900;
 

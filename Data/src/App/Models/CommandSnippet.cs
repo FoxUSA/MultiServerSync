@@ -10,6 +10,7 @@ namespace MultiServerSync.Models;
 public sealed class CommandSnippet : ObservableObject
 {
     private string _comment = string.Empty;
+    private string _group = string.Empty;
     private string _command = string.Empty;
     private List<SavedCommandStep> _steps = new();
 
@@ -17,6 +18,13 @@ public sealed class CommandSnippet : ObservableObject
     {
         get => _comment;
         set => Set(ref _comment, value);
+    }
+
+    /// <summary>Вкладка избранного, где лежит запись. Пусто — запись старой версии, её забирает первая вкладка.</summary>
+    public string Group
+    {
+        get => _group;
+        set => Set(ref _group, value ?? string.Empty);
     }
 
     /// <summary>Команда одиночной записи; у многозадачной — текст первого окна.</summary>

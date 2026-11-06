@@ -33,19 +33,37 @@
       <Setter Property="FontSize" Value="12" />
     </Style>
 
-    <!--  кнопка нажата — оранжевая рамка. Отдельным слоем: шаблон ui:Button свою рамку перекрашивает сам  -->
-    <Style x:Key="UnsentRingStyle" TargetType="Border">
-      <Setter Property="BorderBrush" Value="#E07A1F" />
-      <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="CornerRadius" Value="4" />
-      <Setter Property="IsHitTestVisible" Value="False" />
-      <Setter Property="Visibility" Value="Collapsed" />
-      <Style.Triggers>
-        <DataTrigger Binding="{Binding UnsentOn}" Value="True">
-          <Setter Property="Visibility" Value="Visible" />
-        </DataTrigger>
-      </Style.Triggers>
+    <!--  свитч «Незалитые»: включён — зелёным; галочки тронули руками — тускло-красным.
+          Тема та же, подменены только кисти включённой заливки, как у DangerSwitchStyle  -->
+    <Style
+      x:Key="UnsentSwitchStyle"
+      BasedOn="{StaticResource {x:Type ui:ToggleSwitch}}"
+      TargetType="ui:ToggleSwitch">
+      <Style.Resources>
+        <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#2E9E4A" />
+        <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#36AE54" />
+        <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#278A40" />
+        <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="Transparent" />
+        <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="Transparent" />
+        <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="Transparent" />
+      </Style.Resources>
     </Style>
+
+    <Style
+      x:Key="UnsentStaleSwitchStyle"
+      BasedOn="{StaticResource {x:Type ui:ToggleSwitch}}"
+      TargetType="ui:ToggleSwitch">
+      <Style.Resources>
+        <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#A8463E" />
+        <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#B85048" />
+        <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#953C35" />
+        <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="Transparent" />
+        <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="Transparent" />
+        <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="Transparent" />
+      </Style.Resources>
+    </Style>
+
+    <SolidColorBrush x:Key="UnsentStaleTextBrush" Color="#C8645C" />
   </UserControl.Resources>
 
   <Border
@@ -178,21 +196,28 @@
           ToolTip="Сняли — копирование, которое перезапишет файлы в папке назначения, сначала спросит. Одинаковые файлы при сверке по дате или сумме заменой не считаются."
           Visibility="Collapsed" />
         <!--  только на «Копировании» и «Скачивании»: у «Проводника» строк с галочками нет  -->
-        <Grid
+        <StackPanel
           x:Name="UnsentBlock"
           Grid.Row="3"
           Grid.Column="1"
           Grid.ColumnSpan="3"
           HorizontalAlignment="Right"
-          VerticalAlignment="Center">
-          <ui:Button
-            x:Name="UnsentButton"
-            Height="24"
-            Padding="8,0"
+          VerticalAlignment="Center"
+          Background="Transparent"
+          Orientation="Horizontal">
+          <TextBlock
+            x:Name="UnsentText"
+            Margin="0,0,8,0"
+            VerticalAlignment="Center"
+            FontSize="12"
+            MouseLeftButtonUp="OnUnsentText" />
+          <!--  состояние ставит код: щелчок не переключает сам, а зовёт ToggleUnsentAsync  -->
+          <ui:ToggleSwitch
+            x:Name="UnsentSwitch"
+            VerticalAlignment="Center"
             Click="OnUnsent"
-            FontSize="11" />
-          <Border Style="{StaticResource UnsentRingStyle}" />
-        </Grid>
+            Style="{StaticResource UnsentSwitchStyle}" />
+        </StackPanel>
       </Grid>
       </StackPanel>
     </StackPanel>

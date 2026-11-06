@@ -220,6 +220,12 @@ public partial class CodeEditorWindow : FluentWindow
             return false;
         }
 
+        if (!Editor.IsModified)
+        {
+            Status(Controls.SaveGate.Nothing);
+            return true;
+        }
+
         byte[] data;
 
         try
@@ -566,7 +572,12 @@ public partial class CodeEditorWindow : FluentWindow
 
     // ── строка состояния и заголовок ─────────────────────────────────────────
 
-    private void UpdateTitle() => Title = (Editor.IsModified ? "● " : string.Empty) + $"{_name} — {_where}";
+    /// <summary>Заголовок с точкой несохранённых правок; «Сохранить» тусклая, пока править нечего.</summary>
+    private void UpdateTitle()
+    {
+        Title = (Editor.IsModified ? "● " : string.Empty) + $"{_name} — {_where}";
+        Controls.SaveGate.Show(SaveButton, Editor.IsModified);
+    }
 
     private void UpdateInfo()
     {

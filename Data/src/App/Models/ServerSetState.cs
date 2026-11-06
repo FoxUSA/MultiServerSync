@@ -34,6 +34,11 @@ public sealed class ServerSetsFile
     /// <summary>Выбрана правая таблица.</summary>
     public bool RightActive { get; set; }
 
+    /// <summary>Последний открытый набор основной ленты и архива: значок архива возвращает на них.</summary>
+    public string? LastMainId { get; set; }
+
+    public string? LastArchivedId { get; set; }
+
     /// <summary>
     /// Прежние общие «Все» и одиночный выбор на «Всех». Теперь это своё у каждой вкладки
     /// (<see cref="WorkspaceState.PaneAllSets"/>), здесь — только чтобы перенести во вкладки

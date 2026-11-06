@@ -2,9 +2,10 @@
   x:Class="MultiServerSync.Views.Dialogs.ExcludeDialog"
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:controls="clr-namespace:MultiServerSync.Views.Controls"
   xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
   Title="Исключения"
-  Width="520"
+  Width="998"
   MinHeight="0"
   ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
   ExtendsContentIntoTitleBar="True"
@@ -18,8 +19,7 @@
 
   <ui:FluentWindow.Resources>
     <!--  вкладки окна — кнопками того же вида, что шаблоны ниже: у темы ярлыки сливались с фоном окна.
-          Открытая — белым жирным и с полоской акцентом снизу, остальные — серым. Рамка цветом исключений,
-          пока в поле вкладки есть маски (её ставит код), иначе рамка обычной кнопки.
+          Открытая — белым жирным и с полоской акцентом снизу, остальные — серым. Рамка всегда обычной кнопки.
           Цвет и жирность — только у подписи ярлыка: свойствами самой вкладки они протекали в её содержимое  -->
     <Style x:Key="ExcludeTabStyle" TargetType="TabItem">
       <Setter Property="Margin" Value="0,0,4,0" />
@@ -87,7 +87,14 @@
       ShowMaximize="False"
       ShowMinimize="False" />
 
-    <StackPanel Grid.Row="1" Margin="22,6,22,18">
+    <Grid Grid.Row="1" Margin="22,6,22,18">
+      <Grid.ColumnDefinitions>
+        <!--  ширина — под ряд «Проводник · Эта вкладка · Глобально» и свитч «Глобальный фильтр» целиком  -->
+        <ColumnDefinition Width="494" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
+
+    <StackPanel x:Name="LeftColumn" Grid.Column="0">
       <!--  свои маски вкладки и общие на все вкладки; шаблоны ниже дописываются в открытую  -->
       <TabControl x:Name="Tabs">
         <!--  ряд ярлыков и под ним поле открытой вкладки — без рамок и фонов темы  -->
@@ -113,7 +120,7 @@
           <!--  подпись — про включённое положение: фиолетовый = действуют  -->
           <ui:ToggleSwitch
             x:Name="UseGlobalSwitch"
-            Content="Применять на этой вкладке"
+            Content="Глобальный фильтр"
             FontSize="13"
             ToolTip="Глобальные исключения на этой вкладке. Выключено — они здесь не действуют, но сами не стираются">
             <ui:ToggleSwitch.Resources>
@@ -128,7 +135,33 @@
           </ui:ToggleSwitch>
         </TabControl.Tag>
 
-        <!--  зелёная рамка, как плашка на кнопке «Исключения», пока в поле есть маски  -->
+        <!--  фильтр галочками в «Проводнике»: здесь только описание и переход, итог — справа  -->
+        <TabItem
+          x:Name="ExplorerTab"
+          Header="Проводник"
+          Style="{StaticResource ExcludeTabStyle}">
+          <StackPanel Margin="0,10,0,0">
+            <TextBlock
+              MinHeight="54"
+              FontSize="13"
+              Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+              Text="Отметьте галочками в окне проводника, что копируется или что не копируется. Галочки сильнее масок «Эта вкладка» и «Глобально», сначала они стоят по этим маскам."
+              TextWrapping="Wrap" />
+            <ui:Button
+              x:Name="OpenExplorerButton"
+              Margin="0,10,0,0"
+              Padding="12,5"
+              Click="OnOpenExplorer"
+              Content="Открыть в проводнике"
+              Icon="{ui:SymbolIcon FolderOpen24}" />
+            <TextBlock
+              x:Name="ExplorerState"
+              Margin="0,10,0,0"
+              FontSize="12"
+              Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+              TextWrapping="Wrap" />
+          </StackPanel>
+        </TabItem>
         <TabItem
           x:Name="OwnTab"
           Header="Эта вкладка"
@@ -141,24 +174,55 @@
               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
               Text="Что не копировать — по маске в строке. *.log и node_modules — на любой глубине, .env — ещё и .env.local, cache/ — только папка, /build — только в корне копируемой папки."
               TextWrapping="Wrap" />
+            <TextBlock
+              x:Name="OwnExcludeTitle"
+              Margin="0,8,0,4"
+              FontSize="13"
+              FontWeight="SemiBold"
+              Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+              Text="Исключить:" />
             <ui:TextBox
               x:Name="OwnBox"
               Height="150"
-              Margin="0,10,0,0"
               AcceptsReturn="True"
               FontFamily="Consolas"
               PlaceholderText="ничего не исключается"
               VerticalContentAlignment="Top"
               VerticalScrollBarVisibility="Auto" />
+            <!--  только на «Копировании» и «Скачивании»: сильнее «Исключить». Хранится в тех же масках вкладки строками с «+»  -->
+            <StackPanel x:Name="IncludePanel">
+              <TextBlock
+                Margin="0,10,0,4"
+                FontSize="13"
+                FontWeight="SemiBold"
+                Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                Text="Включить:" />
+              <TextBlock
+                Margin="0,0,0,6"
+                FontSize="12"
+                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                Text="Едет, даже если попало под «Исключить». Например: исключить public/**, включить *.html."
+                TextWrapping="Wrap" />
+              <ui:TextBox
+                x:Name="IncludeBox"
+                Height="110"
+                AcceptsReturn="True"
+                FontFamily="Consolas"
+                PlaceholderText="ничего не возвращается"
+                VerticalContentAlignment="Top"
+                VerticalScrollBarVisibility="Auto" />
+            </StackPanel>
           </StackPanel>
         </TabItem>
         <TabItem
           x:Name="GlobalTab"
           Header="Глобально"
           Style="{StaticResource ExcludeTabStyle}">
-          <StackPanel Margin="0,10,0,0">
+          <!--  поле выше обычного — на всю высоту вкладки, ровно с «Эту вкладку», где полей два; высоту ставит код  -->
+          <DockPanel Margin="0,10,0,0">
             <TextBlock
               MinHeight="54"
+              DockPanel.Dock="Top"
               FontSize="13"
               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
               Text="Действуют на всех вкладках «Копирования», «Проводника» и «Скачивания» вместе с исключениями вкладки. Переключатель выше выключает их только здесь."
@@ -172,10 +236,12 @@
               PlaceholderText="ничего не исключается"
               VerticalContentAlignment="Top"
               VerticalScrollBarVisibility="Auto" />
-          </StackPanel>
+          </DockPanel>
         </TabItem>
       </TabControl>
 
+      <!--  шаблоны дописываются в поле масок — на «Проводнике» поля нет, и их тоже нет  -->
+      <StackPanel x:Name="TemplatesBlock">
       <TextBlock
         Margin="0,12,0,6"
         FontSize="13"
@@ -215,23 +281,95 @@
         FontSize="12"
         Foreground="{DynamicResource TextFillColorTertiaryBrush}"
         Visibility="Collapsed" />
+      </StackPanel>
     </StackPanel>
+
+      <!--  справа — как понята каждая маска открытого поля и сколько файлов вкладки она отсеет.
+            Высотой с левую колонку: длинный список листается, а не раздувает окно. Строки ставит код  -->
+      <Border
+        Grid.Column="1"
+        Height="{Binding ActualHeight, ElementName=LeftColumn}"
+        Margin="16,0,0,0"
+        Padding="12,8"
+        VerticalAlignment="Top"
+        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+        BorderThickness="1"
+        CornerRadius="4">
+        <DockPanel>
+          <TextBlock
+            x:Name="CheckTitle"
+            Margin="0,0,0,6"
+            DockPanel.Dock="Top"
+            FontSize="13"
+            Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+            Text="Как понята каждая маска:" />
+          <TextBlock
+            x:Name="CheckEmpty"
+            DockPanel.Dock="Top"
+            FontSize="12"
+            Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+            Text="Масок нет — ничего не исключается."
+            TextWrapping="Wrap" />
+          <!--  одно пояснение на всю таблицу, а не в каждой строке  -->
+          <TextBlock
+            x:Name="CheckLegend"
+            Margin="0,4,0,0"
+            DockPanel.Dock="Bottom"
+            FontSize="11"
+            Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+            Text="Везде — имя на любой глубине, в корне — только в корне копируемой папки, по пути — путь от неё. +.* — ещё и варианты вроде .env.local."
+            TextWrapping="Wrap"
+            Visibility="Collapsed" />
+          <!--  итог всех масок вместе: столько поедет на самом деле  -->
+          <TextBlock
+            x:Name="CheckTotal"
+            Margin="0,6,0,0"
+            DockPanel.Dock="Bottom"
+            FontSize="13"
+            FontWeight="SemiBold"
+            Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+            TextWrapping="Wrap"
+            Visibility="Collapsed" />
+          <ScrollViewer x:Name="CheckScroll" VerticalScrollBarVisibility="Auto">
+            <!--  отступ справа — под полосу прокрутки темы: она ложится поверх и закрывала числа  -->
+            <Grid x:Name="CheckTable" Margin="0,0,14,0">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+            </Grid>
+          </ScrollViewer>
+        </DockPanel>
+      </Border>
+    </Grid>
 
     <Border
       Grid.Row="2"
       Padding="22,14">
       <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
         <ui:Button
+          x:Name="SaveButton"
           MinWidth="110"
           Margin="0,0,8,0"
           Click="OnSave"
           Content="Сохранить" />
         <ui:Button
+          x:Name="CancelButton"
           MinWidth="110"
           Click="OnCancel"
           Content="Отмена"
           IsCancel="True" />
       </StackPanel>
     </Border>
+
+    <!--  отказ под нажатой кнопкой: плашки главного окна под этим окном не видно  -->
+    <controls:ActionToast
+      x:Name="Toast"
+      Grid.RowSpan="3"
+      Panel.ZIndex="1000"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top" />
   </Grid>
 </ui:FluentWindow>

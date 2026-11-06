@@ -121,6 +121,7 @@ public sealed class AppState : ObservableObject
             }
 
             _activeSet = value;
+            RememberInStrip(value);
             Raise();
             RaiseMany(nameof(ServersLeft), nameof(ServersRight));
 
@@ -135,6 +136,26 @@ public sealed class AppState : ObservableObject
     }
 
     public event Action<ServerSet>? ActiveServerSetChanged;
+
+    /// <summary>Последний открытый набор основной ленты и архива — переживает перезапуск.</summary>
+    private ServerSet? _lastMainSet;
+    private ServerSet? _lastArchivedSet;
+
+    private void RememberInStrip(ServerSet set)
+    {
+        if (set.IsArchived)
+        {
+            _lastArchivedSet = set;
+        }
+        else
+        {
+            _lastMainSet = set;
+        }
+    }
+
+    /// <summary>Набор, открытый в ленте последним, если он ещё там.</summary>
+    public ServerSet? LastInStrip(bool archived) =>
+        (archived ? _lastArchivedSet : _lastMainSet) is { } set && set.IsArchived == archived && ServerSets.Contains(set) ? set : null;
 
     // ── две таблицы на странице «Серверы»: выбранная правится кнопками и ярлыками наверху ──
 
@@ -296,6 +317,15 @@ public sealed class AppState : ObservableObject
         RaiseMany(nameof(PaneSet), nameof(PaneAllSets), nameof(PaneSetTitle), nameof(PaneShowIp), nameof(PaneShowUser));
         RaiseTerminalChecks();
         RaiseSingleSelect();
+    }
+
+    /// <summary>Вкладка сама сменила набор и свитч (окно копирования в фокусе) — панель слева перечитывается, если она её.</summary>
+    public void RefreshPane(Workspace tab)
+    {
+        if (ReferenceEquals(PaneOwner, tab))
+        {
+            RaisePane();
+        }
     }
 
     /// <summary>Ряд вкладок — на «Копировании» и на «Команде», у каждой свои вкладки.</summary>
@@ -683,6 +713,10 @@ public sealed class AppState : ObservableObject
     /// </summary>
     public bool PaneHighlightsPicks => _section is AppSection.Files or AppSection.Command or AppSection.Download;
 
+    /// <summary>Значок «окно команды» в строке кнопок терминала — только в «Проводнике»: на других страницах окно команды своё.</summary>
+    public System.Windows.Visibility CommandFlipVisibility =>
+        _section == AppSection.Explorer ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+
     /// <summary>Свитч команд после копирования переключили — галочка «+ команды» появляется или прячется.</summary>
     public void RaiseChainCopy() => Raise(nameof(ChainCopyVisibility));
 
@@ -829,11 +863,23 @@ public sealed class AppState : ObservableObject
                     break;
                 case AppSection.Explorer:
                     _activeExplorer = value;
+
+                    // ушли из вкладки-фильтра на другую вкладку «Проводника» — фильтр закрывается
+                    if (_filterTab is { } filter && !ReferenceEquals(value, filter))
+                    {
+                        Left(filter);
+                        _filterTab = null;
+                        _explorerBeforeFilter = null;
+                        ExplorerTabs.Remove(filter);
+                    }
+
                     break;
                 default:
                     _active = value;
                     break;
             }
+
+            RememberInStrip(value);
 
             // вкладка другого раздела стала текущей «за кадром» — на экране ничего не меняется
             if (section != TabSection)
@@ -886,9 +932,14 @@ public sealed class AppState : ObservableObject
                 ReturnFromJump();
             }
 
+            if (leaving == AppSection.Explorer && value != AppSection.Explorer)
+            {
+                CloseExplorerFilter();
+            }
+
             // лента показывает вкладки открытого раздела — сначала список, потом выбор в нём
             RaiseMany(nameof(Section), nameof(Tabs), nameof(ShowsWorkspaceTabs), nameof(ShowsServerSetTabs), nameof(ShowsTabStrip),
-                nameof(AutoCopyCurrent), nameof(CopyPass), nameof(CopyPassAvailable), nameof(CopyPassVisibility), nameof(LogAsFile), nameof(ChainCopyVisibility), nameof(PaneHighlightsPicks),
+                nameof(AutoCopyCurrent), nameof(CopyPass), nameof(CopyPassAvailable), nameof(CopyPassVisibility), nameof(LogAsFile), nameof(ChainCopyVisibility), nameof(CommandFlipVisibility), nameof(PaneHighlightsPicks),
                 nameof(Everywhere), nameof(TerminalOwner),
                 nameof(PaneShowIp), nameof(PaneShowUser));
             RaisePane();
@@ -923,6 +974,22 @@ public sealed class AppState : ObservableObject
     }
 
     public event Action<Workspace>? ActiveWorkspaceChanged;
+
+    /// <summary>Последняя открытая вкладка основной ленты и архива — в каждом разделе своя, переживает перезапуск.</summary>
+    private readonly Dictionary<(ObservableCollection<Workspace> Tabs, bool Archived), Workspace> _lastInStrip = [];
+
+    /// <summary>Вкладку открыли — она последняя в своей ленте. Личной и вкладки-фильтра в лентах нет.</summary>
+    public void RememberInStrip(Workspace workspace)
+    {
+        if (!workspace.IsPersonal && workspace.FilterOf is null && !ReferenceEquals(workspace, _serversDesk))
+        {
+            _lastInStrip[(TabsOf(workspace), workspace.IsArchived)] = workspace;
+        }
+    }
+
+    /// <summary>Вкладка, открытая в ленте последней, если она ещё там.</summary>
+    public Workspace? LastInStrip(ObservableCollection<Workspace> tabs, bool archived) =>
+        _lastInStrip.GetValueOrDefault((tabs, archived)) is { } last && last.IsArchived == archived && tabs.Contains(last) ? last : null;
 
     /// <summary>Просьба показать терминал внизу окна — операция только что запущена.</summary>
     public event Action? TerminalRequested;
@@ -1055,7 +1122,9 @@ public sealed class AppState : ObservableObject
             ActiveId = ActiveServerSet.Id,
             OtherId = OtherServerSet.Id,
             RightActive = _serversRightActive,
-            Sets = ServerSets.Select(s => s.ToState()).ToList(),
+            LastMainId = LastInStrip(archived: false)?.Id,
+            LastArchivedId = LastInStrip(archived: true)?.Id,
+            Sets =ServerSets.Select(s => s.ToState()).ToList(),
         });
     }
 
@@ -1108,6 +1177,9 @@ public sealed class AppState : ObservableObject
             }
 
             _activeSet = ServerSets.FirstOrDefault(s => s.Id == file?.ActiveId) ?? ServerSets[0];
+            _lastMainSet = ServerSets.FirstOrDefault(s => s.Id == file?.LastMainId);
+            _lastArchivedSet = ServerSets.FirstOrDefault(s => s.Id == file?.LastArchivedId);
+            RememberInStrip(_activeSet);
             _otherSet = ServerSets.FirstOrDefault(s => s.Id == file?.OtherId);
             _serversRightActive = file?.RightActive == true;
             _legacyAllSets = file?.LegacyShowAll == true;
@@ -1245,7 +1317,8 @@ public sealed class AppState : ObservableObject
     }
 
     /// <summary>Личная вкладка, на которую перешли: она одна на ленте «Команд». Null — лента обычная.</summary>
-    public Workspace? PersonalShown => _section == AppSection.Command && ReferenceEquals(_activeCommand, _jumpedTo) ? _jumpedTo : null;
+    public Workspace? PersonalShown =>
+        (_section == AppSection.Command && ReferenceEquals(_activeCommand, _jumpedTo) ? _jumpedTo : null) ?? FilterShown;
 
     /// <summary>Вкладка, на которой раздел был до перехода.</summary>
     private Workspace CommandBeforeJump => _commandBeforeJump is { IsPersonal: false } before && CommandTabs.Contains(before) ? before : CommandTabs[0];
@@ -1862,9 +1935,118 @@ public sealed class AppState : ObservableObject
             CommandTabs = CommandTabs.Select(w => w.ToState()).ToList(),
             ActiveDownloadId = (_activeDownload ?? DownloadTabs[0]).Id,
             DownloadTabs = DownloadTabs.Select(w => w.ToState()).ToList(),
-            ActiveExplorerId = (_activeExplorer ?? ExplorerTabs[0]).Id,
-            ExplorerTabs = ExplorerTabs.Select(w => w.ToState()).ToList(),
+            // вкладка-фильтр живёт, пока её не покинули: в файл — та, что была до неё
+            ActiveExplorerId = (_activeExplorer is { FilterOf: null } explorer ? explorer : _explorerBeforeFilter ?? ExplorerTabs[0]).Id,
+            ExplorerTabs = ExplorerTabs.Where(w => w.FilterOf is null).Select(w => w.ToState()).ToList(),
+            LastInStripIds = _lastInStrip.Select(p => LastInStrip(p.Key.Tabs, p.Key.Archived)?.Id).OfType<string>().ToList(),
         });
+    }
+
+    // ── фильтр галочками в «Проводнике» ────────────────────────────────────────
+
+    /// <summary>Открытая вкладка-фильтр «Проводника»; null — её нет.</summary>
+    private Workspace? _filterTab;
+
+    /// <summary>Вкладка «Проводника», открытая до фильтра: на неё раздел вернётся.</summary>
+    private Workspace? _explorerBeforeFilter;
+
+    /// <summary>
+    /// «Открыть в проводнике» из исключений копирования: в «Проводнике» — одна вкладка с тем же названием,
+    /// корень — строки всех окон (у нескольких окон — папка на каждое). Тускло-оранжевая рамка и «Назад», как у личной вкладки команд.
+    /// </summary>
+    public void OpenExplorerFilter(Workspace source)
+    {
+        CloseExplorerFilter();
+
+        var tab = new Workspace(Guid.NewGuid().ToString("N"), source.Title, isMain: false)
+        {
+            OwnerCopyTabId = source.Id,
+            FilterOf = new ExplorerFilter(source),
+        };
+
+        // дерево папок — сразу открыто: по нему и отмечают
+        tab.Explorer.Local.ShowTree = true;
+
+        _explorerBeforeFilter = _activeExplorer is { FilterOf: null } before ? before : ExplorerTabs[0];
+        _filterTab = tab;
+        ExplorerTabs.Add(tab);
+        ActiveWorkspace = tab;
+        ShowTab(tab);
+    }
+
+    /// <summary>
+    /// Раздел, который запомнить при закрытии окна. Из вкладки-фильтра — раздел и вкладка, откуда в него пришли:
+    /// сама она в файл не пишется, и после запуска человек оказывается там, где начинал.
+    /// </summary>
+    public AppSection SectionToRemember()
+    {
+        // несохранённые галочки фильтра пропадают: сохраняет их только окно исключений
+        if (FilterShown is not { FilterOf: { } filter })
+        {
+            return _section;
+        }
+
+        var section = SectionOfTab(filter.Source);
+
+        if (section == AppSection.Download)
+        {
+            _activeDownload = filter.Source;
+        }
+        else
+        {
+            _active = filter.Source;
+        }
+
+        SaveWorkspaces();
+        return section;
+    }
+
+    /// <summary>Вкладка-фильтр, на которую перешли: она одна на ленте «Проводника». Null — лента обычная.</summary>
+    private Workspace? FilterShown => _section == AppSection.Explorer && _filterTab is { } tab && ReferenceEquals(_activeExplorer, tab) ? tab : null;
+
+    /// <summary>
+    /// Вкладку-фильтр покинули. Её галочки — черновик: окно знает, вернуть ли человека в окно исключений,
+    /// где их сохраняют.
+    /// </summary>
+    public event Action<ExplorerFilter>? ExplorerFilterLeft;
+
+    private void Left(Workspace tab)
+    {
+        if (tab.FilterOf is { } filter)
+        {
+            ExplorerFilterLeft?.Invoke(filter);
+        }
+    }
+
+    /// <summary>
+    /// Ушли из вкладки-фильтра — «Назад», другой раздел, кнопка «Проводник»: сама вкладка убирается, раздел
+    /// возвращается на прежнюю, галочки ждут «Сохранить» в окне исключений.
+    /// </summary>
+    public void CloseExplorerFilter()
+    {
+        if (_filterTab is not { } tab)
+        {
+            return;
+        }
+
+        // фильтр на экране — раздел переключается на прежнюю вкладку, а вкладку-фильтр убирает выбор вкладки
+        if (_section == AppSection.Explorer && ReferenceEquals(_activeExplorer, tab))
+        {
+            ActiveWorkspace = _explorerBeforeFilter is { } shown && ExplorerTabs.Contains(shown) ? shown : ExplorerTabs[0];
+            return;
+        }
+
+        Left(tab);
+        _filterTab = null;
+
+        if (ReferenceEquals(_activeExplorer, tab))
+        {
+            _activeExplorer = _explorerBeforeFilter is { } before && ExplorerTabs.Contains(before) ? before : ExplorerTabs[0];
+        }
+
+        ExplorerTabs.Remove(tab);
+        _explorerBeforeFilter = null;
+        SaveWorkspaces();
     }
 
     /// <summary>Вкладки всех разделов загружены — до этого сохранять и переключать нечего.</summary>
@@ -2109,6 +2291,15 @@ public sealed class AppState : ObservableObject
             if (_activeCommand is { IsPersonal: true })
             {
                 _jumpedTo = _activeCommand;
+            }
+
+            // значок архива возвращает туда, где был фокус в прошлый раз; открытые вкладки — последние в своих лентах
+            var lastIds = (file?.LastInStripIds ?? []).ToHashSet(StringComparer.Ordinal);
+
+            foreach (var tab in AllWorkspaces.Where(w => lastIds.Contains(w.Id))
+                .Concat([_active!, _activeCommand!, _activeDownload!, _activeExplorer!]))
+            {
+                RememberInStrip(tab);
             }
 
             AppLog.Debug($"Вкладок копирования: {Workspaces.Count}, команды: {CommandTabs.Count}, "

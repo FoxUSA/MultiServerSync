@@ -426,15 +426,29 @@
           </StackPanel>
         </Border>
 
-        <Border Grid.Column="1" Style="{StaticResource PathGroupStyle}">
+        <Border
+          x:Name="FileActions"
+          Grid.Column="1"
+          Style="{StaticResource PathGroupStyle}">
           <StackPanel VerticalAlignment="Center" Orientation="Horizontal">
+            <!--  в окне обзора пути из «Копирования» и «Скачивания» вместо правки и удаления — новая папка  -->
             <Button
+              x:Name="NewFolderButton"
+              Click="OnNewFolder"
+              Style="{StaticResource GroupIconButtonStyle}"
+              ToolTip="Новая папка в открытой (F7)"
+              Visibility="Collapsed">
+              <ui:SymbolIcon FontSize="20" Symbol="FolderAdd24" />
+            </Button>
+            <Button
+              x:Name="EditButton"
               Click="OnEdit"
               Style="{StaticResource GroupIconButtonStyle}"
               ToolTip="Править файл под курсором во встроенном редакторе: номера строк, подсветка, поиск. Права и кодировка не меняются">
               <ui:SymbolIcon FontSize="20" Symbol="DocumentEdit24" />
             </Button>
             <Button
+              x:Name="DeleteButton"
               Click="OnDelete"
               Style="{StaticResource GroupIconButtonStyle}"
               ToolTip="Удалить выделенное (Del): с компьютера — в корзину, на сервере — безвозвратно, после подтверждения">
@@ -532,20 +546,122 @@
           </StackPanel>
         </Border>
 
-        <!--  в окнах выбора пути — чей это сервер: название и адрес. В «Проводнике» скрыто,
-              там сервер подписан над панелью  -->
-        <TextBlock
+        <!--  вкладка-фильтр окна копирования: вместо «Копировать» — режимы галочек и «Сбросить».
+              Выбранный режим — в оранжевой рамке  -->
+        <Border
+          x:Name="FilterGroup"
+          Grid.Column="0"
+          Height="{StaticResource IconButtonSize}"
+          Background="{DynamicResource ControlFillColorDefaultBrush}"
+          BorderBrush="{DynamicResource TextControlElevationBorderBrush}"
+          BorderThickness="1"
+          CornerRadius="4"
+          Visibility="Collapsed">
+          <StackPanel VerticalAlignment="Center" Orientation="Horizontal">
+            <Border x:Name="FilterCopiedRing" Margin="1,0,0,0" BorderThickness="1" CornerRadius="4">
+              <Button
+                x:Name="FilterCopiedButton"
+                Width="Auto"
+                Height="30"
+                Click="OnFilterCopied"
+                FontSize="12"
+                Style="{StaticResource PathIconButtonStyle}"
+                ToolTip="Галочки — на том, что копируется. С папки снята — её новые файлы не поедут">
+                <TextBlock Margin="10,0" VerticalAlignment="Center" Text="Что копируется" />
+              </Button>
+            </Border>
+            <Border x:Name="FilterSkippedRing" BorderThickness="1" CornerRadius="4">
+              <Button
+                x:Name="FilterSkippedButton"
+                Width="Auto"
+                Height="30"
+                Click="OnFilterSkipped"
+                FontSize="12"
+                Style="{StaticResource PathIconButtonStyle}"
+                ToolTip="Галочки — на том, что не копируется. У каждого режима свои галочки, действует выбранный">
+                <TextBlock Margin="10,0" VerticalAlignment="Center" Text="Что не копируется" />
+              </Button>
+            </Border>
+            <Button
+              x:Name="FilterResetButton"
+              Width="Auto"
+              Height="32"
+              Margin="0,0,1,0"
+              Click="OnFilterReset"
+              FontSize="12"
+              Style="{StaticResource PathIconButtonStyle}"
+              ToolTip="Галочки выбранного режима — снова по маскам «Эта вкладка» и «Глобально»">
+              <TextBlock Margin="10,0" VerticalAlignment="Center" Text="Сбросить" />
+            </Button>
+          </StackPanel>
+        </Border>
+
+        <!--  в окнах выбора пути — чей это сервер: плашка как у сервера «Проводника» в ряду разделов, без замка;
+              щелчок — список серверов. В «Проводнике» скрыто, там сервер подписан над панелью  -->
+        <Button
           x:Name="ServerCaption"
           Grid.Column="0"
           Grid.ColumnSpan="2"
-          Margin="2,0,12,0"
+          Margin="0,0,12,0"
+          HorizontalAlignment="Left"
           VerticalAlignment="Center"
-          FontSize="14"
-          TextTrimming="CharacterEllipsis"
+          Click="OnTitleClick"
+          Cursor="Hand"
+          Focusable="False"
+          FontSize="12"
+          Foreground="{DynamicResource TextFillColorPrimaryBrush}"
           Visibility="Collapsed">
-          <Run x:Name="ServerCaptionName" FontWeight="SemiBold" />
-          <Run x:Name="ServerCaptionHost" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-        </TextBlock>
+          <Button.Template>
+            <ControlTemplate TargetType="Button">
+              <Border
+                x:Name="Bd"
+                Padding="10,5"
+                Background="#26E07A1F"
+                BorderBrush="#80E07A1F"
+                BorderThickness="1"
+                CornerRadius="6">
+                <ContentPresenter VerticalAlignment="Center" />
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                  <Setter TargetName="Bd" Property="Background" Value="#38E07A1F" />
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                  <Setter TargetName="Bd" Property="Background" Value="#4AE07A1F" />
+                </Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Button.Template>
+          <StackPanel Orientation="Horizontal">
+            <Image
+              x:Name="ServerCaptionIcon"
+              Width="16"
+              Height="16"
+              Margin="0,0,8,0"
+              VerticalAlignment="Center" />
+            <TextBlock
+              x:Name="ServerCaptionName"
+              VerticalAlignment="Center"
+              FontWeight="SemiBold" />
+            <TextBlock
+              x:Name="ServerCaptionUser"
+              Margin="4,0,0,0"
+              VerticalAlignment="Center"
+              Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            <TextBlock
+              x:Name="ServerCaptionHost"
+              Margin="10,0,0,0"
+              VerticalAlignment="Center"
+              FontFamily="Consolas"
+              Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+            <ui:SymbolIcon
+              Margin="10,0,0,0"
+              VerticalAlignment="Center"
+              FontSize="12"
+              Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+              Symbol="ArrowDown24" />
+          </StackPanel>
+        </Button>
 
         <StackPanel
           Grid.Column="2"
@@ -608,16 +724,20 @@
           BorderThickness="1"
           CornerRadius="4"
           Visibility="Collapsed">
+          <Grid>
           <TreeView
             x:Name="Tree"
             Padding="2,4"
             Background="Transparent"
             BorderThickness="0"
             Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+            ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+            ScrollViewer.ScrollChanged="OnTreeScrolled"
             SelectedItemChanged="OnTreeSelected">
             <TreeView.ItemContainerStyle>
               <Style TargetType="TreeViewItem">
                 <EventSetter Event="Expanded" Handler="OnNodeExpanded" />
+                <EventSetter Event="RequestBringIntoView" Handler="OnNodeBringIntoView" />
                 <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
                 <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
                 <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
@@ -652,10 +772,13 @@
                           <ContentPresenter ContentSource="Header" />
                         </Border>
 
+                        <!--  уровень глубже — на 10 точек, как в VS Code: глубокие папки влезают без прокрутки вбок  -->
                         <ItemsPresenter
                           x:Name="ItemsHost"
                           Grid.Row="1"
-                          Grid.Column="1" />
+                          Grid.Column="0"
+                          Grid.ColumnSpan="2"
+                          Margin="10,0,0,0" />
                       </Grid>
 
                       <ControlTemplate.Triggers>
@@ -679,7 +802,12 @@
             </TreeView.ItemContainerStyle>
             <TreeView.ItemTemplate>
               <HierarchicalDataTemplate DataType="{x:Type controls:PaneNode}" ItemsSource="{Binding Children}">
-                <StackPanel Orientation="Horizontal">
+                <!--  не влезло — многоточие, полное имя в подсказке  -->
+                <Grid ToolTip="{Binding Name}">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
                   <Image
                     Width="16"
                     Height="16"
@@ -687,13 +815,51 @@
                     VerticalAlignment="Center"
                     Source="{Binding Icon}" />
                   <TextBlock
+                    Grid.Column="1"
                     VerticalAlignment="Center"
                     FontSize="12"
-                    Text="{Binding Name}" />
-                </StackPanel>
+                    Text="{Binding Name}"
+                    TextTrimming="CharacterEllipsis" />
+                </Grid>
               </HierarchicalDataTemplate>
             </TreeView.ItemTemplate>
           </TreeView>
+
+          <!--  дерево прокручено — корень закреплён сверху: щелчок возвращает в него  -->
+          <Border
+            x:Name="TreeRootBar"
+            Margin="1,1,1,0"
+            Padding="8,5"
+            VerticalAlignment="Top"
+            Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+            BorderThickness="0,0,0,1"
+            CornerRadius="4,4,0,0"
+            Cursor="Hand"
+            MouseLeftButtonUp="OnTreeRootClick"
+            ToolTip="Вернуться в корень"
+            Visibility="Collapsed">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <Image
+                x:Name="TreeRootIcon"
+                Width="16"
+                Height="16"
+                Margin="0,0,6,0"
+                VerticalAlignment="Center" />
+              <TextBlock
+                x:Name="TreeRootName"
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                FontSize="12"
+                FontWeight="SemiBold"
+                TextTrimming="CharacterEllipsis" />
+            </Grid>
+          </Border>
+          </Grid>
         </Border>
 
         <GridSplitter

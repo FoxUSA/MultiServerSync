@@ -1528,13 +1528,14 @@ public static class SshService
             var target = CombineRemote(root, item.Name);
             plan.Roots.Add(target);
 
-            if (item.IsDirectory)
-            {
-                AddDirectory(plan, item.FullPath, target, item.Name, exclude);
-            }
-            else
+            if (!item.IsDirectory)
             {
                 plan.Files.Add(new FileJob(item.FullPath, target));
+            }
+            else if (!AddDirectory(plan, item.FullPath, target, item.Name, exclude))
+            {
+                // папка целиком под исключением, в неё заходили ради «Включить» и ничего не нашли — её как бы и нет
+                plan.Roots.Remove(target);
             }
         }
 
@@ -1542,9 +1543,18 @@ public static class SshService
     }
 
     /// <param name="relative">Путь от копируемого объекта включительно — по нему сверяются маски.</param>
-    private static void AddDirectory(Plan plan, string localDir, string remoteDir, string relative, ExcludeFilter exclude)
+    /// <returns>Папка едет: сама или ради того, что в ней включено.</returns>
+    private static bool AddDirectory(Plan plan, string localDir, string remoteDir, string relative, ExcludeFilter exclude)
     {
-        plan.Dirs.Add(new DirJob(localDir, remoteDir));
+        // исключённая папка, в которую зашли ради «Включить», создаётся, только если в ней что-то едет
+        var onlyForIncludes = exclude.OnlyForIncludes(relative);
+        var at = plan.Dirs.Count;
+        var filesBefore = plan.Files.Count;
+
+        if (!onlyForIncludes)
+        {
+            plan.Dirs.Add(new DirJob(localDir, remoteDir));
+        }
 
         foreach (var file in Directory.EnumerateFiles(localDir))
         {
@@ -1570,6 +1580,20 @@ public static class SshService
 
             AddDirectory(plan, dir, CombineRemote(remoteDir, name), relative + "/" + name, exclude);
         }
+
+        if (!onlyForIncludes)
+        {
+            return true;
+        }
+
+        if (plan.Files.Count == filesBefore)
+        {
+            return false;
+        }
+
+        // родитель раньше детей: папки на сервере создаются по этому порядку
+        plan.Dirs.Insert(at, new DirJob(localDir, remoteDir));
+        return true;
     }
 
     /// <summary>
@@ -1601,8 +1625,15 @@ public static class SshService
 
         try
         {
-            using var cmd = ssh.CreateCommand(script);
-            cmd.ExecuteAsync(ct).GetAwaiter().GetResult();
+            // через ввод sh, а не командной строкой: отдельных файлов бывают тысячи, и строка с их путями
+            // не влезала в пакет SSH («Packet is too big») — опись шла по одному файлу, разбор по полминуты
+            using var cmd = ssh.CreateCommand("sh -s");
+
+            Rethrow(Feed(cmd, ct, channel =>
+            {
+                using var input = new BufferedStream(channel, 64 * 1024);
+                input.Write(new UTF8Encoding(false).GetBytes(script));
+            }));
 
             if (cmd.ExitStatus == 97)
             {
@@ -1798,7 +1829,10 @@ public static class SshService
             packed.Clear();
         }
 
-        var batches = Batches(packed).Concat(streamed.Select(s => new List<SendJob> { s })).ToList();
+        // тяжёлые первыми: крупная пачка в конце очереди едет одна, когда остальные подключения уже свободны
+        var batches = Batches(packed).Concat(streamed.Select(s => new List<SendJob> { s }))
+            .OrderByDescending(b => b.Sum(s => s.Info.Length))
+            .ToList();
         var fallback = new ConcurrentBag<SendJob>();
 
         if (small.Count > 0)
@@ -1835,16 +1869,22 @@ public static class SshService
         return batches.Count > 0;
     }
 
-    /// <summary>Мелочь — пачками с пределом по числу файлов и по объёму.</summary>
+    /// <summary>
+    /// Мелочь — пачками с пределом по числу файлов и по объёму. Пачек не меньше, чем подключений:
+    /// иначе почти всё едет одной пачкой по одному подключению, а остальные простаивают.
+    /// </summary>
     private static List<List<SendJob>> Batches(List<SendJob> files)
     {
         var result = new List<List<SendJob>>();
         var current = new List<SendJob>();
         long bytes = 0;
 
+        var maxFiles = Math.Min(TarBatchFiles, Math.Max(TarMinFiles, (files.Count + TarConnections - 1) / TarConnections));
+        var maxBytes = Math.Min(TarBatchBytes, Math.Max(SmallFile, (files.Sum(s => s.Info.Length) + TarConnections - 1) / TarConnections));
+
         foreach (var s in files)
         {
-            if (current.Count > 0 && (current.Count >= TarBatchFiles || bytes + s.Info.Length > TarBatchBytes))
+            if (current.Count > 0 && (current.Count >= maxFiles || bytes + s.Info.Length > maxBytes))
             {
                 result.Add(current);
                 current = [];

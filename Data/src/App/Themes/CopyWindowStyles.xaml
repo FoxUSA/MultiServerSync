@@ -1,0 +1,226 @@
+<!--  Общая таблица окон «Копирования» и «Скачивания»: номер окна, разделитель группы окна, строка пустого окна.
+      Кнопки разделителя страница ловит на таблице по именам: GroupNumber, GroupAdd, GroupRemove, GroupName; GroupCollapse — сама раскладка  -->
+<ResourceDictionary
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:controls="clr-namespace:MultiServerSync.Views.Controls"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+
+  <!--  стили таблиц — здесь же: на них стоит строка пустого окна, а словарь подключают страницы сами  -->
+  <ResourceDictionary.MergedDictionaries>
+    <ResourceDictionary Source="/Themes/DataGridStyles.xaml" />
+  </ResourceDictionary.MergedDictionaries>
+
+  <BooleanToVisibilityConverter x:Key="WindowBoolToVis" />
+
+  <!--  Номер окна — как кнопка, без оранжевого. Окно в фокусе — оба его номера (на разделителе и в строке пути)
+        на тусклой оранжевой плашке; встало на суммах — красная рамка. Окно в Tag  -->
+  <Style x:Key="WindowNumberStyle" TargetType="Button">
+    <Setter Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+    <Setter Property="FontFamily" Value="Consolas" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Focusable" Value="False" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="ToolTip" Value="Фокус на этом окне: кнопки сверху, сводка и параметры — для него" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Border
+            Padding="{TemplateBinding Padding}"
+            Background="{TemplateBinding Background}"
+            BorderBrush="{TemplateBinding BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="4"
+            SnapsToDevicePixels="True">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+    <Style.Triggers>
+      <Trigger Property="IsMouseOver" Value="True">
+        <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+      </Trigger>
+      <!--  после наведения: у окна в фокусе плашка оранжевая и под мышью  -->
+      <DataTrigger Binding="{Binding Tag.IsFocused, RelativeSource={RelativeSource Self}}" Value="True">
+        <Setter Property="Background" Value="#26E07A1F" />
+        <Setter Property="BorderBrush" Value="#80E07A1F" />
+        <Setter Property="Cursor" Value="Arrow" />
+        <Setter Property="ToolTip" Value="Это окно в фокусе: кнопки сверху, сводка и параметры — для него" />
+      </DataTrigger>
+      <DataTrigger Binding="{Binding Tag.IsFailed, RelativeSource={RelativeSource Self}}" Value="True">
+        <Setter Property="BorderBrush" Value="#E85C5C" />
+      </DataTrigger>
+    </Style.Triggers>
+  </Style>
+
+  <!--  Группа строк окна: сверху номер — квадрат ровно над галочкой строки, — название, справа плюс и минус;
+        под ними черта во всю ширину над строками окна. Между окнами — пустая полоса высотой со строку.
+        Окно одно — разделителя нет  -->
+  <Style x:Key="WindowGroupStyle" TargetType="GroupItem">
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="GroupItem">
+          <StackPanel>
+            <!--  Строка окна целиком — щелчок по ней даёт фокус окну (кроме плюса и минуса). Фон — как у полосы
+                  чередования строк таблицы; снизу черта во всю ширину, цвета сетки: строки окна закрыты ею сверху  -->
+            <Grid
+              x:Name="Divider"
+              Height="26"
+              Margin="0,24,0,0"
+              Background="{DynamicResource ControlFillColorDefaultBrush}"
+              Cursor="Hand"
+              ToolTip="Щелчок — свернуть или развернуть строки окна и фокус на нём (по названию и адресу — только фокус). Двойной щелчок по адресу — «Обзор» этого окна">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+              <Border
+                Grid.ColumnSpan="5"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="0,0,0,1"
+                IsHitTestVisible="False"
+                SnapsToDevicePixels="True" />
+
+              <Button
+                x:Name="GroupNumber"
+                Grid.Column="0"
+                Height="18"
+                MinWidth="18"
+                Margin="4,0,6,0"
+                Padding="2,0"
+                VerticalAlignment="Center"
+                Content="{Binding Name.NumberText}"
+                FontSize="12"
+                Style="{StaticResource WindowNumberStyle}"
+                Tag="{Binding Name}"
+                ToolTip="Отметить все строки окна или снять отметки" />
+              <TextBlock
+                x:Name="GroupName"
+                Grid.Column="1"
+                Margin="0,0,6,0"
+                VerticalAlignment="Center"
+                FontSize="11"
+                FontWeight="SemiBold"
+                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                Text="{Binding Name.NameText}"
+                ToolTip="Двойной щелчок — изменить название окна"
+                Visibility="{Binding Name.ShowsName, Converter={StaticResource WindowBoolToVis}}" />
+              <!--  название от адреса — тонкой тусклой чертой, только когда название видно  -->
+              <Rectangle
+                Grid.Column="2"
+                Width="1"
+                Height="12"
+                Margin="2,0,8,0"
+                VerticalAlignment="Center"
+                Fill="{DynamicResource TextFillColorTertiaryBrush}"
+                Opacity="0.6"
+                SnapsToDevicePixels="True"
+                Visibility="{Binding Name.ShowsName, Converter={StaticResource WindowBoolToVis}}" />
+              <!--  адрес окна: путь на сервере, на «Скачивании» — папка здесь. Двойной щелчок только по нему — «Обзор»,
+                    щелчок по нему не сворачивает. Шириной с текст: пустое место справа сворачивает  -->
+              <TextBlock
+                x:Name="GroupAddress"
+                Grid.Column="3"
+                Margin="0,0,8,0"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Center"
+                Background="Transparent"
+                FontSize="12"
+                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                Text="{Binding Name.AddressText}"
+                TextTrimming="CharacterEllipsis"
+                ToolTip="Двойной щелчок — «Обзор» этого окна" />
+              <!--  столбиком со значками строк: поле ячейки 8 и отступ 2  -->
+              <StackPanel
+                Grid.Column="4"
+                Margin="4,0,10,0"
+                Orientation="Horizontal">
+                <Button
+                  x:Name="GroupAdd"
+                  controls:LockMute.IsOn="{Binding Name.IsPaneLocked}"
+                  Style="{DynamicResource RowPathButtonStyle}"
+                  ToolTip="Добавить окно ниже — выполнится после этого">
+                  <ui:SymbolIcon FontSize="14" Symbol="Add24" />
+                </Button>
+                <Button
+                  x:Name="GroupRemove"
+                  controls:LockMute.IsOn="{Binding Name.IsPaneLocked}"
+                  Style="{DynamicResource RowPathButtonStyle}"
+                  ToolTip="Убрать это окно">
+                  <ui:SymbolIcon FontSize="14" Symbol="Subtract24" />
+                </Button>
+                <Button
+                  x:Name="GroupCollapse"
+                  Style="{DynamicResource RowPathButtonStyle}"
+                  ToolTip="Свернуть строки окна">
+                  <ui:SymbolIcon
+                    x:Name="CollapseIcon"
+                    FontSize="14"
+                    Symbol="ChevronDown24" />
+                </Button>
+              </StackPanel>
+            </Grid>
+            <ItemsPresenter x:Name="Rows" />
+          </StackPanel>
+          <ControlTemplate.Triggers>
+            <DataTrigger Binding="{Binding Name.Number}" Value="1">
+              <Setter TargetName="Divider" Property="Margin" Value="0" />
+            </DataTrigger>
+            <DataTrigger Binding="{Binding Name.IsMulti}" Value="False">
+              <Setter TargetName="Divider" Property="Visibility" Value="Collapsed" />
+            </DataTrigger>
+            <DataTrigger Binding="{Binding Name.IsFocused}" Value="True">
+              <Setter TargetName="GroupName" Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            </DataTrigger>
+            <DataTrigger Binding="{Binding Name.IsCollapsed}" Value="True">
+              <Setter TargetName="CollapseIcon" Property="Symbol" Value="ChevronRight24" />
+              <Setter TargetName="GroupCollapse" Property="ToolTip" Value="Развернуть строки окна" />
+            </DataTrigger>
+            <!--  свёрнутое прячет строки, только пока есть разделитель: у единственного окна развернуть было бы нечем  -->
+            <MultiDataTrigger>
+              <MultiDataTrigger.Conditions>
+                <Condition Binding="{Binding Name.IsCollapsed}" Value="True" />
+                <Condition Binding="{Binding Name.IsMulti}" Value="True" />
+              </MultiDataTrigger.Conditions>
+              <Setter TargetName="Rows" Property="Visibility" Value="Collapsed" />
+            </MultiDataTrigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!--  Пустое окно, когда окон несколько: одна надпись вместо ячеек; двойной щелчок по ней добавляет в это окно  -->
+  <Style
+    x:Key="EmptyWindowRowStyle"
+    BasedOn="{StaticResource AppDataGridRowStyle}"
+    TargetType="DataGridRow">
+    <Setter Property="Focusable" Value="False" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="DataGridRow">
+          <Border Height="24" Background="Transparent">
+            <TextBlock
+              Margin="34,0,0,0"
+              VerticalAlignment="Center"
+              FontSize="12"
+              Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+              Text="{Binding Hint}"
+              TextTrimming="CharacterEllipsis" />
+          </Border>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <controls:WindowRowStyleSelector
+    x:Key="WindowRowSelector"
+    Empty="{StaticResource EmptyWindowRowStyle}"
+    Row="{StaticResource AppDataGridRowStyle}" />
+</ResourceDictionary>

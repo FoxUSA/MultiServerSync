@@ -52,7 +52,7 @@ public static class RemoteEdit
 
             if (stats.Failed > 0 || !File.Exists(local))
             {
-                throw new IOException("файл не скачался — подробности в журнале");
+                throw new IOException("файл не скачался — подробности в истории");
             }
 
             file = new EditedFile(source, entry, local);

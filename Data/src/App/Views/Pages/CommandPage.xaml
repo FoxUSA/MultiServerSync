@@ -15,10 +15,7 @@
   <Page.Resources>
     <BooleanToVisibilityConverter x:Key="BoolToVis" />
 
-    <!--  правка избранного: окна подкрашены, чтобы не спутать с рабочими  -->
-    <SolidColorBrush x:Key="EditTint" Color="#33E8B54A" />
-
-    <!--  строка истории и избранного: невысокие, чтобы поле ввода было больше  -->
+    <!--  строка истории: невысокая, чтобы поле ввода было больше  -->
     <Style
       x:Key="SlimComboStyle"
       BasedOn="{StaticResource {x:Type ComboBox}}"
@@ -34,7 +31,6 @@
 
   <Grid Margin="12">
     <Grid.RowDefinitions>
-      <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" MinHeight="120" />
       <RowDefinition Height="Auto" />
@@ -55,15 +51,17 @@
       x:Name="HistoryBox"
       Grid.Row="0"
       Grid.Column="1"
-      IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}"
+      ItemsSource="{Binding CommandHistory}"
       SelectionChanged="OnHistoryPicked"
       Style="{StaticResource SlimComboStyle}"
-      ToolTip="Ранее выполнявшиеся команды — общие для всех вкладок. Крестик убирает строку из истории.">
+      ToolTip="Команды, выполненные в этой вкладке, без повторов. У строки — в избранное, скопировать и убрать из истории.">
       <ComboBox.ItemTemplate>
         <DataTemplate>
           <Grid>
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
               <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <!--
@@ -81,161 +79,48 @@
               Text="{Binding Converter={StaticResource ShortLine}}"
               TextTrimming="CharacterEllipsis" />
             <Button
-              x:Name="Remove"
+              x:Name="Book"
               Grid.Column="1"
+              Click="OnBookHistoryItem"
+              Style="{StaticResource RowIconButtonStyle}"
+              ToolTip="Добавить в избранное">
+              <ui:SymbolIcon FontSize="12" Symbol="Heart24" />
+            </Button>
+            <Button
+              x:Name="Copy"
+              Grid.Column="2"
+              Click="OnCopyHistoryItem"
+              Style="{StaticResource RowIconButtonStyle}"
+              ToolTip="Скопировать команду">
+              <ui:SymbolIcon FontSize="12" Symbol="Copy24" />
+            </Button>
+            <Button
+              x:Name="Remove"
+              Grid.Column="3"
               Click="OnRemoveHistoryItem"
               Style="{StaticResource HistoryRemoveButtonStyle}" />
           </Grid>
           <DataTemplate.Triggers>
-            <!--  в закрытом списке шаблон рисует выбранную строку — там крестик не нужен  -->
+            <!--  в закрытом списке шаблон рисует выбранную строку — там кнопки не нужны  -->
             <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}}" Value="{x:Null}">
+              <Setter TargetName="Book" Property="Visibility" Value="Collapsed" />
+              <Setter TargetName="Copy" Property="Visibility" Value="Collapsed" />
               <Setter TargetName="Remove" Property="Visibility" Value="Collapsed" />
             </DataTrigger>
           </DataTemplate.Triggers>
         </DataTemplate>
       </ComboBox.ItemTemplate>
     </ComboBox>
-    <!--  избранное: своя шпаргалка команд с описаниями, общая для всех вкладок  -->
-    <TextBlock
-      Grid.Row="1"
-      Grid.Column="0"
-      Margin="0,4,4,0"
-      VerticalAlignment="Center"
-      FontSize="12"
-      Text="Избранное:" />
-    <ComboBox
-      x:Name="BookBox"
-      Grid.Row="1"
-      Grid.Column="1"
-      IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}"
-      Margin="0,4,0,0"
-      SelectionChanged="OnSnippetPicked"
-      Style="{StaticResource SlimComboStyle}"
-      ToolTip="Сохранённые команды с описанием — общие для всех вкладок. Выбор подставляет команду в окно, а запись из нескольких окон раскрывает их все. Карандаш открывает запись на правку прямо в окнах, крестик удаляет.">
-      <ComboBox.ItemTemplate>
-        <DataTemplate>
-          <Grid ToolTip="{Binding Preview}">
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="*" />
-              <ColumnDefinition Width="Auto" />
-              <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
 
-            <StackPanel
-              Grid.Column="0"
-              MinWidth="320"
-              MaxWidth="760"
-              HorizontalAlignment="Left">
-              <StackPanel Orientation="Horizontal">
-                <TextBlock
-                  FontWeight="SemiBold"
-                  Text="{Binding Comment}"
-                  TextTrimming="CharacterEllipsis" />
-                <Border
-                  Margin="8,0,0,0"
-                  Padding="5,0"
-                  VerticalAlignment="Center"
-                  BorderBrush="{DynamicResource TextFillColorSecondaryBrush}"
-                  BorderThickness="1"
-                  CornerRadius="3"
-                  ToolTip="Многозадачная запись: при вставке раскроет все свои окна"
-                  Visibility="{Binding IsMulti, Converter={StaticResource BoolToVis}}">
-                  <TextBlock
-                    FontSize="11"
-                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                    Text="{Binding MultiText}" />
-                </Border>
-              </StackPanel>
-              <TextBlock
-                x:Name="Line"
-                FontFamily="Consolas"
-                FontSize="11"
-                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                Text="{Binding Preview}"
-                TextTrimming="CharacterEllipsis" />
-            </StackPanel>
-
-            <Button
-              x:Name="Edit"
-              Grid.Column="1"
-              VerticalAlignment="Center"
-              Click="OnEditSnippet"
-              Style="{StaticResource RowEditButtonStyle}" />
-
-            <Button
-              x:Name="Remove"
-              Grid.Column="2"
-              VerticalAlignment="Center"
-              Click="OnRemoveSnippet"
-              Style="{StaticResource HistoryRemoveButtonStyle}" />
-          </Grid>
-          <DataTemplate.Triggers>
-            <!--  в закрытом списке остаётся только описание — строка не должна расти в высоту  -->
-            <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}}" Value="{x:Null}">
-              <Setter TargetName="Edit" Property="Visibility" Value="Collapsed" />
-              <Setter TargetName="Remove" Property="Visibility" Value="Collapsed" />
-              <Setter TargetName="Line" Property="Visibility" Value="Collapsed" />
-            </DataTrigger>
-          </DataTemplate.Triggers>
-        </DataTemplate>
-      </ComboBox.ItemTemplate>
-    </ComboBox>
-
-    <!--  окна команды: делят место поровну; правка избранного — те же окна, другим фоном  -->
+    <!--  окна команды: делят место поровну  -->
     <Grid
-      Grid.Row="2"
+      Grid.Row="1"
       Grid.Column="0"
       Grid.ColumnSpan="2">
-      <Grid.RowDefinitions>
-        <RowDefinition Height="Auto" />
-        <RowDefinition Height="*" />
-      </Grid.RowDefinitions>
-
-      <!--  полоса правки избранного: пока она видна, работают только правка окон, «Сохранить» и «Отменить»  -->
-      <Border
-        x:Name="EditBar"
-        Grid.Row="0"
-        Margin="0,4,0,0"
-        Padding="10,6"
-        Background="{StaticResource EditTint}"
-        BorderBrush="#E8B54A"
-        BorderThickness="1"
-        CornerRadius="4"
-        Visibility="Collapsed">
-        <Grid>
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="*" />
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="Auto" />
-          </Grid.ColumnDefinitions>
-          <TextBlock
-            Grid.Column="0"
-            Margin="0,0,4,0"
-            VerticalAlignment="Center"
-            FontWeight="SemiBold"
-            Text="Правка избранного:" />
-          <ui:TextBox
-            x:Name="EditNameBox"
-            Grid.Column="1"
-            PlaceholderText="название записи" />
-          <ui:Button
-            Grid.Column="2"
-            Margin="4,0,4,0"
-            Appearance="Primary"
-            Click="OnSaveEdit"
-            Content="Сохранить" />
-          <ui:Button
-            Grid.Column="3"
-            Click="OnCancelEdit"
-            Content="Отменить" />
-        </Grid>
-      </Border>
 
       <!--  окна делят высоту поровну, но не ниже своего минимума — дальше их листает прокрутка  -->
       <ScrollViewer
         x:Name="StepsScroll"
-        Grid.Row="1"
         Focusable="False"
         HorizontalScrollBarVisibility="Disabled"
         VerticalScrollBarVisibility="Auto">
@@ -318,7 +203,6 @@
                     <Button
                       x:Name="RunOne"
                       Click="OnRunStep"
-                      IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}"
                       Style="{StaticResource EditorIconStyle}"
                       ToolTip="Выполнить только это окно"
                       Visibility="{Binding DataContext.CommandBatch.IsIdle, RelativeSource={RelativeSource AncestorType=Page}, Converter={StaticResource BoolToVis}}">
@@ -330,7 +214,6 @@
                     <Button
                       x:Name="RunBelow"
                       Click="OnRunFromStep"
-                      IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}"
                       Style="{StaticResource EditorIconStyle}"
                       ToolTip="Выполнить это окно и все ниже — по очереди, каждое после успешного предыдущего (Ctrl+Enter)">
                       <ui:SymbolIcon
@@ -351,9 +234,8 @@
                     <Button
                       x:Name="CopyOut"
                       Click="OnCopyOutput"
-                      IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}"
                       Style="{StaticResource EditorIconStyle}"
-                      ToolTip="Копировать вывод (Ctrl+Shift+C) — то же, что «Текущий лог» в терминале: весь вывод сервера, выбранного в таблице слева, со всеми окнами">
+                      ToolTip="Копировать вывод (Ctrl+Shift+C) — то же, что «Текущий лог» в журнале: весь вывод сервера, выбранного в таблице слева, со всеми окнами">
                       <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Copy24" />
                     </Button>
 
@@ -375,33 +257,10 @@
 
                   <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
                     <Button
-                      x:Name="SaveOne"
-                      Click="OnAddSnippet"
-                      IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}"
+                      Click="OnOpenBook"
                       Style="{StaticResource EditorIconStyle}"
-                      ToolTip="В избранное — это окно. Существующее название перезапишет свою запись.">
+                      ToolTip="Избранное: команда по щелчку встаёт в это окно, запись из нескольких окон раскрывает их все. Там же — добавить в избранное это окно или все окна.">
                       <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Heart24" />
-                    </Button>
-                    <!--  два сердечка: весь набор окон одной записью  -->
-                    <Button
-                      x:Name="SaveSet"
-                      Click="OnAddSnippetSet"
-                      IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}"
-                      Style="{StaticResource EditorIconStyle}"
-                      ToolTip="В избранное — все окна одной записью. При вставке окна раскроются сами."
-                      Visibility="{Binding CanSaveSet, Converter={StaticResource BoolToVis}}">
-                      <Grid Width="24" Height="20">
-                        <ui:SymbolIcon
-                          Margin="0,0,6,0"
-                          HorizontalAlignment="Left"
-                          FontSize="16"
-                          Symbol="Heart24" />
-                        <ui:SymbolIcon
-                          Margin="6,4,0,0"
-                          HorizontalAlignment="Right"
-                          FontSize="16"
-                          Symbol="Heart24" />
-                      </Grid>
                     </Button>
 
                     <Border
@@ -493,11 +352,9 @@
                 <DataTrigger Binding="{Binding IsEmpty}" Value="True">
                   <Setter TargetName="RunOne" Property="pages:CommandPage.Idle" Value="True" />
                   <Setter TargetName="Clear" Property="pages:CommandPage.Idle" Value="True" />
-                  <Setter TargetName="SaveOne" Property="pages:CommandPage.Idle" Value="True" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsTailEmpty}" Value="True">
                   <Setter TargetName="RunBelow" Property="pages:CommandPage.Idle" Value="True" />
-                  <Setter TargetName="SaveSet" Property="pages:CommandPage.Idle" Value="True" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding DataContext.CommandBatch.HasResults, RelativeSource={RelativeSource AncestorType=Page}}" Value="False">
                   <Setter TargetName="CopyOut" Property="pages:CommandPage.Idle" Value="True" />
@@ -527,7 +384,6 @@
       <!--  «не вставлено» — посреди окон: в углу окна такую плашку не замечали  -->
       <controls:ActionToast
         x:Name="PasteToast"
-        Grid.Row="1"
         Margin="20"
         HorizontalAlignment="Center"
         VerticalAlignment="Center" />
@@ -535,11 +391,10 @@
 
     <Grid
       x:Name="BottomBar"
-      Grid.Row="3"
+      Grid.Row="2"
       Grid.Column="0"
       Grid.ColumnSpan="2"
-      Margin="0,4,0,0"
-      IsEnabled="{Binding IsNotEditingSnippet, RelativeSource={RelativeSource AncestorType=Page}}">
+      Margin="0,4,0,0">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="*" />

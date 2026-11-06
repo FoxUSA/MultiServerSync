@@ -187,6 +187,26 @@ public sealed class TabReorder
     }
 
     /// <summary>
+    /// Элемент поднят и едет за мышью. Шаблон может дать ему по этому флагу свой фон,
+    /// чтобы в руке была плашка, а не голый текст.
+    /// </summary>
+    public static readonly DependencyProperty IsLiftedProperty = DependencyProperty.RegisterAttached(
+        "IsLifted", typeof(bool), typeof(TabReorder), new PropertyMetadata(false));
+
+    /// <summary>Тень у поднятого элемента. Нет — когда в руке своя плашка, а элемент в ряду только держит место.</summary>
+    public bool LiftShadow { get; init; } = true;
+
+    /// <summary>
+    /// Переставлять внутри ряда. Нет — элемент можно только бросить на <see cref="OutTarget"/>,
+    /// ряд стоит как стоял (история команд: её порядок задаёт время, а не мышь).
+    /// </summary>
+    public bool Reorder { get; init; } = true;
+
+    public static bool GetIsLifted(DependencyObject element) => (bool)element.GetValue(IsLiftedProperty);
+
+    public static void SetIsLifted(DependencyObject element, bool value) => element.SetValue(IsLiftedProperty, value);
+
+    /// <summary>
     /// Куда ещё можно бросить элемент, кроме места в ряду, — значок архива вкладок. Бросили
     /// на него — вместо перестановки <see cref="DroppedOut"/>.
     /// </summary>
@@ -355,7 +375,12 @@ public sealed class TabReorder
         }
 
         Panel.SetZIndex(item, 100);
-        item.Effect = new DropShadowEffect { BlurRadius = 14, ShadowDepth = 2, Opacity = 0.35, Direction = 270 };
+        if (LiftShadow)
+        {
+            item.Effect = new DropShadowEffect { BlurRadius = 14, ShadowDepth = 2, Opacity = 0.35, Direction = 270 };
+        }
+
+        SetIsLifted(item, true);
 
         _dragging = true;
         _dragStartAt = Along(Mouse.GetPosition(Frame), _verticalScroll);
@@ -391,6 +416,11 @@ public sealed class TabReorder
     /// <summary>Элемент за мышью; остальные уступают ему место.</summary>
     private void Follow(Point inPanel)
     {
+        if (!Reorder)
+        {
+            return;
+        }
+
         var dragged = _items[_from];
         var size = new Vector(dragged.ActualWidth, dragged.ActualHeight);
         var pos = (Vector)inPanel - _grabOffset;
@@ -601,6 +631,7 @@ public sealed class TabReorder
             container.ClearValue(Panel.ZIndexProperty);
             container.ClearValue(UIElement.EffectProperty);
             container.ClearValue(UIElement.OpacityProperty);
+            container.ClearValue(IsLiftedProperty);
         }
 
         _items = [];

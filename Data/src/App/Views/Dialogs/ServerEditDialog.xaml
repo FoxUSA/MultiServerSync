@@ -2,6 +2,7 @@
   x:Class="MultiServerSync.Views.Dialogs.ServerEditDialog"
   xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
   xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:controls="clr-namespace:MultiServerSync.Views.Controls"
   xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
   Title="Сервер"
   Width="560"
@@ -191,6 +192,7 @@
       HorizontalAlignment="Right"
       Orientation="Horizontal">
       <ui:Button
+        x:Name="SaveButton"
         Margin="0,0,8,0"
         Click="OnSave"
         Content="Сохранить"
@@ -202,5 +204,12 @@
         Icon="{ui:SymbolIcon Dismiss24}"
         IsCancel="True" />
     </StackPanel>
+
+    <controls:ActionToast
+      x:Name="Toast"
+      Grid.RowSpan="3"
+      Panel.ZIndex="1000"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top" />
   </Grid>
 </ui:FluentWindow>

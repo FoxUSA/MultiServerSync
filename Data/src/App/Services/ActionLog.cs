@@ -96,6 +96,11 @@ public static class ActionLog
             AppLog.Write(level, summary, ReferenceEquals(where, Program) ? null : where.Display, resolved,
                 lines.Count > 0 ? string.Join(Environment.NewLine, lines) : null, tabName);
         }
+        else if (ReferenceEquals(where, Program))
+        {
+            // действия программы человеку не нужны: только файл лога, со стёртым — на случай разбора
+            AppLog.Debug(lines.Count > 0 ? summary + Environment.NewLine + string.Join(Environment.NewLine, lines) : summary);
+        }
         else
         {
             // журнал выключен — отклик всё равно есть: плашка и файл лога

@@ -36,29 +36,18 @@ public partial class CommandPage : Page
         private set => SetValue(HasClipboardTextProperty, value);
     }
 
-
-    public static readonly DependencyProperty IsNotEditingSnippetProperty = DependencyProperty.Register(
-        nameof(IsNotEditingSnippet), typeof(bool), typeof(CommandPage), new PropertyMetadata(true));
-
     /// <summary>Тик секундомеров окон — один на страницу, а не по таймеру на окно.</summary>
     private readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromMilliseconds(250) };
-
-    // ── правка избранного ──
-    private CommandSnippet? _editing;
-    private Workspace? _editWorkspace;
 
     public CommandPage()
     {
         InitializeComponent();
 
-        // история и избранное сквозные — одни на все вкладки
-        HistoryBox.ItemsSource = AppState.Current.Settings.CommandHistory;
-        BookBox.ItemsSource = AppState.Current.Settings.CommandBook;
-
+        // история — своя у вкладки, та же, что в избранном: строка привязана к CommandHistory открытой вкладки
         DataContext = AppState.Current.ActiveWorkspace;
         AppState.Current.ActiveWorkspaceChanged += workspace => DataContext = workspace;
 
-        // выбор в списках держится только пока окно совпадает с выбранной строкой
+        // выбор в истории держится только пока окно совпадает с выбранной строкой
         DataContextChanged += OnWorkspaceSwitched;
         Attach(Workspace);
 
@@ -91,13 +80,6 @@ public partial class CommandPage : Page
                 _clock.Stop();
             }
         };
-    }
-
-    /// <summary>Не идёт правка избранного — тогда работает всё, а не только окна и «Сохранить».</summary>
-    public bool IsNotEditingSnippet
-    {
-        get => (bool)GetValue(IsNotEditingSnippetProperty);
-        private set => SetValue(IsNotEditingSnippetProperty, value);
     }
 
     private Workspace? Workspace => DataContext as Workspace;
@@ -147,16 +129,11 @@ public partial class CommandPage : Page
 
     /// <summary>
     /// Фон окна не меняется ни под мышью, ни в фокусе: тема подменяет его на своих состояниях,
-    /// и на окне в полстраницы это читается как мигание. В правке избранного фон подкрашен —
-    /// так видно, что сейчас правится запись, а не рабочие команды.
+    /// и на окне в полстраницы это читается как мигание.
     /// </summary>
     private void PaintBox(Control box)
     {
-        var brush = !IsNotEditingSnippet
-            ? (Brush)FindResource("EditTint")
-            : TryFindResource("TextControlBackground") as Brush;
-
-        if (brush is null)
+        if (TryFindResource("TextControlBackground") is not Brush brush)
         {
             return;
         }
@@ -254,12 +231,6 @@ public partial class CommandPage : Page
 
     private void OnWorkspaceSwitched(object sender, DependencyPropertyChangedEventArgs e)
     {
-        // правка избранного живёт в окнах той вкладки, где её начали: уходим — правка отменяется
-        if (_editing is not null)
-        {
-            CancelEdit();
-        }
-
         if (e.OldValue is Workspace old)
         {
             old.PropertyChanged -= OnWorkspaceProperty;
@@ -287,30 +258,18 @@ public partial class CommandPage : Page
     }
 
     /// <summary>
-    /// Снимает выбор в списках, как только окно перестало совпадать с выбранной строкой.
+    /// Снимает выбор в истории, как только окно перестало совпадать с выбранной строкой.
     /// Список сообщает о выборе только когда тот сменился: пока в нём висит прошлая запись,
-    /// повторный выбор той же избранной команды ничего не подставлял.
+    /// повторный выбор той же команды ничего не подставлял.
     /// </summary>
     private void SyncPickers()
     {
-        if (Workspace is not { } workspace)
+        if (Workspace is null)
         {
             return;
         }
 
         var text = ActiveStep?.Text ?? string.Empty;
-
-        if (BookBox.SelectedItem is CommandSnippet snippet)
-        {
-            var same = snippet.IsMulti
-                ? Signature(snippet.AsSteps()) == Signature(workspace.SaveSteps())
-                : string.Equals(snippet.Command, text, StringComparison.Ordinal);
-
-            if (!same)
-            {
-                BookBox.SelectedItem = null;
-            }
-        }
 
         if (HistoryBox.SelectedItem is string command
             && !string.Equals(command, text, StringComparison.Ordinal))
@@ -318,9 +277,6 @@ public partial class CommandPage : Page
             HistoryBox.SelectedItem = null;
         }
     }
-
-    private static string Signature(IEnumerable<SavedCommandStep> steps) =>
-        string.Join("\n␞\n", steps.Select(s => s.Text.Trim()));
 
     // ── история и вставка ───────────────────────────────────────────────────
 
@@ -408,12 +364,29 @@ public partial class CommandPage : Page
     // ── избранное ───────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Выбор записи избранного: окна вкладки заменяются её набором — у одиночной остаётся
-    /// одно окно с этой командой (sudo — как было у окна с курсором).
+    /// ♡ у окна: избранное. Одиночная запись встаёт в это окно (sudo окна остаётся), запись из нескольких
+    /// окон заменяет все окна вкладки. Добавить в избранное это окно или все окна — там же.
     /// </summary>
-    private void OnSnippetPicked(object sender, SelectionChangedEventArgs e)
+    private void OnOpenBook(object sender, RoutedEventArgs e)
     {
-        if (e.AddedItems.Count == 0 || BookBox.SelectedItem is not CommandSnippet snippet || Workspace is not { } workspace)
+        if (StepOf(sender) is not { } step || Workspace is not { } workspace)
+        {
+            return;
+        }
+
+        var request = new CommandBookRequest
+        {
+            Section = AppSection.Command,
+            Tab = workspace,
+            Window = step.ToSaved(),
+            AllWindows = workspace.Steps
+                .Where(s => !s.IsEmpty)
+                .Select(s => new SavedCommandStep { Text = s.Text.Trim(), UseSudo = s.UseSudo })
+                .ToList(),
+            AllowMulti = true,
+        };
+
+        if (CommandBookDialog.Ask(Window.GetWindow(this), request) is not { } snippet)
         {
             return;
         }
@@ -422,239 +395,87 @@ public partial class CommandPage : Page
         {
             workspace.SetSteps(snippet.AsSteps());
             AppLog.Echo($"Из избранного раскрыто окон: {workspace.Steps.Count} — {snippet.Comment}");
+            step = workspace.Steps[0];
         }
         else
         {
-            var sudo = ActiveStep?.UseSudo ?? false;
-            workspace.SetSteps([new SavedCommandStep { Text = snippet.Command, UseSudo = sudo }]);
-            AppLog.Echo($"Подставлена команда из избранного: {snippet.Comment}");
+            step.Text = snippet.Command;
+            AppLog.Echo($"Подставлена команда {CommandBookDialog.Origin(snippet)}");
         }
+
+        workspace.FocusStep(step);
+        FocusStep(step);
     }
 
-    /// <summary>♡ у окна: записать это окно в избранное одиночной записью.</summary>
-    private void OnAddSnippet(object sender, RoutedEventArgs e)
-    {
-        if (StepOf(sender) is not { } step || string.IsNullOrWhiteSpace(step.Text))
-        {
-            FlashSteps(StepOf(sender) is { } empty ? [empty] : []);
-            AppLog.Hint("Сначала наберите команду в окне — её и запишем в избранное.", LogLevel.Warning);
-            return;
-        }
-
-        SaveSnippet([new SavedCommandStep { Text = step.Text.Trim(), UseSudo = step.UseSudo }]);
-    }
-
-    /// <summary>♡♡ у первого окна: все окна одной многозадачной записью.</summary>
-    private void OnAddSnippetSet(object sender, RoutedEventArgs e)
-    {
-        var steps = Workspace?.Steps
-            .Where(s => !string.IsNullOrWhiteSpace(s.Text))
-            .Select(s => new SavedCommandStep { Text = s.Text.Trim(), UseSudo = s.UseSudo })
-            .ToList() ?? [];
-
-        if (steps.Count == 0)
-        {
-            FlashSteps(Workspace?.Steps ?? []);
-            AppLog.Hint("Все окна пустые — записывать в избранное нечего.", LogLevel.Warning);
-            return;
-        }
-
-        SaveSnippet(steps);
-    }
-
-    /// <summary>
-    /// Название спрашивается в отдельном окне; если такое название уже есть, запись
-    /// обновляется — так же правится и сама команда.
-    /// </summary>
-    private void SaveSnippet(List<SavedCommandStep> steps)
-    {
-        var current = (BookBox.SelectedItem as CommandSnippet)?.Comment ?? string.Empty;
-        var multi = steps.Count > 1;
-
-        var dialog = new InputDialog(
-            "Запись в избранное",
-            multi ? $"Как назвать этот набор из {steps.Count} окон? Короткое название:" : "Как назвать эту команду? Короткое название:",
-            current)
-        {
-            Owner = Window.GetWindow(this),
-        };
-
-        if (dialog.ShowDialog() != true || string.IsNullOrWhiteSpace(dialog.Value))
-        {
-            return;
-        }
-
-        var comment = dialog.Value.Trim();
-        var book = AppState.Current.Settings.CommandBook;
-        var existing = book.FirstOrDefault(s => string.Equals(s.Comment, comment, StringComparison.OrdinalIgnoreCase));
-
-        if (existing is null)
-        {
-            existing = new CommandSnippet { Comment = comment };
-            existing.SetSteps(steps);
-            book.Add(existing);
-            ActionLog.Info(multi ? $"В избранное добавлен набор из {steps.Count} окон: {comment}" : $"В избранное добавлено: {comment}",
-                null, AppSection.Command, Workspace, steps.Select(s => OneLine(s.Text)));
-        }
-        else
-        {
-            existing.SetSteps(steps);
-            ActionLog.Info($"Запись избранного обновлена: {comment}", null, AppSection.Command, Workspace, steps.Select(s => OneLine(s.Text)));
-        }
-
-        AppState.Current.SaveSettings();
-        BookBox.SelectedItem = existing;
-    }
-
-    /// <summary>
-    /// Карандаш: запись открывается на правку прямо в окнах — так, как она будет выглядеть
-    /// в работе. Окна подкрашены, работают только правка, ＋/－, «Сохранить» и «Отменить».
-    /// Рабочие команды вкладки на время правки откладываются и потом возвращаются.
-    /// </summary>
-    private void OnEditSnippet(object sender, RoutedEventArgs e)
+    /// <summary>♡ у строки истории: избранное открывается сразу новой записью с этой командой.</summary>
+    private void OnBookHistoryItem(object sender, RoutedEventArgs e)
     {
         // иначе щелчок дойдёт до строки списка и она будет выбрана
         e.Handled = true;
 
-        if (sender is not FrameworkElement { DataContext: CommandSnippet snippet } || Workspace is not { } workspace)
+        if (sender is not FrameworkElement { DataContext: string value } || Workspace is not { } workspace)
         {
             return;
         }
 
-        // модальное окно и правка поверх открытого списка выглядят криво — список закрываем
-        BookBox.IsDropDownOpen = false;
+        HistoryBox.IsDropDownOpen = false;
+        var step = ActiveStep ?? workspace.Steps.FirstOrDefault();
 
-        if (workspace.CommandBatch.IsRunning)
+        var request = new CommandBookRequest
         {
-            AppLog.Hint("Команда ещё выполняется — править избранное можно, когда она закончится.", LogLevel.Warning);
+            Section = AppSection.Command,
+            Tab = workspace,
+            Window = step?.ToSaved() ?? new SavedCommandStep(),
+            AddCommand = value,
+            AllowMulti = true,
+        };
+
+        // после добавления из избранного могут и выбрать запись — она встаёт в окно, как по ♡ у окна
+        if (CommandBookDialog.Ask(Window.GetWindow(this), request) is not { } snippet || step is null)
+        {
             return;
         }
 
-        _editing = snippet;
-        _editWorkspace = workspace;
-        workspace.HoldSteps(snippet.AsSteps());
-        EditNameBox.Text = snippet.Comment;
-        EditBar.Visibility = Visibility.Visible;
-        IsNotEditingSnippet = false;
+        if (snippet.IsMulti)
+        {
+            workspace.SetSteps(snippet.AsSteps());
+            step = workspace.Steps[0];
+        }
+        else
+        {
+            step.Text = snippet.Command;
+        }
 
-        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(PaintBoxes));
-        AppLog.Hint($"Правка избранного: {snippet.Comment}");
+        AppLog.Echo($"Подставлена команда {CommandBookDialog.Origin(snippet)}");
+        workspace.FocusStep(step);
+        FocusStep(step);
     }
 
-    private void OnSaveEdit(object sender, RoutedEventArgs e)
-    {
-        if (_editing is not { } snippet || _editWorkspace is not { } workspace)
-        {
-            return;
-        }
-
-        var name = EditNameBox.Text.Trim();
-
-        if (name.Length == 0)
-        {
-            AppLog.Hint("У записи должно быть название.", LogLevel.Warning);
-            EditNameBox.Focus();
-            return;
-        }
-
-        var book = AppState.Current.Settings.CommandBook;
-
-        // название — ключ записи: два одинаковых в списке не различить
-        if (book.FirstOrDefault(s => !ReferenceEquals(s, snippet)
-                && string.Equals(s.Comment, name, StringComparison.OrdinalIgnoreCase)) is { } clash)
-        {
-            AppLog.Hint($"В избранном уже есть запись «{clash.Comment}» — выберите другое название.", LogLevel.Warning);
-            EditNameBox.Focus();
-            return;
-        }
-
-        var steps = workspace.Steps
-            .Where(s => !string.IsNullOrWhiteSpace(s.Text))
-            .Select(s => new SavedCommandStep { Text = s.Text.Trim(), UseSudo = s.UseSudo })
-            .ToList();
-
-        if (steps.Count == 0)
-        {
-            AppLog.Hint("Все окна пустые — запись без команд не сохраняется. Удалить её можно крестиком в списке.", LogLevel.Warning);
-            return;
-        }
-
-        snippet.Comment = name;
-        snippet.SetSteps(steps);
-        AppState.Current.SaveSettings();
-        ActionLog.Info($"Запись избранного изменена: {name}", null, AppSection.Command, Workspace, steps.Select(s => OneLine(s.Text)));
-
-        EndEdit();
-    }
-
-    private void OnCancelEdit(object sender, RoutedEventArgs e)
-    {
-        AppLog.Hint("Правка избранного отменена.");
-        CancelEdit();
-    }
-
-    private void CancelEdit() => EndEdit();
-
-    /// <summary>Вернуть вкладке её рабочие окна и выйти из правки.</summary>
-    private void EndEdit()
-    {
-        _editWorkspace?.ReleaseSteps();
-
-        _editing = null;
-        _editWorkspace = null;
-
-        EditBar.Visibility = Visibility.Collapsed;
-        IsNotEditingSnippet = true;
-        BookBox.SelectedItem = null;
-
-        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(PaintBoxes));
-    }
-
-    /// <summary>Крестик в выпадающем списке: убирает запись из избранного.</summary>
-    private void OnRemoveSnippet(object sender, RoutedEventArgs e)
+    /// <summary>Скопировать команду из истории в буфер.</summary>
+    private void OnCopyHistoryItem(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
 
-        if (sender is not FrameworkElement { DataContext: CommandSnippet snippet })
+        if (sender is FrameworkElement { DataContext: string value } && ClipboardText.Copy(value))
         {
-            return;
+            HistoryBox.IsDropDownOpen = false;
+            AppLog.Echo("Скопирована команда из истории: " + OneLine(value));
         }
-
-        var book = AppState.Current.Settings.CommandBook;
-
-        if (!book.Remove(snippet))
-        {
-            return;
-        }
-
-        AppState.Current.SaveSettings();
-        ActionLog.Info($"Из избранного удалено: {snippet.Comment}", null, AppSection.Command, Workspace);
-
-        BookBox.IsDropDownOpen = book.Count > 0;
     }
 
-    /// <summary>Крестик в выпадающем списке: убирает одну команду из истории.</summary>
+    /// <summary>Крестик в выпадающем списке: убирает одну команду из истории вкладки — как крестик в избранном.</summary>
     private void OnRemoveHistoryItem(object sender, RoutedEventArgs e)
     {
         // иначе щелчок дойдёт до строки списка и она будет выбрана
         e.Handled = true;
 
-        if (sender is not FrameworkElement { DataContext: string value })
+        if (sender is not FrameworkElement { DataContext: string value } || Workspace is not { } workspace)
         {
             return;
         }
 
-        var history = AppState.Current.Settings.CommandHistory;
-
-        if (!history.Remove(value))
-        {
-            return;
-        }
-
-        AppState.Current.SaveSettings();
-        ActionLog.Info($"Из истории команд удалено: {OneLine(value)}", null, AppSection.Command, Workspace, [value.TrimEnd()]);
-
-        HistoryBox.IsDropDownOpen = history.Count > 0;
+        workspace.ForgetCommand(value, AppSection.Command);
+        HistoryBox.IsDropDownOpen = workspace.CommandHistory.Count > 0;
     }
 
     // ── запуск ──────────────────────────────────────────────────────────────
@@ -782,11 +603,6 @@ public partial class CommandPage : Page
     /// </summary>
     private async Task RunGuardedAsync(Workspace workspace, CommandStep? from, bool onlyThis)
     {
-        if (!IsNotEditingSnippet)
-        {
-            return;
-        }
-
         // делать нечего — мигнуть тем, что надо заполнить: пустыми окнами или серверами слева.
         // Запуск всё равно идёт дальше: он сам откажет и объяснит причину
         var steps = from is null ? workspace.Steps.ToList()

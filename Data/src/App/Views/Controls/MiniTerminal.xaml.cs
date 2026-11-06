@@ -7,6 +7,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using MultiServerSync.Models;
 using MultiServerSync.Services;
+using MultiServerSync.Views.Dialogs;
 using MultiServerSync.Views.Pages;
 
 namespace MultiServerSync.Views.Controls;
@@ -73,8 +74,25 @@ public partial class MiniTerminal : UserControl
         set => SetValue(TagRowHeightProperty, value);
     }
 
-    /// <summary>Ниже этого окно не ужимается: значки сверху и sudo снизу налезали бы друг на друга.</summary>
-    private const double MinStepHeight = 104;
+    public static readonly DependencyProperty ShowTargetsProperty = DependencyProperty.Register(
+        nameof(ShowTargets), typeof(bool), typeof(MiniTerminal),
+        new PropertyMetadata(true, (d, e) => ((MiniTerminal)d).ApplyTargets()));
+
+    /// <summary>
+    /// Ряд плашек серверов над окном. В «Проводнике» его нет: сервер и так в названии правой панели,
+    /// а окно встаёт ровно на место вывода.
+    /// </summary>
+    public bool ShowTargets
+    {
+        get => (bool)GetValue(ShowTargetsProperty);
+        set => SetValue(ShowTargetsProperty, value);
+    }
+
+    /// <summary>Команда пошла на серверы — для переворота окна обратно в вывод.</summary>
+    public event Action? Launched;
+
+    /// <summary>Ниже этого окно не ужимается: два ряда значков сверху и sudo снизу налезали бы друг на друга.</summary>
+    private const double MinStepHeight = 112;
 
     /// <summary>Сколько после окончания команды её повтор считается случайным двойным нажатием.</summary>
     private static readonly TimeSpan RepeatGuard = TimeSpan.FromSeconds(3);
@@ -193,6 +211,13 @@ public partial class MiniTerminal : UserControl
         });
 
         return Plate(row);
+    }
+
+    /// <summary>Без ряда плашек окно поднимается к самому верху: отступ над ним был зазором до плашек.</summary>
+    private void ApplyTargets()
+    {
+        TagRow.Visibility = ShowTargets ? Visibility.Visible : Visibility.Collapsed;
+        StepsScroll.Margin = ShowTargets ? default : new Thickness(0, -4, 0, 0);
     }
 
     private void BuildTags()
@@ -349,6 +374,15 @@ public partial class MiniTerminal : UserControl
             }
         }));
 
+    /// <summary>Окно открылось — курсор сразу в поле первой команды.</summary>
+    public void FocusFirst()
+    {
+        if (Tab?.Steps.FirstOrDefault() is { } step)
+        {
+            FocusStep(step);
+        }
+    }
+
     private void Flash(CommandStep step)
     {
         if (StepsList.ItemContainerGenerator.ContainerFromItem(step) is ContentPresenter presenter
@@ -399,6 +433,34 @@ public partial class MiniTerminal : UserControl
         FocusStep(step);
     }
 
+    /// <summary>
+    /// ♡ у окна: избранное. Выбор заменяет окно, как на «Команде»; sudo остаётся как было.
+    /// Окно здесь одно, поэтому записи из нескольких окон в списке не выбираются.
+    /// </summary>
+    private void OnPickSnippet(object sender, RoutedEventArgs e)
+    {
+        if (StepOf(sender) is not { } step)
+        {
+            return;
+        }
+
+        var request = new CommandBookRequest
+        {
+            Section = AppState.Current.Section,
+            Tab = Tab,
+            Window = new SavedCommandStep { Text = step.Text, UseSudo = step.UseSudo },
+        };
+
+        if (CommandBookDialog.Ask(Window.GetWindow(this), request) is not { } snippet)
+        {
+            return;
+        }
+
+        step.Text = snippet.Command.Trim();
+        AppLog.Echo($"Подставлена команда {CommandBookDialog.Origin(snippet)}");
+        FocusStep(step);
+    }
+
     private void OnBoxPasting(object sender, DataObjectPastingEventArgs e)
     {
         if (e.DataObject.GetData(DataFormats.UnicodeText) is string text
@@ -437,6 +499,12 @@ public partial class MiniTerminal : UserControl
 
         if (tab.CopyTargets.Count == 0)
         {
+            if (!ShowTargets)
+            {
+                AppLog.Hint("Сервер не выбран — выберите его значком сервера слева от пути в правой панели.", LogLevel.Warning);
+                return;
+            }
+
             if (Window.GetWindow(this) is MainWindow main)
             {
                 main.FlashTargets();
@@ -462,7 +530,15 @@ public partial class MiniTerminal : UserControl
 
         _repeatConfirmed = false;
 
-        if (await tab.RunCommandAsync(from: step, onlyThis: true, servers: tab.CopyTargets))
+        // отказ возвращается сразу, ещё до ожидания; не закончилась сразу — значит, пошла
+        var run = tab.RunCommandAsync(from: step, onlyThis: true, servers: tab.CopyTargets);
+
+        if (!run.IsCompleted)
+        {
+            Launched?.Invoke();
+        }
+
+        if (await run)
         {
             _lastRun = signature;
             _lastFinishedAt = DateTime.Now;

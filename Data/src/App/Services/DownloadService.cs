@@ -624,6 +624,7 @@ public static class DownloadService
 
         var cut = new List<string>();
         var kept = new List<Entry>();
+        var onlyForIncludes = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var e in entries.OrderBy(e => e.Relative, StringComparer.Ordinal))
         {
@@ -642,10 +643,34 @@ public static class DownloadService
                 continue;
             }
 
+            if (e.IsDirectory && exclude.OnlyForIncludes(e.Relative))
+            {
+                onlyForIncludes.Add(e.Relative);
+            }
+
             kept.Add(e);
         }
 
-        return kept;
+        if (onlyForIncludes.Count == 0)
+        {
+            return kept;
+        }
+
+        // исключённые папки, куда заходили ради «Включить», остаются, только если в них что-то едет
+        var needed = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var file in kept.Where(e => !e.IsDirectory))
+        {
+            for (var slash = file.Relative.LastIndexOf('/'); slash > 0; slash = file.Relative.LastIndexOf('/', slash - 1))
+            {
+                if (!needed.Add(file.Relative[..slash]))
+                {
+                    break;
+                }
+            }
+        }
+
+        return kept.Where(e => !e.IsDirectory || !onlyForIncludes.Contains(e.Relative) || needed.Contains(e.Relative)).ToList();
     }
 
     /// <summary>

@@ -5,6 +5,7 @@
   xmlns:core="clr-namespace:MultiServerSync.Core"
   xmlns:controls="clr-namespace:MultiServerSync.Views.Controls"
   xmlns:pages="clr-namespace:MultiServerSync.Views.Pages"
+  xmlns:services="clr-namespace:MultiServerSync.Services"
   xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
   Title="MultiServerSync"
   Icon="pack://application:,,,/Assets/app.ico"
@@ -930,24 +931,24 @@
       <Grid>
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-        <!--  «+» и под ним архив (щелчок переключает ленту на архивные вкладки и обратно):
-              вместе ровно в высоту ярлыков, сколько бы рядов их ни было;
-              отступы те же, что у ярлыка. У наборов серверов архива нет — там «+» во всю высоту  -->
+        <!--  «+» — во всю высоту ярлыков, архив справа; ярлыки в несколько рядов — «+» и архив
+              одного размера друг над другом (раскладку меняет ArrangeTabButtons). Отступы те же, что у ярлыка  -->
         <Grid
           x:Name="TabButtons"
+          Grid.Row="0"
+          Grid.RowSpan="2"
           Grid.Column="0"
           Width="44"
           Margin="0,2,4,2">
-          <Grid.RowDefinitions>
-            <RowDefinition Height="*" />
-            <RowDefinition x:Name="ArchiveRow" Height="*" />
-          </Grid.RowDefinitions>
-
           <ui:Button
-            Grid.Row="0"
             MinHeight="0"
             Padding="0"
             HorizontalAlignment="Stretch"
@@ -959,32 +960,39 @@
               <ui:SymbolIcon FontSize="14" Symbol="Add24" />
             </ui:Button.Icon>
           </ui:Button>
+        </Grid>
 
-          <Grid Grid.Row="1" Margin="0,2,0,0">
+        <!--  архив — только когда в нём что-то есть: кнопка высотой с ярлык, шириной по слову.
+              Щелчок переключает ленту на архивные вкладки и обратно  -->
+        <Grid
+          x:Name="ArchiveHost"
+          Grid.Row="0"
+          Grid.Column="1"
+          Height="41"
+          Margin="0,2,4,2"
+          VerticalAlignment="Top">
             <ui:Button
               x:Name="ArchiveButton"
               MinHeight="0"
-              Padding="0"
+              Padding="12,0"
               HorizontalAlignment="Stretch"
               HorizontalContentAlignment="Center"
               VerticalAlignment="Stretch"
               Click="OnArchiveClick"
-              RenderTransformOrigin="0.5,0.5"
-              >
+              RenderTransformOrigin="0.5,0.5">
               <ui:Button.RenderTransform>
                 <ScaleTransform />
               </ui:Button.RenderTransform>
               <StackPanel Orientation="Horizontal">
                 <ui:SymbolIcon
                   x:Name="ArchiveIcon"
-                  FontSize="14"
+                  VerticalAlignment="Center"
+                  FontSize="16"
                   Symbol="Archive24" />
                 <TextBlock
-                  x:Name="ArchiveCount"
-                  Margin="3,0,0,0"
+                  Margin="6,0,0,0"
                   VerticalAlignment="Center"
-                  FontSize="10"
-                  FontWeight="SemiBold" />
+                  Text="Архив" />
               </StackPanel>
             </ui:Button>
 
@@ -1031,13 +1039,13 @@
                 </Style>
               </Border.Style>
             </Border>
-          </Grid>
         </Grid>
 
         <!--  наборы серверов: новый — пустой, закрытие уносит его серверы  -->
         <ListBox
           x:Name="SetStrip"
-          Grid.Column="1"
+          Grid.RowSpan="2"
+          Grid.Column="2"
           Padding="0"
           Background="Transparent"
           BorderThickness="0"
@@ -1053,7 +1061,10 @@
 
         <!--  вкладки раздела; на личной вкладке лента ужата до её ярлыка, справа — стрелка назад
               к вкладке копирования, в высоту ярлыка  -->
-        <Grid Grid.Column="1" Visibility="{Binding State.ShowsWorkspaceTabs, Converter={StaticResource BoolToVis}}">
+        <Grid
+          Grid.RowSpan="2"
+          Grid.Column="2"
+          Visibility="{Binding State.ShowsWorkspaceTabs, Converter={StaticResource BoolToVis}}">
           <Grid.ColumnDefinitions>
             <ColumnDefinition x:Name="TabStripColumn" Width="*" />
             <ColumnDefinition Width="Auto" />
@@ -1348,6 +1359,74 @@
                   ToolTip="Отметить или снять все серверы в списке этой вкладки. Если отмечена часть — отмечает все" />
               </Border>
 
+              <!--  «Копирование» с несколькими окнами: у каждого окна свои серверы. Номера окон в ряд, как номер
+                    слева от «Открыть»; у окна в фокусе — оранжевый, и галочки ниже — его. Щелчок — фокус на окне  -->
+              <ItemsControl
+                Margin="0,2,-4,4"
+                Focusable="False"
+                ItemsSource="{Binding State.ActiveWorkspace.CopyWindows}">
+                <ItemsControl.Style>
+                  <Style TargetType="ItemsControl">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                      <MultiDataTrigger>
+                        <MultiDataTrigger.Conditions>
+                          <Condition Binding="{Binding State.Section}" Value="{x:Static services:AppSection.Files}" />
+                          <Condition Binding="{Binding State.ActiveWorkspace.IsMultiWindow}" Value="True" />
+                          <Condition Binding="{Binding State.ActiveWorkspace.SeparateServers}" Value="True" />
+                        </MultiDataTrigger.Conditions>
+                        <Setter Property="Visibility" Value="Visible" />
+                      </MultiDataTrigger>
+                    </Style.Triggers>
+                  </Style>
+                </ItemsControl.Style>
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <WrapPanel Orientation="Horizontal" />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Button
+                      Height="28"
+                      MinWidth="28"
+                      Margin="0,0,4,4"
+                      Padding="3,0"
+                      Click="OnPaneWindowClick"
+                      Content="{Binding NumberText}"
+                      Cursor="Hand"
+                      Focusable="False"
+                      FontFamily="Consolas"
+                      FontSize="12"
+                      Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                      ToolTip="{Binding NameText}">
+                      <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                          <Border
+                            x:Name="Box"
+                            Padding="{TemplateBinding Padding}"
+                            Background="{DynamicResource ControlFillColorDefaultBrush}"
+                            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                          </Border>
+                          <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                              <Setter TargetName="Box" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                            </Trigger>
+                            <DataTrigger Binding="{Binding IsFocused}" Value="True">
+                              <Setter TargetName="Box" Property="Background" Value="#26E07A1F" />
+                              <Setter TargetName="Box" Property="BorderBrush" Value="#80E07A1F" />
+                            </DataTrigger>
+                          </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                      </Button.Template>
+                    </Button>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+
               <!--  серверы переставляются мышью: порядок общий, его же показывают «Серверы»  -->
               <ItemsControl x:Name="PaneServerList" ItemsSource="{Binding State.ActiveWorkspace.Servers}">
                 <ItemsControl.ItemTemplate>
@@ -1358,6 +1437,8 @@
                         Margin="0,2,0,0"
                         Padding="0,2,0,0"
                         Background="Transparent"
+                        PreviewMouseLeftButtonDown="OnPaneServerPress"
+                        PreviewMouseLeftButtonUp="OnPaneServerRelease"
                         BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
                         BorderThickness="0,1,0,0">
                         <!--  отмеченный сервер — в тусклой оранжевой рамке на тусклом оранжевом фоне, шрифт на пункт
@@ -1646,13 +1727,13 @@
           <RadioButton
             x:Name="TerminalTab"
             Checked="OnBottomTabChanged"
-            Content="Терминал"
+            Content="Журнал"
             IsChecked="True"
             Style="{StaticResource PanelTabStyle}" />
           <RadioButton
             x:Name="JournalTab"
             Checked="OnBottomTabChanged"
-            Content="Журнал"
+            Content="История"
             Style="{StaticResource PanelTabStyle}" />
 
           <!--  что из разовых действий открытого раздела писать в терминал и журнал; у каждого раздела своё  -->
@@ -1661,7 +1742,7 @@
             Margin="2,0,0,0"
             Click="OnOutputPrefs"
             Style="{StaticResource RowPathButtonStyle}"
-            ToolTip="Что писать в терминал и журнал в этом разделе и сколько хранить">
+            ToolTip="Что писать в журнал и историю в этом разделе и сколько хранить">
             <ui:SymbolIcon FontSize="15" Symbol="Settings24" />
           </Button>
           <Popup
@@ -1717,14 +1798,14 @@
                     Margin="0,0,0,4"
                     HorizontalAlignment="Center"
                     Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                    Text="Терминал" />
+                    Text="Журнал" />
                   <TextBlock
                     Grid.Row="0"
                     Grid.Column="2"
                     Margin="0,0,0,4"
                     HorizontalAlignment="Center"
                     Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                    Text="Журнал" />
+                    Text="История" />
 
                   <!--  строки, которых в разделе не бывает, прячутся: в «Команде» остаётся одна «Программа»  -->
                   <TextBlock

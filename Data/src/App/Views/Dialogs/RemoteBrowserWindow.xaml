@@ -40,6 +40,7 @@
       </Grid.ColumnDefinitions>
 
       <TextBlock
+        x:Name="ChoiceLabel"
         Grid.Column="0"
         Margin="0,0,8,0"
         VerticalAlignment="Center"
@@ -62,10 +63,19 @@
           Icon="{ui:SymbolIcon Checkmark24}"
           ToolTip="Отмеченная галочкой папка, а если ничего не отмечено — открытая" />
         <ui:Button
+          x:Name="CancelButton"
           Click="OnCancel"
           Content="Отмена"
           IsCancel="True" />
       </StackPanel>
     </Grid>
+
+    <!--  отказ под нажатой кнопкой: плашки главного окна под этим окном не видно  -->
+    <controls:ActionToast
+      x:Name="Toast"
+      Grid.RowSpan="3"
+      Panel.ZIndex="1000"
+      HorizontalAlignment="Left"
+      VerticalAlignment="Top" />
   </Grid>
 </ui:FluentWindow>

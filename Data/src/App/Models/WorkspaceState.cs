@@ -48,8 +48,14 @@ public sealed class WorkspaceState
     /// <summary>Название первого окна: его поля лежат наверху файла.</summary>
     public string CopyWindowName { get; set; } = string.Empty;
 
+    /// <summary>Строки первого окна свёрнуты.</summary>
+    public bool CopyWindowCollapsed { get; set; }
+
     /// <summary>Кнопка «Название» включена: в окнах вкладки видны плашки названий.</summary>
     public bool ShowWindowNames { get; set; }
+
+    /// <summary>Кнопка «Разные сервера»: у окон копирования свои серверы. Без неё все окна идут на отмеченные слева.</summary>
+    public bool SeparateServers { get; set; }
 
     public string RemotePath { get; set; } = "/";
 
@@ -148,6 +154,18 @@ public sealed class WorkspaceState
     /// <summary>Галочка «Весь журнал».</summary>
     public bool JournalWhole { get; set; }
 
+    /// <summary>Вкладка избранного, открытая здесь в прошлый раз. null — не открывали.</summary>
+    public string? BookGroup { get; set; }
+
+    /// <summary>Докуда был прокручен список избранного.</summary>
+    public double BookScroll { get; set; }
+
+    /// <summary>В избранном была открыта история команд, а не вкладка избранного.</summary>
+    public bool BookHistory { get; set; }
+
+    /// <summary>Выполненные здесь команды, свежая первой, без повторов.</summary>
+    public List<string>? CommandHistory { get; set; }
+
     public bool? PaneShowUser { get; set; }
 
     /// <summary>
@@ -224,4 +242,7 @@ public sealed class WorkspacesFile
 
     /// <summary>Вкладки раздела «Проводник». Пусто — файл версии, где раздела ещё не было.</summary>
     public List<WorkspaceState> ExplorerTabs { get; set; } = new();
+
+    /// <summary>Последняя открытая вкладка основной ленты и архива каждого раздела: значок архива возвращает на них.</summary>
+    public List<string>? LastInStripIds { get; set; }
 }

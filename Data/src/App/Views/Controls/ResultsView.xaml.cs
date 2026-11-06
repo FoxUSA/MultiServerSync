@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using MultiServerSync.Models;
 using MultiServerSync.Services;
 using MultiServerSync.Views.Dialogs;
@@ -18,6 +19,10 @@ public partial class ResultsView : UserControl
     public ResultsView()
     {
         InitializeComponent();
+
+        // работа пошла или кончилась, «1 из 2» стало длиннее — место под «Остановить» пересчитать
+        RunTools.IsVisibleChanged += (_, _) => FitLeftTools();
+        RunText.SizeChanged += (_, _) => FitLeftTools();
 
         // «Всем серверам» в строке ответа берёт серверы показанного прогона
         Answer.BatchSource = () => Batch;
@@ -45,9 +50,103 @@ public partial class ResultsView : UserControl
         };
         Loaded += (_, _) => agoTimer.Start();
         Unloaded += (_, _) => agoTimer.Stop();
+
+        // окно команды в «Проводнике»: открыто ли оно — помнится между запусками, команда пошла — назад к выводу
+        _commandOpen = AppState.Current.Settings.ExplorerCommandOpen;
+        CommandFace.Launched += () => Flip(false);
+        AppState.Current.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(AppState.Section))
+            {
+                ApplyFace();
+            }
+        };
+        ApplyFace();
     }
 
     private OperationBatch? Batch => DataContext as OperationBatch;
+
+    // ── окно команды на обороте вывода («Проводник») ──────────────────────────
+
+    /// <summary>Половина переворота: сжатие к середине или разворот другой стороной.</summary>
+    private static readonly Duration FlipHalf = new(TimeSpan.FromMilliseconds(130));
+
+    /// <summary>Вывод перевёрнут окном команды; видно это только в «Проводнике».</summary>
+    private bool _commandOpen;
+
+    private bool _flipping;
+
+    private bool CommandShown => _commandOpen && AppState.Current.Section == AppSection.Explorer;
+
+    private void OnFlip(object sender, RoutedEventArgs e) => Flip(!_commandOpen);
+
+    /// <summary>Переворот как у страницы: окно сжимается к середине и разворачивается другой стороной.</summary>
+    private void Flip(bool command)
+    {
+        if (_flipping || command == _commandOpen)
+        {
+            return;
+        }
+
+        _flipping = true;
+        _commandOpen = command;
+        AppState.Current.Settings.ExplorerCommandOpen = command;
+        ApplyFlipButton();
+
+        var fold = new DoubleAnimation(1, 0, FlipHalf) { EasingFunction = new SineEase { EasingMode = EasingMode.EaseIn } };
+        fold.Completed += (_, _) =>
+        {
+            ShowFace(command);
+
+            var unfold = new DoubleAnimation(0, 1, FlipHalf) { EasingFunction = new SineEase { EasingMode = EasingMode.EaseOut } };
+            unfold.Completed += (_, _) =>
+            {
+                FlipScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+                _flipping = false;
+
+                if (command)
+                {
+                    CommandFace.FocusFirst();
+                }
+            };
+            FlipScale.BeginAnimation(ScaleTransform.ScaleXProperty, unfold);
+        };
+        FlipScale.BeginAnimation(ScaleTransform.ScaleXProperty, fold);
+    }
+
+    /// <summary>Сторона без переворота — при запуске и смене раздела: окно команды есть только в «Проводнике».</summary>
+    private void ApplyFace()
+    {
+        FlipScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        _flipping = false;
+        ShowFace(CommandShown);
+        ApplyFlipButton();
+    }
+
+    private void ShowFace(bool command)
+    {
+        CommandFace.Visibility = command ? Visibility.Visible : Visibility.Collapsed;
+        OutputFace.Visibility = command ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// <summary>Открыто окно команды — белый значок на тускло-зелёной плашке.</summary>
+    private void ApplyFlipButton()
+    {
+        if (_commandOpen)
+        {
+            FlipBadge.Background = new SolidColorBrush(Color.FromRgb(0x2E, 0x7D, 0x3E));
+            FlipGlyph.Foreground = Brushes.White;
+            FlipText.Text = "Закрыть терминал";
+            FlipButton.ToolTip = "Вернуть окно вывода";
+        }
+        else
+        {
+            FlipBadge.Background = Brushes.Transparent;
+            FlipGlyph.ClearValue(IconElement.ForegroundProperty);
+            FlipText.Text = "Открыть терминал";
+            FlipButton.ToolTip = "Перевернуть окно вывода окном команды для сервера правой панели";
+        }
+    }
 
     /// <summary>Стоп в строке — только она; строка команды цепочки останавливает свой сервер в цепочке.</summary>
     private async void OnRowStop(object sender, RoutedEventArgs e)
@@ -80,8 +179,18 @@ public partial class ResultsView : UserControl
     /// </summary>
     private void FitLeftTools()
     {
-        LeftTools.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        LeftToolsColumn.Width = new GridLength(Math.Max(LeftTools.DesiredSize.Width, TablePane.ActualWidth - _toolIndent));
+        var any = new Size(double.PositiveInfinity, double.PositiveInfinity);
+        LeftTools.Measure(any);
+        var need = LeftTools.DesiredSize.Width;
+
+        // пока идёт работа — ещё «1 из 2» и «Остановить»: у узкой таблицы их срезало «Хранить вывод» справа
+        if (RunTools.Visibility == Visibility.Visible)
+        {
+            RunTools.Measure(any);
+            need += RunTools.DesiredSize.Width;
+        }
+
+        LeftToolsColumn.Width = new GridLength(Math.Max(need, TablePane.ActualWidth - _toolIndent));
     }
 
     /// <summary>Команды после копирования показанного прогона; null — их нет.</summary>

@@ -137,16 +137,9 @@ public partial class ServersPage : Page
 
     private void EditSelected(System.Windows.Controls.DataGrid grid)
     {
-        if (grid.SelectedItem is not ServerCheck { Server: { } entry })
+        if (grid.SelectedItem is ServerCheck { Server: { } entry })
         {
-            return;
-        }
-
-        if (Edit(entry, isNew: false))
-        {
-            AppState.Current.SaveServers();
-            ActionLog.Info($"Изменён сервер: {entry.Display}", entry, AppSection.Servers, null,
-                [$"пользователь: {entry.User}", $"адрес: {entry.Host}:{entry.Port}"]);
+            ServerEditDialog.EditExisting(Window.GetWindow(this), entry, AppSection.Servers, null);
         }
     }
 

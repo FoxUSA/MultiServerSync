@@ -1,0 +1,662 @@
+<ui:FluentWindow
+  x:Class="MultiServerSync.Views.Dialogs.CommandBookDialog"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:controls="clr-namespace:MultiServerSync.Views.Controls"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+  Title="Избранное"
+  Width="920"
+  Height="640"
+  MinHeight="0"
+  ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
+  Background="{DynamicResource ApplicationBackgroundBrush}"
+  ExtendsContentIntoTitleBar="True"
+  Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  PreviewKeyDown="OnWindowKeyDown"
+  PreviewMouseMove="OnWindowMouseMove"
+  ResizeMode="NoResize"
+  ShowInTaskbar="False"
+  TextOptions.TextFormattingMode="Display"
+  UseLayoutRounding="True"
+  WindowBackdropType="None"
+  WindowCornerPreference="Round"
+  WindowStartupLocation="CenterOwner">
+
+  <Window.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+    <!--  карточка — вторая ступень яркости, как панели главного окна  -->
+    <Style x:Key="CardStyle" TargetType="Border">
+      <Setter Property="Background" Value="{DynamicResource SolidBackgroundFillColorQuarternaryBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource SurfaceStrokeColorDefaultBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="12" />
+    </Style>
+
+    <!--  подпись над блоком карточки  -->
+    <Style x:Key="CaptionStyle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+    </Style>
+  </Window.Resources>
+
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <ui:TitleBar
+      Grid.Row="0"
+      Title="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
+      ShowMaximize="False"
+      ShowMinimize="False" />
+
+    <Grid Grid.Row="1" Margin="12,0,12,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="230" />
+        <ColumnDefinition Width="4" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
+
+      <!--  ── вкладки: своя карточка, ярлыки одной ширины столбиком  ──  -->
+      <Border
+        x:Name="GroupsPane"
+        Grid.Column="0"
+        Style="{StaticResource CardStyle}">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+
+          <TextBlock
+            x:Name="GroupsCaption"
+            Grid.Row="0"
+            Margin="2,0,0,8"
+            Style="{StaticResource CaptionStyle}"
+            Text="ВКЛАДКИ" />
+
+          <ScrollViewer
+            x:Name="GroupsScroll"
+            Grid.Row="1"
+            HorizontalScrollBarVisibility="Disabled"
+            VerticalScrollBarVisibility="Auto">
+            <ItemsControl x:Name="GroupsList">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Grid
+                    x:Name="Plate"
+                    Margin="0,0,0,4"
+                    Background="Transparent"
+                    Cursor="Hand"
+                    MouseLeftButtonDown="OnGroupMouseDown"
+                    MouseLeftButtonUp="OnGroupClick"
+                    ToolTip="{Binding Name}">
+                    <Grid.ContextMenu>
+                      <ContextMenu>
+                        <MenuItem Click="OnRenameGroup" Header="Переименовать">
+                          <MenuItem.Icon>
+                            <ui:SymbolIcon FontSize="16" Symbol="Rename24" />
+                          </MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Click="OnRemoveGroup" Header="Удалить">
+                          <MenuItem.Icon>
+                            <ui:SymbolIcon FontSize="16" Symbol="Delete24" />
+                          </MenuItem.Icon>
+                        </MenuItem>
+                      </ContextMenu>
+                    </Grid.ContextMenu>
+                    <Border
+                      x:Name="Bd"
+                      Background="{DynamicResource ControlFillColorDefaultBrush}"
+                      BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                      BorderThickness="1"
+                      CornerRadius="6" />
+                    <Grid Margin="10,8,12,8">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                      </Grid.ColumnDefinitions>
+                      <ui:SymbolIcon
+                        x:Name="Glyph"
+                        Grid.Column="0"
+                        Margin="0,0,8,0"
+                        VerticalAlignment="Center"
+                        FontSize="16"
+                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                        Symbol="Folder24" />
+                      <TextBlock
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        Text="{Binding Name}"
+                        TextTrimming="CharacterEllipsis" />
+                      <TextBlock
+                        Grid.Column="2"
+                        Margin="8,0,0,0"
+                        VerticalAlignment="Center"
+                        FontSize="12"
+                        Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                        Text="{Binding Count}" />
+                    </Grid>
+                    <Border
+                      x:Name="Ring"
+                      BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
+                      BorderThickness="2"
+                      CornerRadius="6"
+                      IsHitTestVisible="False"
+                      Visibility="Collapsed" />
+                    <!--  сюда тащат запись: отпустишь — она переедет в эту вкладку  -->
+                    <Border
+                      x:Name="DropRing"
+                      Background="#26E07A1F"
+                      BorderBrush="#E07A1F"
+                      BorderThickness="2"
+                      CornerRadius="6"
+                      IsHitTestVisible="False"
+                      Visibility="Collapsed" />
+                  </Grid>
+                  <DataTemplate.Triggers>
+                    <Trigger SourceName="Plate" Property="IsMouseOver" Value="True">
+                      <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                      <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource TextFillColorDisabledBrush}" />
+                    </Trigger>
+                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                      <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                      <Setter TargetName="Ring" Property="Visibility" Value="Visible" />
+                      <Setter TargetName="Glyph" Property="Symbol" Value="FolderOpen24" />
+                      <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding IsDropTarget}" Value="True">
+                      <Setter TargetName="DropRing" Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                  </DataTemplate.Triggers>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+
+          <!--  история команд этой вкладки программы; открытая — в рамке акцента, как выбранная вкладка  -->
+          <Grid
+            x:Name="HistoryPlate"
+            Grid.Row="2"
+            Margin="0,8,0,0">
+            <ui:Button
+              HorizontalAlignment="Stretch"
+              Click="OnShowHistory"
+              Content="История"
+              Icon="{ui:SymbolIcon History24}"
+              ToolTip="Команды, выполненные в этой вкладке, без повторов. Щелчок вставляет команду в окно, а перетащенная на вкладку слева она добавляется в избранное." />
+            <Border
+              x:Name="HistoryRing"
+              BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
+              BorderThickness="2"
+              CornerRadius="4"
+              IsHitTestVisible="False"
+              Visibility="Collapsed" />
+          </Grid>
+
+          <ui:Button
+            Grid.Row="3"
+            Margin="0,4,0,0"
+            HorizontalAlignment="Stretch"
+            Click="OnAddGroup"
+            Content="Новая вкладка"
+            Icon="{ui:SymbolIcon Add24}"
+            ToolTip="Вкладка избранного со своим названием. Переименовать и удалить — правой кнопкой по вкладке, порядок — мышью. Запись переносится в другую вкладку, если бросить её на эту вкладку. При добавлении записи новая вкладка сразу становится местом сохранения." />
+        </Grid>
+      </Border>
+
+      <!--  ── команды выбранной вкладки: шапка с названием и добавлением, ниже список на тёмной подложке  ──  -->
+      <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+
+          <Grid Grid.Row="0" Margin="2,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel
+              Grid.Column="0"
+              VerticalAlignment="Center"
+              Orientation="Horizontal">
+              <TextBlock
+                x:Name="HeaderText"
+                VerticalAlignment="Center"
+                FontSize="18"
+                FontWeight="SemiBold"
+                TextTrimming="CharacterEllipsis" />
+              <TextBlock
+                x:Name="HeaderCount"
+                Margin="10,0,0,0"
+                VerticalAlignment="Center"
+                FontSize="12"
+                Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+            </StackPanel>
+
+            <StackPanel
+              x:Name="AddButtons"
+              Grid.Column="1"
+              Orientation="Horizontal">
+              <ui:Button
+                x:Name="AddAll"
+                Margin="0,0,4,0"
+                Click="OnAddAll"
+                Icon="{ui:SymbolIcon Heart24}"
+                Visibility="Collapsed" />
+              <ui:Button
+                x:Name="AddOne"
+                Click="OnAddOne"
+                Content="Добавить в избранное"
+                Icon="{ui:SymbolIcon Heart24}"
+                ToolTipService.ShowOnDisabled="True" />
+            </StackPanel>
+
+            <ui:Button
+              x:Name="ClearHistory"
+              Grid.Column="1"
+              Click="OnClearHistory"
+              Content="Очистить историю"
+              Icon="{ui:SymbolIcon Delete24}"
+              ToolTipService.ShowOnDisabled="True"
+              Visibility="Collapsed" />
+          </Grid>
+
+          <!--  список — рабочая поверхность, ступенькой темнее карточки  -->
+          <Border
+            x:Name="ListPane"
+            Grid.Row="1"
+            Padding="4"
+            Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="4">
+            <Grid>
+              <TextBlock
+                x:Name="EmptyText"
+                Margin="12,10"
+                FontSize="13"
+                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                Text="Во вкладке пока пусто. Команду из окна добавляет «Добавить в избранное» вверху, а запись из другой вкладки можно бросить мышью на эту вкладку слева."
+                TextWrapping="Wrap"
+                Visibility="Collapsed" />
+
+              <ScrollViewer
+                x:Name="BookScroll"
+                HorizontalScrollBarVisibility="Disabled"
+                VerticalScrollBarVisibility="Auto">
+                <ItemsControl x:Name="BookList">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid>
+                      <!--  линия между записями: у первой её нет  -->
+                      <Border
+                        x:Name="Line"
+                        Height="1"
+                        Margin="12,0"
+                        VerticalAlignment="Top"
+                        Background="{DynamicResource ControlStrokeColorDefaultBrush}"
+                        IsHitTestVisible="False" />
+                      <Border
+                        x:Name="Row"
+                        Padding="12,5"
+                        Background="Transparent"
+                        BorderBrush="Transparent"
+                        BorderThickness="1"
+                        CornerRadius="6"
+                        Cursor="Hand"
+                        MouseLeftButtonUp="OnRowClick">
+                        <Grid>
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                          </Grid.ColumnDefinitions>
+
+                          <StackPanel
+                            x:Name="Body"
+                            Grid.Column="0"
+                            ToolTip="{Binding Preview}">
+                            <StackPanel Orientation="Horizontal">
+                              <TextBlock
+                                FontWeight="SemiBold"
+                                Text="{Binding Comment}"
+                                TextTrimming="CharacterEllipsis" />
+                              <Border
+                                Margin="8,0,0,0"
+                                Padding="5,0"
+                                VerticalAlignment="Center"
+                                BorderBrush="{DynamicResource TextFillColorSecondaryBrush}"
+                                BorderThickness="1"
+                                CornerRadius="3"
+                                Visibility="{Binding IsMulti, Converter={StaticResource BoolToVis}}">
+                                <TextBlock
+                                  FontSize="11"
+                                  Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                  Text="{Binding Badge}" />
+                              </Border>
+                            </StackPanel>
+                            <TextBlock
+                              Margin="0,2,0,0"
+                              FontFamily="Consolas"
+                              FontSize="12"
+                              Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                              Text="{Binding Preview}"
+                              TextTrimming="CharacterEllipsis" />
+                          </StackPanel>
+
+                          <Button
+                            x:Name="Copy"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            Click="OnCopySnippet"
+                            Style="{StaticResource RowIconButtonStyle}"
+                            ToolTip="Скопировать команду"
+                            Visibility="Hidden">
+                            <ui:SymbolIcon FontSize="12" Symbol="Copy24" />
+                          </Button>
+                          <Button
+                            x:Name="Edit"
+                            Grid.Column="2"
+                            VerticalAlignment="Center"
+                            Click="OnEditSnippet"
+                            Style="{StaticResource RowEditButtonStyle}"
+                            ToolTip="Изменить название, вкладку и команду"
+                            Visibility="Hidden" />
+                          <Button
+                            x:Name="Remove"
+                            Grid.Column="3"
+                            VerticalAlignment="Center"
+                            Click="OnRemoveSnippet"
+                            Style="{StaticResource HistoryRemoveButtonStyle}"
+                            ToolTip="Удалить из избранного"
+                            Visibility="Hidden" />
+                        </Grid>
+                      </Border>
+                      </Grid>
+                      <DataTemplate.Triggers>
+                        <DataTrigger Binding="{Binding RelativeSource={RelativeSource PreviousData}}" Value="{x:Null}">
+                          <Setter TargetName="Line" Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                        <Trigger SourceName="Row" Property="IsMouseOver" Value="True">
+                          <Setter TargetName="Row" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                          <Setter TargetName="Copy" Property="Visibility" Value="Visible" />
+                          <Setter TargetName="Edit" Property="Visibility" Value="Visible" />
+                          <Setter TargetName="Remove" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                        <!--  запись из нескольких окон не встаёт в одно окно: тусклая и не вставляется, но править, удалять и переносить можно  -->
+                        <DataTrigger Binding="{Binding IsPickable}" Value="False">
+                          <Setter TargetName="Body" Property="Opacity" Value="0.45" />
+                          <Setter TargetName="Row" Property="Cursor" Value="Arrow" />
+                          <Setter TargetName="Row" Property="Background" Value="Transparent" />
+                        </DataTrigger>
+                        <!--  запись в руке едет плашкой у курсора, а в списке на её месте — пустое тусклое место: туда она встанет  -->
+                        <DataTrigger Binding="{Binding (controls:TabReorder.IsLifted), RelativeSource={RelativeSource AncestorType=ContentPresenter}}" Value="True">
+                          <Setter TargetName="Row" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                          <Setter TargetName="Body" Property="Visibility" Value="Hidden" />
+                          <Setter TargetName="Edit" Property="Visibility" Value="Hidden" />
+                          <Setter TargetName="Remove" Property="Visibility" Value="Hidden" />
+                        </DataTrigger>
+                      </DataTemplate.Triggers>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+
+              <!--  история: одни команды, щелчок вставляет  -->
+              <ScrollViewer
+                x:Name="HistoryScroll"
+                HorizontalScrollBarVisibility="Disabled"
+                VerticalScrollBarVisibility="Auto"
+                Visibility="Collapsed">
+                <ItemsControl x:Name="HistoryList">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Grid>
+                      <Border
+                        x:Name="Line"
+                        Height="1"
+                        Margin="12,0"
+                        VerticalAlignment="Top"
+                        Background="{DynamicResource ControlStrokeColorDefaultBrush}"
+                        IsHitTestVisible="False" />
+                      <Border
+                        x:Name="Row"
+                        Padding="12,5"
+                        Background="Transparent"
+                        CornerRadius="6"
+                        Cursor="Hand"
+                        MouseLeftButtonUp="OnHistoryClick">
+                        <Grid>
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                          </Grid.ColumnDefinitions>
+                          <TextBlock
+                            x:Name="Body"
+                            Grid.Column="0"
+                            VerticalAlignment="Center"
+                            FontFamily="Consolas"
+                            FontSize="13"
+                            Text="{Binding Preview}"
+                            TextTrimming="CharacterEllipsis"
+                            ToolTip="{Binding Text}" />
+                          <Button
+                            x:Name="Remove"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            Click="OnRemoveHistoryItem"
+                            Style="{StaticResource HistoryRemoveButtonStyle}"
+                            ToolTip="Убрать из истории"
+                            Visibility="Hidden" />
+                        </Grid>
+                      </Border>
+                      </Grid>
+                      <DataTemplate.Triggers>
+                        <DataTrigger Binding="{Binding RelativeSource={RelativeSource PreviousData}}" Value="{x:Null}">
+                          <Setter TargetName="Line" Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                        <Trigger SourceName="Row" Property="IsMouseOver" Value="True">
+                          <Setter TargetName="Row" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                          <Setter TargetName="Remove" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                        <!--  команда в руке едет плашкой к вкладкам, а в истории остаётся тусклой на своём месте  -->
+                        <DataTrigger Binding="{Binding (controls:TabReorder.IsLifted), RelativeSource={RelativeSource AncestorType=ContentPresenter}}" Value="True">
+                          <Setter TargetName="Row" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                          <Setter TargetName="Body" Property="Opacity" Value="0.45" />
+                          <Setter TargetName="Remove" Property="Visibility" Value="Hidden" />
+                        </DataTrigger>
+                      </DataTemplate.Triggers>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+            </Grid>
+          </Border>
+
+          <!--  правка и новая запись — на месте списка: название, вкладка, команда  -->
+          <Grid
+            x:Name="EditPane"
+            Grid.Row="1"
+            Visibility="Collapsed">
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock
+              Grid.Row="0"
+              Grid.Column="0"
+              Margin="2,0,12,0"
+              VerticalAlignment="Center"
+              Text="Название" />
+            <ui:TextBox
+              x:Name="NameBox"
+              Grid.Row="0"
+              Grid.Column="1"
+              KeyDown="OnNameKeyDown"
+              PlaceholderText="коротко: что делает команда" />
+
+            <!--  куда сохранить — выбранная вкладка слева  -->
+            <ScrollViewer
+              x:Name="DraftScroll"
+              Grid.Row="1"
+              Grid.Column="0"
+              Grid.ColumnSpan="2"
+              Margin="0,8,0,0"
+              Focusable="False"
+              HorizontalScrollBarVisibility="Disabled"
+              VerticalScrollBarVisibility="Auto">
+              <ItemsControl
+                x:Name="DraftList"
+                VerticalAlignment="Top"
+                Focusable="False">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <UniformGrid Columns="1" />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Grid Margin="0,0,0,4">
+                      <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                      </Grid.RowDefinitions>
+                      <!--  у записи из нескольких окон — номер окна и его sudo  -->
+                      <StackPanel
+                        Grid.Row="0"
+                        Margin="2,0,0,4"
+                        Orientation="Horizontal"
+                        Visibility="{Binding ShowHeader, Converter={StaticResource BoolToVis}}">
+                        <TextBlock
+                          VerticalAlignment="Center"
+                          Style="{StaticResource CaptionStyle}"
+                          Text="{Binding Title}" />
+                        <CheckBox
+                          MinWidth="0"
+                          Margin="12,0,0,0"
+                          Padding="4,0,0,0"
+                          VerticalAlignment="Center"
+                          Content="sudo"
+                          FontSize="12"
+                          IsChecked="{Binding UseSudo, Mode=TwoWay}" />
+                      </StackPanel>
+                      <ui:TextBox
+                        Grid.Row="1"
+                        AcceptsReturn="True"
+                        AcceptsTab="True"
+                        ClearButtonEnabled="False"
+                        FontFamily="Consolas"
+                        HorizontalScrollBarVisibility="Auto"
+                        PlaceholderText="команда"
+                        Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}"
+                        TextWrapping="NoWrap"
+                        VerticalContentAlignment="Top"
+                        VerticalScrollBarVisibility="Auto" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </Grid>
+        </Grid>
+      </Border>
+
+      <controls:ActionToast
+        x:Name="Toast"
+        Grid.Column="0"
+        Grid.ColumnSpan="3"
+        Margin="20"
+        HorizontalAlignment="Center"
+        VerticalAlignment="Center" />
+    </Grid>
+
+    <!--  запись в руке за пределами списка: плашка едет за мышью поверх всего окна, видна и над вкладками  -->
+    <Canvas
+      x:Name="DragLayer"
+      Grid.Row="0"
+      Grid.RowSpan="3"
+      Panel.ZIndex="10"
+      IsHitTestVisible="False">
+      <Border
+        x:Name="Ghost"
+        MaxWidth="360"
+        Padding="12,8"
+        Background="{DynamicResource SolidBackgroundFillColorQuarternaryBrush}"
+        BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
+        BorderThickness="1"
+        CornerRadius="6"
+        Opacity="0.95"
+        Visibility="Collapsed">
+        <Border.Effect>
+          <DropShadowEffect
+            BlurRadius="14"
+            Direction="270"
+            Opacity="0.35"
+            ShadowDepth="2" />
+        </Border.Effect>
+        <StackPanel>
+          <TextBlock
+            x:Name="GhostName"
+            FontWeight="SemiBold"
+            TextTrimming="CharacterEllipsis" />
+          <TextBlock
+            x:Name="GhostPreview"
+            Margin="0,2,0,0"
+            FontFamily="Consolas"
+            FontSize="12"
+            Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+            TextTrimming="CharacterEllipsis" />
+        </StackPanel>
+      </Border>
+    </Canvas>
+
+    <!--  подсказка, что можно сделать мышью, — посередине подвала; меняется с тем, что открыто  -->
+    <TextBlock
+      x:Name="FooterHint"
+      Grid.Row="2"
+      Margin="12"
+      HorizontalAlignment="Center"
+      VerticalAlignment="Center"
+      FontSize="13"
+      Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+    <!--  кнопки окна — на его фоне, справа, одной высоты  -->
+    <StackPanel
+      Grid.Row="2"
+      Margin="12"
+      HorizontalAlignment="Right"
+      Orientation="Horizontal">
+      <ui:Button
+        x:Name="SaveButton"
+        MinWidth="110"
+        Margin="0,0,4,0"
+        Click="OnSave"
+        Content="Сохранить"
+        ToolTip="Ctrl+Enter"
+        Visibility="Collapsed" />
+      <ui:Button
+        x:Name="CloseButton"
+        MinWidth="110"
+        Click="OnClose"
+        Content="Закрыть" />
+    </StackPanel>
+  </Grid>
+</ui:FluentWindow>

@@ -250,13 +250,13 @@ public partial class LogPanel : UserControl
     {
         if (AppLog.Entries.Count == 0)
         {
-            AppLog.Hint("Журнал уже пуст.");
+            AppLog.Hint("История уже пуста.");
             return;
         }
 
         if (Dialogs.ConfirmDialog.Ask(
                 Window.GetWindow(this),
-                $"Очистить журнал ({AppLog.Entries.Count})?",
+                $"Очистить историю ({AppLog.Entries.Count})?",
                 "Удалятся записи всех вкладок и их полные логи, вернуть их нельзя. Файлы дней в папке логов останутся.",
                 "Очистить"))
         {
@@ -269,11 +269,11 @@ public partial class LogPanel : UserControl
         try
         {
             Clipboard.SetText(AppLog.ExportText());
-            AppLog.Echo("Журнал скопирован в буфер обмена.");
+            AppLog.Echo("История скопирована в буфер обмена.");
         }
         catch (Exception ex)
         {
-            AppLog.Hint("Не удалось скопировать журнал: " + ex.Message, LogLevel.Error);
+            AppLog.Hint("Не удалось скопировать историю: " + ex.Message, LogLevel.Error);
         }
     }
 

@@ -115,10 +115,11 @@
             Content="Сохранять вывод"
             FontSize="11"
             IsChecked="{Binding KeepLog, Mode=TwoWay}"
-            ToolTip="Своя у каждой вкладки. Отмечено — терминал вкладки хранит все запуски, пока галочку не снять. Снято — запуск позже срока «Хранить вывод» после окончания прошлого начинает терминал заново." />
+            ToolTip="Своя у каждой вкладки. Отмечено — журнал вкладки хранит все запуски, пока галочку не снять. Снято — запуск позже срока «Хранить вывод» после окончания прошлого начинает журнал заново." />
         </StackPanel>
 
       <Grid
+        x:Name="RunTools"
         Margin="12,0,12,0"
         VerticalAlignment="Center"
         Visibility="{Binding IsRunning, Converter={StaticResource BoolToVis}}">
@@ -135,6 +136,7 @@
           Maximum="100"
           Value="{Binding ProgressPercent, Mode=OneWay}" />
         <TextBlock
+          x:Name="RunText"
           Grid.Column="1"
           Margin="4,0"
           VerticalAlignment="Center"
@@ -143,6 +145,38 @@
         <controls:StopButton Grid.Column="2" />
       </Grid>
       </DockPanel>
+
+      <!--  «Проводник»: окно вывода переворачивается окном команды. Значок — у левого края окна вывода  -->
+      <ui:Button
+        x:Name="FlipButton"
+        Grid.Column="2"
+        Padding="9,2"
+        HorizontalAlignment="Left"
+        VerticalAlignment="Center"
+        Click="OnFlip"
+        ToolTip="Перевернуть окно вывода окном команды для сервера правой панели"
+        Visibility="{Binding Source={x:Static services:AppState.Current}, Path=CommandFlipVisibility}">
+        <!--  включено — белый значок на тускло-зелёной плашке; плашка есть всегда, кнопка не меняет размер  -->
+        <StackPanel Orientation="Horizontal">
+          <Border
+            x:Name="FlipBadge"
+            Padding="2"
+            VerticalAlignment="Center"
+            Background="Transparent"
+            CornerRadius="3">
+            <ui:SymbolIcon
+              x:Name="FlipGlyph"
+              FontSize="15"
+              Symbol="WindowConsole20" />
+          </Border>
+          <TextBlock
+            x:Name="FlipText"
+            Margin="6,0,0,0"
+            VerticalAlignment="Center"
+            FontSize="11"
+            Text="Открыть терминал" />
+        </StackPanel>
+      </ui:Button>
 
       <StackPanel
         Grid.Column="2"
@@ -408,8 +442,24 @@
         HorizontalAlignment="Stretch"
         Background="Transparent" />
 
-      <Border
+      <!--  две стороны одного окна: вывод и окно команды. Переворот — сжатие к середине и разворот
+            другой стороной, как страница. Высота у сторон одна — их ячейка  -->
+      <Grid
+        x:Name="FlipHost"
         Grid.Column="2"
+        RenderTransformOrigin="0.5,0.5">
+        <Grid.RenderTransform>
+          <ScaleTransform x:Name="FlipScale" />
+        </Grid.RenderTransform>
+
+      <controls:MiniTerminal
+        x:Name="CommandFace"
+        DataContext="{Binding Source={x:Static services:AppState.Current}, Path=TerminalOwner}"
+        ShowTargets="False"
+        Visibility="Collapsed" />
+
+      <Border
+        x:Name="OutputFace"
         Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
         BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
         BorderThickness="1"
@@ -557,6 +607,7 @@
             Visibility="{Binding HasTransfer, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}" />
         </Grid>
       </Border>
+      </Grid>
     </Grid>
   </Grid>
 </UserControl>

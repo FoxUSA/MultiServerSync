@@ -56,7 +56,8 @@ public partial class ExplorerPage : Page
             pane.StateChanged += OnPaneState;
         }
 
-        LocalPane.ShowTransfer(toRight: true, "Отмеченное, а без галочек — строку под курсором, в открытую справа папку сервера (F5). Можно и перетащить мышью");
+        LocalPane.ShowTransfer(toRight: true, LocalTransferTip);
+        LocalPane.TicksEdited += OnFilterTicks;
         RemotePane.ShowTransfer(toRight: false, "Отмеченное, а без галочек — строку под курсором, в открытую слева папку компьютера (F5). Можно и перетащить мышью");
         RemotePane.EnableTitlePicker("Сменить сервер");
         RemotePane.TitleClicked += OnRemoteTitleClicked;
@@ -134,7 +135,32 @@ public partial class ExplorerPage : Page
         LocalPane.Tab = tab;
         RemotePane.Tab = tab;
 
+        // вкладка-фильтр: одна панель на всю ширину, корень — строки окна копирования, галочки — фильтр
+        var filter = tab.FilterOf;
+        ShowFilterLayout(filter);
+
+        if (filter is not null)
+        {
+            SetActive(LocalPane);
+            await LocalPane.AttachAsync(filter.Files, tab.Explorer.Local, filter.Source.Title, ShellIcons.Computer);
+
+            if (version == _attachVersion)
+            {
+                _active.FocusList();
+                await AttachFilterTargetAsync(filter);
+            }
+
+            return;
+        }
+
         SetActive(tab.Explorer.RemoteActive ? RemotePane : LocalPane);
+
+        // под замком левая панель — в закреплённой папке или глубже, что бы ни помнила вкладка
+        if (tab.ExplorerLockedLocalPath is { Length: > 0 } lockedLocal && !InsideLocal(tab.Explorer.Local.Path, lockedLocal))
+        {
+            tab.Explorer.Local.Path = lockedLocal;
+            tab.Explorer.Local.Focus = string.Empty;
+        }
 
         await LocalPane.AttachAsync(Local, tab.Explorer.Local, LocalSource.ComputerTitle, ShellIcons.Computer);
 
@@ -149,6 +175,152 @@ public partial class ExplorerPage : Page
         }
     }
 
+    /// <summary>
+    /// Вкладка-фильтр — правой панели нет, у левой вместо «Копировать» режимы галочек, галочки ставит фильтр.
+    /// Обычная вкладка — две панели, как всегда.
+    /// </summary>
+    private void ShowFilterLayout(ExplorerFilter? filter)
+    {
+        // у вкладки-фильтра правая панель для вида: куда поедет, но сама неактивна
+        RemotePane.IsEnabled = filter is null;
+        RemotePane.Opacity = filter is null ? 1 : 0.5;
+
+        LocalPane.ShowFilter(filter is null ? null : filter.TickedNames);
+        LocalPane.MuteFilter(filter?.Source.IsPaneLocked == true);
+
+        if (filter is null)
+        {
+            LocalPane.ShowTransfer(toRight: true, LocalTransferTip);
+            UpdateTransferButtons();
+        }
+        else
+        {
+            LocalPane.MarkFilterMode(filter.CopiedMode);
+            filter.Restored -= OnFilterRestored;
+            filter.Restored += OnFilterRestored;
+        }
+    }
+
+    /// <summary>Галочки фильтра вернули стрелкой отмены — режим и галочки открытой папки заново.</summary>
+    private void OnFilterRestored()
+    {
+        if (_tab?.FilterOf is { } filter)
+        {
+            LocalPane.MarkFilterMode(filter.CopiedMode);
+            LocalPane.ReapplyTicks();
+        }
+    }
+
+    /// <summary>Правая панель вкладки-фильтра: сервер и папка окна копирования — куда поедет. Только посмотреть.</summary>
+    private async Task AttachFilterTargetAsync(ExplorerFilter filter)
+    {
+        // справа — путь окна, по чьим строкам сейчас ходят слева; в корне — окна в фокусе
+        var window = filter.WindowAt(_tab?.Explorer.Local.Path ?? string.Empty);
+        _filterTarget = window;
+
+        if (filter.Source.CopyTargets.FirstOrDefault() is not { } server)
+        {
+            ReleaseRemote();
+            RemotePane.ShowEmpty("Сервер", ShellIcons.Server, "На вкладке копирования не отмечен сервер.");
+            return;
+        }
+
+        if (_remote is null || !ReferenceEquals(_remote.Server, server))
+        {
+            ReleaseRemote();
+            _remote = new RemoteSource(RemoteSession.Acquire(server, AppState.Current.Settings));
+        }
+
+        var title = string.IsNullOrWhiteSpace(server.User) ? server.PaneLabel : $"{server.PaneLabel} ({server.User})";
+        await RemotePane.AttachAsync(_remote, new ExplorerPaneState { Path = window.RemotePath }, title, ShellIcons.Server);
+    }
+
+    /// <summary>Чей путь показан справа у вкладки-фильтра: перешли слева в другое окно — правая панель за ним.</summary>
+    private CopyWindow? _filterTarget;
+
+    private const string LocalTransferTip = "Отмеченное, а без галочек — строку под курсором, в открытую справа папку сервера (F5). Можно и перетащить мышью";
+
+    /// <summary>Галочки во вкладке-фильтре поменяли руками — в фильтр окна копирования.</summary>
+    private void OnFilterTicks(FilePane pane)
+    {
+        if (_tab?.FilterOf is not { } filter || !ReferenceEquals(pane, LocalPane))
+        {
+            return;
+        }
+
+        // вкладка копирования под замком: галочки только посмотреть — поставленное рукой сразу возвращается.
+        // Не изнутри смены выделения, а следом: иначе список правится, пока сам ещё меняется
+        if (filter.Source.IsPaneLocked)
+        {
+            // выделение пересобралось само (открыли папку) — галочки те же, отказывать не в чем
+            if (filter.TickedNames(pane.VisibleEntries).ToHashSet().SetEquals(pane.TickedNames))
+            {
+                return;
+            }
+
+            RefuseFilterLocked(filter);
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => LocalPane.ReapplyTicks()));
+            return;
+        }
+
+        filter.Edit(pane.VisibleEntries, pane.TickedNames);
+    }
+
+    /// <summary>Когда последний раз отказали из-за замка: протяжка мышью меняет галочки по строке, плашка — одна.</summary>
+    private DateTime _filterRefusedAt;
+
+    private void RefuseFilterLocked(ExplorerFilter filter)
+    {
+        if (DateTime.Now - _filterRefusedAt < TimeSpan.FromSeconds(2))
+        {
+            return;
+        }
+
+        _filterRefusedAt = DateTime.Now;
+        AppLog.Hint($"Вкладка «{filter.Source.Title}» закреплена за своим сервером — фильтр здесь только посмотреть. Изменить можно, сняв замок.",
+            LogLevel.Warning);
+    }
+
+    /// <summary>Кнопки режимов и «Сбросить» во вкладке-фильтре.</summary>
+    private void OnFilterCommand(PaneCommand command)
+    {
+        if (_tab?.FilterOf is not { } filter)
+        {
+            return;
+        }
+
+        // под замком режимы — только посмотреть их галочки, «Сбросить» их поменял бы
+        if (filter.Source.IsPaneLocked && command == PaneCommand.FilterReset)
+        {
+            _filterRefusedAt = default;
+            RefuseFilterLocked(filter);
+            return;
+        }
+
+        switch (command)
+        {
+            case PaneCommand.FilterCopied:
+                filter.SetMode(copied: true);
+                break;
+            case PaneCommand.FilterSkipped:
+                filter.SetMode(copied: false);
+                break;
+            case PaneCommand.FilterReset:
+                filter.Reset();
+                break;
+        }
+
+        LocalPane.MarkFilterMode(filter.CopiedMode);
+        LocalPane.ReapplyTicks();
+    }
+
+    /// <summary>Папка компьютера — сама закреплённая или внутри неё.</summary>
+    private static bool InsideLocal(string path, string root)
+    {
+        var prefix = root.EndsWith('\\') ? root : root + "\\";
+        return string.Equals(path, root, StringComparison.OrdinalIgnoreCase) || path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>Сервер сменили — правая половина переключается на него.</summary>
     private void OnTabChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -161,6 +333,11 @@ public partial class ExplorerPage : Page
         if (e.PropertyName == nameof(Workspace.ExplorerLockedPath))
         {
             RemotePane.ShowLockLimits();
+        }
+
+        if (e.PropertyName == nameof(Workspace.ExplorerLockedLocalPath))
+        {
+            LocalPane.ShowLockLimits();
         }
     }
 
@@ -193,8 +370,9 @@ public partial class ExplorerPage : Page
             state.Remote.Focus = string.Empty;
         }
 
-        // под замком панель стоит в закреплённой папке, что бы ни помнила вкладка
-        if (tab.ExplorerLockedPath is { Length: > 0 } lockedPath && state.Remote.Path != lockedPath)
+        // под замком панель стоит в закреплённой папке или глубже, что бы ни помнила вкладка
+        if (tab.ExplorerLockedPath is { Length: > 0 } lockedPath && state.Remote.Path != lockedPath
+            && !state.Remote.Path.StartsWith(lockedPath.TrimEnd('/') + "/", StringComparison.Ordinal))
         {
             state.Remote.Path = lockedPath;
             state.Remote.Focus = string.Empty;
@@ -222,6 +400,12 @@ public partial class ExplorerPage : Page
         {
             _tab.RaiseExplorerPath();
             _tab.AdoptExplorerLock();
+        }
+
+        if (ReferenceEquals(pane, LocalPane) && _tab.FilterOf is { } filter
+            && !ReferenceEquals(filter.WindowAt(_tab.Explorer.Local.Path), _filterTarget))
+        {
+            _ = AttachFilterTargetAsync(filter);
         }
 
         _saveDelay.Stop();
@@ -738,6 +922,12 @@ public partial class ExplorerPage : Page
                 await PasteAsync(pane);
                 break;
 
+            case PaneCommand.FilterCopied:
+            case PaneCommand.FilterSkipped:
+            case PaneCommand.FilterReset:
+                OnFilterCommand(command);
+                break;
+
             case PaneCommand.TransferToOther:
                 await TransferAsync(pane, picked, Other(pane).CurrentPath);
                 break;
@@ -747,7 +937,7 @@ public partial class ExplorerPage : Page
                 break;
 
             case PaneCommand.Excludes when _tab is { } tab:
-                ExcludeDialog.Edit(Window.GetWindow(this), tab, "копировании");
+                ExcludeDialog.Edit(Window.GetWindow(this), tab, "копировании", includes: false);
                 break;
 
             case PaneCommand.Open:
@@ -785,6 +975,10 @@ public partial class ExplorerPage : Page
 
             case PaneCommand.Compare:
                 await CompareAsync(pane, picked);
+                break;
+
+            case PaneCommand.Listing when pane.Source is RemoteSource remote && _tab is { } tab:
+                await tab.RunListingAsync([remote.Server], picked.Count > 0 ? picked.Select(p => p.FullPath).ToList() : [pane.CurrentPath]);
                 break;
 
             case PaneCommand.Run when pane.Source is RemoteSource remote && focused is { IsDirectory: false }:

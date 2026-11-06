@@ -8,9 +8,10 @@ using MultiServerSync.Services;
 namespace MultiServerSync.Views.Controls;
 
 /// <summary>
-/// Столбцы «Размер», «Размер*», «Файлов», «Файлов*» таблицы окна — одни у «Копирования» и «Скачивания».
-/// Исключений нет — видны «Размер» и «Файлов», меню нет: звёздочка ничего бы не добавила. Исключения есть —
-/// видны столбцы со звёздочкой, а меню на шапке включает любые из четырёх; выбор помнит вкладка.
+/// Столбцы «Размер», «Размер*», «Файлов», «Файлов*» общей таблицы окон — одни у «Копирования» и «Скачивания».
+/// Исключений нет ни у одного окна — видны «Размер» и «Файлов», меню нет: звёздочка ничего бы не добавила.
+/// Исключения есть хоть у одного — видны столбцы со звёздочкой (шапка у окон общая), а меню на шапке
+/// включает любые из четырёх; выбор помнит вкладка.
 /// </summary>
 public static class SizeColumns
 {
@@ -29,14 +30,14 @@ public static class SizeColumns
     {
         var columns = grid.Columns.Where(c => c.Header is string header && Names.Contains(header)).ToList();
 
-        Explain(grid, columns, KeptSize, "С учётом исключений: размер без того, что отсеивают маски этого окна");
-        Explain(grid, columns, KeptFiles, "С учётом исключений: файлов без тех, что отсеивают маски этого окна");
+        Explain(grid, columns, KeptSize, "С учётом исключений: размер без того, что отсеивают маски окна строки");
+        Explain(grid, columns, KeptFiles, "С учётом исключений: файлов без тех, что отсеивают маски окна строки");
 
-        CopyWindow? window = null;
+        Workspace? tab = null;
 
         void Apply()
         {
-            var shown = window is { HasFilters: true } ? Shown(window) : Plain;
+            var shown = tab is { AnyWindowFilters: true } ? Shown(tab) : Plain;
 
             foreach (var column in columns)
             {
@@ -44,9 +45,11 @@ public static class SizeColumns
             }
         }
 
-        void OnWindowChanged(object? sender, PropertyChangedEventArgs e)
+        // маски окна в фокусе живут в полях вкладки, у остальных — в самих окнах; окна добавляют и убирают
+        void OnTabChanged(object? sender, PropertyChangedEventArgs e)
         {
-            if (e.PropertyName is nameof(CopyWindow.HasFilters) or nameof(CopyWindow.SizeColumnsShown))
+            if (e.PropertyName is nameof(Workspace.ExcludeMasks) or nameof(Workspace.UseGlobalExcludes) or nameof(Workspace.HasGlobalExcludes)
+                or nameof(Workspace.AnyWindowFilters) or nameof(Workspace.SizeColumnsShown) or nameof(Workspace.IsMultiWindow))
             {
                 Apply();
             }
@@ -54,16 +57,16 @@ public static class SizeColumns
 
         void Bind()
         {
-            if (window is not null)
+            if (tab is not null)
             {
-                window.PropertyChanged -= OnWindowChanged;
+                tab.PropertyChanged -= OnTabChanged;
             }
 
-            window = grid.DataContext as CopyWindow;
+            tab = grid.DataContext as Workspace;
 
-            if (window is not null)
+            if (tab is not null)
             {
-                window.PropertyChanged += OnWindowChanged;
+                tab.PropertyChanged += OnTabChanged;
             }
 
             Apply();
@@ -72,10 +75,10 @@ public static class SizeColumns
         grid.DataContextChanged += (_, _) => Bind();
         grid.PreviewMouseRightButtonDown += (_, e) =>
         {
-            if (window is { HasFilters: true } && IsOnHeader(e.OriginalSource as DependencyObject))
+            if (tab is { AnyWindowFilters: true } && IsOnHeader(e.OriginalSource as DependencyObject))
             {
                 e.Handled = true;
-                ShowMenu(grid, window);
+                ShowMenu(grid, tab);
             }
         };
 
@@ -94,7 +97,7 @@ public static class SizeColumns
         }
     }
 
-    private static IReadOnlyList<string> Shown(CopyWindow window) => window.SizeColumnsShown ?? ByDefault;
+    private static IReadOnlyList<string> Shown(Workspace tab) => tab.SizeColumnsShown ?? ByDefault;
 
     private static bool IsOnHeader(DependencyObject? node)
     {
@@ -113,10 +116,10 @@ public static class SizeColumns
         return false;
     }
 
-    private static void ShowMenu(DataGrid grid, CopyWindow window)
+    private static void ShowMenu(DataGrid grid, Workspace tab)
     {
         var menu = new ContextMenu { PlacementTarget = grid, Placement = PlacementMode.MousePoint };
-        var shown = Shown(window);
+        var shown = Shown(tab);
 
         foreach (var name in Names)
         {
@@ -124,7 +127,7 @@ public static class SizeColumns
 
             item.Click += (_, _) =>
             {
-                var picked = Shown(window).ToHashSet();
+                var picked = Shown(tab).ToHashSet();
 
                 if (item.IsChecked)
                 {
@@ -135,7 +138,7 @@ public static class SizeColumns
                     picked.Remove(name);
                 }
 
-                window.SetSizeColumnsShown(Names.Where(picked.Contains).ToList());
+                tab.SetSizeColumnsShown(Names.Where(picked.Contains).ToList());
             };
 
             menu.Items.Add(item);

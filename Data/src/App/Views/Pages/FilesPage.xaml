@@ -15,6 +15,12 @@
   ScrollViewer.CanContentScroll="False">
 
   <Page.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <!--  общая таблица окон: номер окна, разделитель группы, строка пустого окна — одни с «Скачиванием»  -->
+        <ResourceDictionary Source="/Themes/CopyWindowStyles.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+
     <BooleanToVisibilityConverter x:Key="BoolToVis" />
 
     <!--  опции ровными рядами: одинаковая высота, один отступ  -->
@@ -30,6 +36,7 @@
       <Setter Property="FontSize" Value="12" />
       <Setter Property="Margin" Value="0,0,4,0" />
     </Style>
+    </ResourceDictionary>
   </Page.Resources>
 
   <Grid Margin="12">
@@ -48,8 +55,27 @@
       </Grid.ColumnDefinitions>
 
     <StackPanel Grid.Column="0" Orientation="Horizontal">
+      <!--  окон несколько — номер окна в фокусе: кнопки ряда, сводка и параметры работают с ним  -->
+      <Border
+        Height="28"
+        MinWidth="34"
+        Margin="0,0,4,0"
+        Padding="7,0"
+        Background="#26E07A1F"
+        BorderBrush="#80E07A1F"
+        BorderThickness="1"
+        CornerRadius="4"
+        ToolTip="Кнопки ряда, сводка и параметры — для этого окна. Другое окно — щелчок по его номеру"
+        Visibility="{Binding IsMultiWindow, Converter={StaticResource BoolToVis}}">
+        <TextBlock
+          HorizontalAlignment="Center"
+          VerticalAlignment="Center"
+          FontFamily="Consolas"
+          FontSize="12"
+          Text="{Binding FocusedWindow.NumberText}" />
+      </Border>
+      <!--  «Открыть» и «Исключения» под замком не гаснут: посмотреть можно, изменить — нет  -->
       <ui:Button
-        controls:LockMute.IsOn="{Binding IsPaneLocked}"
         Click="OnAdd"
         Content="Открыть"
         Icon="{ui:SymbolIcon FolderOpen24}"
@@ -58,7 +84,6 @@
       <!--  заданы исключения — значок на зелёной плашке: видно, что не всё из списка поедет.
             Плашка выходит влево на свой отступ, чтобы значок стоял там же, где у соседних кнопок  -->
       <ui:Button
-        controls:LockMute.IsOn="{Binding IsPaneLocked}"
         Click="OnExcludes"
         Style="{StaticResource ToolButtonStyle}"
         ToolTip="Что не копировать: маски вроде *.log, node_modules, .git">
@@ -82,479 +107,416 @@
         Icon="{ui:SymbolIcon ArrowClockwise24}"
         Style="{StaticResource ToolButtonStyle}"
         ToolTip="Перечитать размер и дату изменения с диска" />
-      <!--  резервирует в каждом окне плашку названия, справа от номера; видна, пока окон больше одного  -->
+      <!--  окон несколько — у каждого могут быть свои серверы; надпись — что кнопка сделает  -->
       <ui:Button
-        Click="OnWindowNames"
-        Content="Название"
-        Icon="{ui:SymbolIcon Rename24}"
-        Style="{StaticResource ToolButtonStyle}"
-        ToolTip="Показать или скрыть названия окон. Название меняется двойным щелчком по его плашке"
-        Visibility="{Binding IsMultiWindow, Converter={StaticResource BoolToVis}}" />
+        controls:LockMute.IsOn="{Binding IsPaneLocked}"
+        Click="OnSeparateServers"
+        Content="{Binding SeparateServersCaption}"
+        Icon="{ui:SymbolIcon Server24}"
+        ToolTip="Свои целевые серверы у каждого окна: номер окна в панели слева показывает и меняет его серверы"
+        Visibility="{Binding IsMultiWindow, Converter={StaticResource BoolToVis}}">
+        <!--  только появилась — оранжевая, пока человек не уйдёт с вкладки; цвета плашки сервера (ServerTagStyle)  -->
+        <ui:Button.Style>
+          <Style BasedOn="{StaticResource ToolButtonStyle}" TargetType="ui:Button">
+            <Style.Triggers>
+              <DataTrigger Binding="{Binding HintSeparateServers}" Value="True">
+                <Setter Property="Background" Value="#26E07A1F" />
+                <Setter Property="BorderBrush" Value="#80E07A1F" />
+                <Setter Property="MouseOverBackground" Value="#38E07A1F" />
+                <Setter Property="MouseOverBorderBrush" Value="#80E07A1F" />
+                <Setter Property="PressedBackground" Value="#4AE07A1F" />
+              </DataTrigger>
+            </Style.Triggers>
+          </Style>
+        </ui:Button.Style>
+      </ui:Button>
     </StackPanel>
-
-      <TextBlock
-        Grid.Column="1"
-        Margin="12,0,0,0"
-        HorizontalAlignment="Right"
-        VerticalAlignment="Center"
-        FontSize="12"
-        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-        Text="{Binding TargetsInfo}"
-        TextTrimming="CharacterEllipsis"
-        ToolTip="{Binding TargetsInfo}" />
     </Grid>
 
-    <!--  окна делят высоту поровну, но не ниже своего минимума — дальше их листает прокрутка, как окна «Команд».
-          Окно — таблица и строка пути под ней; панель кнопок и параметры одни и показывают окно в фокусе  -->
-    <ScrollViewer
-      x:Name="WindowsScroll"
+    <!--  Таблица одна на все окна вкладки: шапка общая, строки окна — группой под тонким разделителем с номером
+          и названием. Под таблицей — строки пути окон стопкой. Окно в фокусе выбирается щелчком по номеру:
+          кнопки сверху, сводка и параметры показывают его  -->
+    <Border
       Grid.Row="1"
-      Focusable="False"
-      HorizontalScrollBarVisibility="Disabled"
-      VerticalScrollBarVisibility="Auto">
-      <ItemsControl
-        x:Name="WindowsList"
-        VerticalAlignment="Top"
-        Focusable="False"
-        ItemsSource="{Binding CopyWindows}">
-        <ItemsControl.ItemsPanel>
-          <ItemsPanelTemplate>
-            <UniformGrid Columns="1" />
-          </ItemsPanelTemplate>
-        </ItemsControl.ItemsPanel>
-        <ItemsControl.ItemTemplate>
-          <DataTemplate>
-            <Grid
-              Margin="0,4,0,0"
-              GotKeyboardFocus="OnWindowKeyboardFocus"
-              PreviewMouseDown="OnWindowMouseDown">
-              <Border
-                Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
-                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                BorderThickness="1"
-                CornerRadius="4">
-                <Grid>
-                  <Grid.RowDefinitions>
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                  </Grid.RowDefinitions>
+      Margin="0,4,0,0"
+      Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+      BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+      BorderThickness="1"
+      CornerRadius="4">
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="*" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
 
-                  <Grid Grid.Row="0">
-                    <DataGrid
-                      BorderThickness="0"
-                      CanUserReorderColumns="False"
-                      CellStyle="{StaticResource AppDataGridCellStyle}"
-                      ColumnHeaderStyle="{StaticResource AppColumnHeaderStyle}"
-                      ItemsSource="{Binding Items}"
-                      Loaded="OnWindowGridLoaded"
-                      MouseDoubleClick="OnGridDoubleClick"
-                      RowHeight="24"
-                      RowStyle="{StaticResource AppDataGridRowStyle}"
-                      Style="{StaticResource AppDataGridStyle}"
-                      VerticalScrollBarVisibility="Auto">
-                      <DataGrid.Columns>
-                    <DataGridTemplateColumn
-                      Width="26"
-                      MinWidth="26"
-                      CanUserResize="False"
-                      CellStyle="{StaticResource CheckColumnCellStyle}"
-                      HeaderStyle="{StaticResource CheckColumnHeaderStyle}">
-                      <DataGridTemplateColumn.Header>
-                        <Viewbox
-                          Width="16"
-                          Height="16"
-                          HorizontalAlignment="Center"
-                          VerticalAlignment="Center">
-                          <CheckBox
-                            MinWidth="0"
-                            MinHeight="0"
-                            Margin="0"
-                            Padding="0"
-                            Click="OnToggleAllItems"
-                            IsChecked="{Binding DataContext.AllItemsSelected, RelativeSource={RelativeSource AncestorType=DataGrid}, Mode=OneWay}"
-                            IsThreeState="True"
-                            ToolTip="Отметить или снять все объекты" />
-                        </Viewbox>
-                      </DataGridTemplateColumn.Header>
-                      <DataGridTemplateColumn.CellTemplate>
-                        <DataTemplate>
-                          <Viewbox
-                            Width="16"
-                            Height="16"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center">
-                            <CheckBox
-                              MinWidth="0"
-                              MinHeight="0"
-                              Margin="0"
-                              Padding="0"
-                              IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                          </Viewbox>
-                        </DataTemplate>
-                      </DataGridTemplateColumn.CellTemplate>
-                    </DataGridTemplateColumn>
-
-                    <!--  всё по содержимому, а путь забирает остаток ширины  -->
-                    <DataGridTextColumn
-                      Width="Auto"
-                      Binding="{Binding Kind}"
-                      Header="Тип" />
-                    <DataGridTextColumn
-                      Width="Auto"
-                      MaxWidth="360"
-                      Binding="{Binding Name}"
-                      Header="Имя" />
-                    <!--
-                      Столбцы показывают готовую надпись, а сортируются по самому значению:
-                      по тексту «25.06.2026» сравнивается сначала день, и порядок выходит не по времени.
-                    -->
-                    <DataGridTextColumn
-                      Width="Auto"
-                      Binding="{Binding SizeText}"
-                      Header="Размер"
-                      SortMemberPath="SizeBytes" />
-                    <!--  какие из четырёх видны — решает SizeColumns  -->
-                    <DataGridTextColumn
-                      Width="Auto"
-                      Binding="{Binding KeptSizeText}"
-                      Header="Размер*"
-                      SortMemberPath="KeptBytes"
-                      Visibility="Collapsed" />
-                    <DataGridTextColumn
-                      Width="Auto"
-                      Binding="{Binding FilesText}"
-                      Header="Файлов"
-                      SortMemberPath="Files" />
-                    <DataGridTextColumn
-                      Width="Auto"
-                      Binding="{Binding KeptFilesText}"
-                      Header="Файлов*"
-                      SortMemberPath="KeptFiles"
-                      Visibility="Collapsed" />
-                    <DataGridTextColumn
-                      Width="Auto"
-                      Binding="{Binding ModifiedText}"
-                      Header="Дата изменения"
-                      SortMemberPath="Modified" />
-                    <!--  в конце строки — копировать и вписать путь, как в адресной строке «Проводника»  -->
-                    <DataGridTemplateColumn
-                      Width="*"
-                      MinWidth="150"
-                      Header="Локальный путь"
-                      SortMemberPath="FullPath">
-                      <DataGridTemplateColumn.CellTemplate>
-                        <DataTemplate>
-                          <DockPanel>
-                            <StackPanel
-                              Margin="4,0,2,0"
-                              DockPanel.Dock="Right"
-                              Orientation="Horizontal">
-                              <Button
-                                Click="OnCopyItemPath"
-                                Style="{StaticResource RowPathButtonStyle}"
-                                ToolTip="Копировать путь">
-                                <ui:SymbolIcon FontSize="14" Symbol="Copy24" />
-                              </Button>
-                              <Button
-                                controls:LockMute.IsOn="{Binding DataContext.IsPaneLocked, RelativeSource={RelativeSource AncestorType=DataGrid}}"
-                                Click="OnEditItemPath"
-                                Style="{StaticResource RowPathButtonStyle}"
-                                ToolTip="Вписать другой путь">
-                                <ui:SymbolIcon FontSize="14" Symbol="Edit24" />
-                              </Button>
-                              <Button
-                                controls:LockMute.IsOn="{Binding DataContext.IsPaneLocked, RelativeSource={RelativeSource AncestorType=DataGrid}}"
-                                Click="OnRemoveItemRow"
-                                Style="{StaticResource RowPathButtonStyle}"
-                                ToolTip="Убрать строку из списка — сам файл не трогается">
-                                <ui:SymbolIcon FontSize="14" Symbol="Delete24" />
-                              </Button>
-                            </StackPanel>
-                            <TextBlock
-                              VerticalAlignment="Center"
-                              Text="{Binding FullPath}"
-                              TextTrimming="CharacterEllipsis" />
-                          </DockPanel>
-                        </DataTemplate>
-                      </DataGridTemplateColumn.CellTemplate>
-                    </DataGridTemplateColumn>
-                  </DataGrid.Columns>
-                    </DataGrid>
-
-                    <TextBlock
+        <Grid Grid.Row="0">
+          <DataGrid
+            x:Name="RowsGrid"
+            BorderThickness="0"
+            CanUserReorderColumns="False"
+            CellStyle="{StaticResource AppDataGridCellStyle}"
+            ColumnHeaderStyle="{StaticResource AppColumnHeaderStyle}"
+            Loaded="OnWindowGridLoaded"
+            MouseDoubleClick="OnGridDoubleClick"
+            RowHeight="24"
+            RowStyleSelector="{StaticResource WindowRowSelector}"
+            Style="{StaticResource AppDataGridStyle}"
+            VerticalScrollBarVisibility="Auto"
+            VirtualizingPanel.IsVirtualizingWhenGrouping="True">
+            <DataGrid.GroupStyle>
+              <GroupStyle ContainerStyle="{StaticResource WindowGroupStyle}" />
+            </DataGrid.GroupStyle>
+            <DataGrid.Columns>
+              <DataGridTemplateColumn
+                Width="26"
+                MinWidth="26"
+                CanUserResize="False"
+                CellStyle="{StaticResource CheckColumnCellStyle}"
+                HeaderStyle="{StaticResource CheckColumnHeaderStyle}">
+                <DataGridTemplateColumn.Header>
+                  <Viewbox
+                    Width="16"
+                    Height="16"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center">
+                    <CheckBox
+                      MinWidth="0"
+                      MinHeight="0"
+                      Margin="0"
+                      Padding="0"
+                      Click="OnToggleAllItems"
+                      IsChecked="{Binding DataContext.AllWindowsItemsSelected, RelativeSource={RelativeSource AncestorType=DataGrid}, Mode=OneWay}"
+                      IsThreeState="True"
+                      ToolTip="Отметить или снять все объекты всех окон" />
+                  </Viewbox>
+                </DataGridTemplateColumn.Header>
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <Viewbox
+                      Width="16"
+                      Height="16"
                       HorizontalAlignment="Center"
-                      VerticalAlignment="Center"
-                      FontSize="12"
-                      Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                      IsHitTestVisible="False"
-                      Text="Список пуст — нажмите «Открыть», дважды щёлкните здесь или перетащите файлы в окно">
-                      <TextBlock.Style>
-                        <Style TargetType="TextBlock">
-                          <Setter Property="Visibility" Value="Collapsed" />
-                          <Style.Triggers>
-                            <DataTrigger Binding="{Binding Items.Count}" Value="0">
-                              <Setter Property="Visibility" Value="Visible" />
-                            </DataTrigger>
-                          </Style.Triggers>
-                        </Style>
-                      </TextBlock.Style>
-                    </TextBlock>
+                      VerticalAlignment="Center">
+                      <CheckBox
+                        MinWidth="0"
+                        MinHeight="0"
+                        Margin="0"
+                        Padding="0"
+                        IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    </Viewbox>
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
 
-                    <!--  плюс и минус окна — под последней строкой, столбиком со значками строки; место ставит код  -->
-                    <StackPanel
-                      HorizontalAlignment="Right"
-                      VerticalAlignment="Top"
-                      Orientation="Horizontal">
-                      <Button
-                        controls:LockMute.IsOn="{Binding IsPaneLocked}"
-                        Click="OnAddWindow"
-                        Style="{StaticResource RowPathButtonStyle}"
-                        ToolTip="Добавить окно ниже — выполнится после этого">
-                        <ui:SymbolIcon FontSize="18" Symbol="Add24" />
-                      </Button>
-                      <Button
-                        controls:LockMute.IsOn="{Binding IsPaneLocked}"
-                        Click="OnRemoveWindow"
-                        Style="{StaticResource RowPathButtonStyle}"
-                        ToolTip="Убрать это окно"
-                        Visibility="{Binding IsMulti, Converter={StaticResource BoolToVis}}">
-                        <ui:SymbolIcon FontSize="18" Symbol="Subtract24" />
-                      </Button>
-                    </StackPanel>
-                  </Grid>
-
-                  <!--  низ окна: всё по центру между разделительной линией и нижней границей.
-                        Слева номер, справа от него путь, дальше предупреждения: общие — у самого нижнего окна  -->
-                  <Border
-                    Grid.Row="1"
-                    Padding="12,4,4,4"
-                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                    BorderThickness="0,1,0,0">
-                    <Grid>
-                      <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" MinWidth="420" />
-                        <ColumnDefinition Width="Auto" />
-                      </Grid.ColumnDefinitions>
-
-                      <!--  номер и название — на тусклых оранжевых плашках с рамкой, как у окна команды.
-                            Плашка названия всегда одной длины: длинное название ужимает шрифт  -->
+              <!--  всё по содержимому, а путь забирает остаток ширины  -->
+              <DataGridTextColumn
+                Width="Auto"
+                Binding="{Binding Kind}"
+                Header="Тип" />
+              <DataGridTextColumn
+                Width="Auto"
+                MaxWidth="360"
+                Binding="{Binding Name}"
+                Header="Имя" />
+              <!--
+                Столбцы показывают готовую надпись, а сортируются по самому значению:
+                по тексту «25.06.2026» сравнивается сначала день, и порядок выходит не по времени.
+              -->
+              <DataGridTextColumn
+                Width="Auto"
+                Binding="{Binding SizeText}"
+                Header="Размер"
+                SortMemberPath="SizeBytes" />
+              <!--  какие из четырёх видны — решает SizeColumns  -->
+              <DataGridTextColumn
+                Width="Auto"
+                Binding="{Binding KeptSizeText}"
+                Header="Размер*"
+                SortMemberPath="KeptBytes"
+                Visibility="Collapsed" />
+              <DataGridTextColumn
+                Width="Auto"
+                Binding="{Binding FilesText}"
+                Header="Файлов"
+                SortMemberPath="Files" />
+              <DataGridTextColumn
+                Width="Auto"
+                Binding="{Binding KeptFilesText}"
+                Header="Файлов*"
+                SortMemberPath="KeptFiles"
+                Visibility="Collapsed" />
+              <DataGridTextColumn
+                Width="Auto"
+                Binding="{Binding ModifiedText}"
+                Header="Дата изменения"
+                SortMemberPath="Modified" />
+              <!--  в конце строки — копировать и вписать путь, как в адресной строке «Проводника»  -->
+              <DataGridTemplateColumn
+                Width="*"
+                MinWidth="150"
+                Header="Локальный путь"
+                SortMemberPath="FullPath">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <DockPanel>
                       <StackPanel
-                        Grid.Column="0"
-                        Margin="0,0,8,0"
-                        VerticalAlignment="Center"
-                        Orientation="Horizontal"
-                        Visibility="{Binding IsMulti, Converter={StaticResource BoolToVis}}">
-                        <Border
-                          Padding="7,1,7,2"
-                          Background="#38E07A1F"
-                          BorderBrush="#80E07A1F"
-                          BorderThickness="1"
-                          CornerRadius="4">
-                          <TextBlock
-                            VerticalAlignment="Center"
-                            FontFamily="Consolas"
-                            FontSize="12"
-                            Text="{Binding NumberText}" />
-                        </Border>
-                        <Border
-                          Width="114"
-                          MinHeight="21"
-                          Margin="4,0,0,0"
-                          Padding="7,1,7,2"
-                          Background="#38E07A1F"
-                          BorderBrush="#80E07A1F"
-                          BorderThickness="1"
-                          CornerRadius="4"
-                          MouseLeftButtonDown="OnWindowNameDown"
-                          ToolTip="Двойной щелчок — изменить название окна"
-                          Visibility="{Binding ShowsName, Converter={StaticResource BoolToVis}}">
-                          <controls:FitTextBlock
-                            VerticalAlignment="Center"
-                            MaxFontSize="12"
-                            MaxLines="1"
-                            MinFontSize="6"
-                            Text="{Binding NameText}"
-                            TextWeight="Normal" />
-                        </Border>
-                      </StackPanel>
-
-                      <Grid Grid.Column="1">
-                        <Grid.ColumnDefinitions>
-                          <ColumnDefinition Width="Auto" />
-                          <ColumnDefinition Width="*" />
-                          <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-
-                        <TextBlock
-                          Grid.Column="0"
-                          Margin="0,0,4,0"
-                          VerticalAlignment="Center"
-                          FontSize="12"
-                          Text="Путь на сервере:" />
-                        <!--  невидимое поле, как «Куда скачать» на «Скачивании», задаёт высоту строки: у списка своя больше  -->
-                        <ui:TextBox
-                          x:Name="PathHeight"
-                          Grid.Column="1"
-                          Padding="10,5,36,6"
-                          ClearButtonEnabled="False"
-                          Focusable="False"
-                          FontSize="12"
-                          IsHitTestVisible="False"
-                          Visibility="Hidden" />
-                        <ComboBox
-                          Grid.Column="1"
-                          Height="{Binding ActualHeight, ElementName=PathHeight}"
-                          MinHeight="0"
-                          Padding="10,0,10,0"
-                          controls:LockMute.IsOn="{Binding IsPaneLocked}"
-                          VerticalContentAlignment="Center"
-                          DropDownOpened="OnPathDropDownOpened"
-                          FontSize="12"
-                          IsEditable="True"
-                          IsTextSearchEnabled="False"
-                          IsEnabled="{Binding IsNotPaneLocked}"
-                          ItemsSource="{Binding Source={x:Static services:AppState.Current}, Path=Settings.RemotePathHistory}"
-                          Text="{Binding RemotePath, UpdateSourceTrigger=PropertyChanged}"
-                          ToolTip="Путь одинаков для всех отмеченных серверов этого окна. История общая для всех окон и вкладок, крестик убирает строку.">
-                          <ComboBox.ItemTemplate>
-                            <DataTemplate>
-                              <Grid>
-                                <Grid.ColumnDefinitions>
-                                  <ColumnDefinition Width="*" />
-                                  <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock
-                                  Grid.Column="0"
-                                  MinWidth="280"
-                                  VerticalAlignment="Center"
-                                  FontFamily="Consolas"
-                                  Text="{Binding}"
-                                  TextTrimming="CharacterEllipsis" />
-                                <Button
-                                  x:Name="Remove"
-                                  Grid.Column="1"
-                                  Click="OnRemoveRemotePath"
-                                  Style="{StaticResource HistoryRemoveButtonStyle}" />
-                              </Grid>
-                              <DataTemplate.Triggers>
-                                <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}}" Value="{x:Null}">
-                                  <Setter TargetName="Remove" Property="Visibility" Value="Collapsed" />
-                                </DataTrigger>
-                              </DataTemplate.Triggers>
-                            </DataTemplate>
-                          </ComboBox.ItemTemplate>
-                        </ComboBox>
-                        <!--  копировать путь — внутри поля, слева от стрелки списка  -->
+                        Margin="4,0,2,0"
+                        DockPanel.Dock="Right"
+                        Orientation="Horizontal">
                         <Button
-                          Grid.Column="1"
-                          Margin="0,0,34,0"
-                          HorizontalAlignment="Right"
-                          VerticalAlignment="Center"
-                          Click="OnCopyRemotePath"
+                          Click="OnCopyItemPath"
                           Style="{StaticResource RowPathButtonStyle}"
                           ToolTip="Копировать путь">
                           <ui:SymbolIcon FontSize="14" Symbol="Copy24" />
                         </Button>
-                        <ui:Button
-                          Grid.Column="2"
-                          Margin="4,0,0,0"
-                          Height="Auto"
-                          VerticalAlignment="Stretch"
-                          controls:LockMute.IsOn="{Binding IsPaneLocked}"
-                          Click="OnBrowse"
-                          Content="Обзор на сервере…"
-                          Icon="{ui:SymbolIcon FolderOpen24}"
-                          Style="{StaticResource ToolButtonStyle}" />
-                      </Grid>
+                        <Button
+                          controls:LockMute.IsOn="{Binding DataContext.IsPaneLocked, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                          Click="OnEditItemPath"
+                          Style="{StaticResource RowPathButtonStyle}"
+                          ToolTip="Вписать другой путь">
+                          <ui:SymbolIcon FontSize="14" Symbol="Edit24" />
+                        </Button>
+                        <Button
+                          controls:LockMute.IsOn="{Binding DataContext.IsPaneLocked, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                          Click="OnRemoveItemRow"
+                          Style="{StaticResource RowPathButtonStyle}"
+                          ToolTip="Убрать строку из списка — сам файл не трогается">
+                          <ui:SymbolIcon FontSize="14" Symbol="Delete24" />
+                        </Button>
+                      </StackPanel>
+                      <TextBlock
+                        VerticalAlignment="Center"
+                        Text="{Binding FullPath}"
+                        TextTrimming="CharacterEllipsis" />
+                    </DockPanel>
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+            </DataGrid.Columns>
+          </DataGrid>
 
-                      <Border
-                        Grid.Column="2"
-                        MaxWidth="520"
-                        Margin="4,0,0,0"
-                        Padding="10,4"
-                        VerticalAlignment="Stretch"
-                        Background="#1FE89A3C"
-                        BorderBrush="#E89A3C"
-                        BorderThickness="1"
-                        CornerRadius="4"
-                        Cursor="Hand"
-                        MouseLeftButtonUp="OnNoticeClick"
-                        ToolTip="Открыть личную вкладку команд"
-                        Visibility="{Binding HasNotices, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}">
-                        <ItemsControl VerticalAlignment="Center" ItemsSource="{Binding Notices}">
-                          <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                              <Grid>
-                                <Grid.ColumnDefinitions>
-                                  <ColumnDefinition Width="Auto" />
-                                  <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <ui:SymbolIcon
-                                  Grid.Column="0"
-                                  Margin="0,0,8,0"
-                                  VerticalAlignment="Center"
-                                  FontSize="16"
-                                  Foreground="#E89A3C"
-                                  Symbol="Warning24" />
-                                <TextBlock
-                                  Grid.Column="1"
-                                  VerticalAlignment="Center"
-                                  FontSize="12"
-                                  FontWeight="SemiBold"
-                                  Foreground="#E89A3C"
-                                  Text="{Binding}"
-                                  TextWrapping="Wrap" />
-                              </Grid>
-                            </DataTemplate>
-                          </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                      </Border>
+          <TextBlock
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            FontSize="12"
+            Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+            IsHitTestVisible="False"
+            Text="Список пуст — нажмите «Открыть», дважды щёлкните здесь или перетащите файлы в окно">
+            <TextBlock.Style>
+              <Style TargetType="TextBlock">
+                <Setter Property="Visibility" Value="Collapsed" />
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding Items.Count, ElementName=RowsGrid}" Value="0">
+                    <Setter Property="Visibility" Value="Visible" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </TextBlock.Style>
+          </TextBlock>
+
+          <!--  плюс единственного окна — под последней строкой, столбиком со значками строки; место ставит код.
+                Окон несколько — плюс и минус у каждого на его разделителе  -->
+          <StackPanel
+            HorizontalAlignment="Right"
+            VerticalAlignment="Top"
+            Orientation="Horizontal">
+            <StackPanel.Style>
+              <Style TargetType="StackPanel">
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding IsMultiWindow}" Value="True">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </StackPanel.Style>
+            <Button
+              controls:LockMute.IsOn="{Binding IsPaneLocked}"
+              Click="OnAddWindow"
+              Style="{StaticResource RowPathButtonStyle}"
+              ToolTip="Добавить окно ниже — выполнится после этого">
+              <ui:SymbolIcon FontSize="18" Symbol="Add24" />
+            </Button>
+          </StackPanel>
+        </Grid>
+
+        <!--  строка пути одна — окна в фокусе: номер, «Обзор», «Листинг», путь; общие предупреждения вкладки справа  -->
+        <Border
+          Grid.Row="1"
+          DataContext="{Binding FocusedWindow}"
+          Padding="4"
+          Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+          BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+          BorderThickness="0,1,0,0">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" MinWidth="420" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!--  номер окна в фокусе, как у «Открыть»: строка пути одна и переключается вместе с фокусом  -->
+            <Border
+              Grid.Column="0"
+              MinWidth="34"
+              Margin="0,0,4,0"
+              Padding="7,0"
+              Background="#26E07A1F"
+              BorderBrush="#80E07A1F"
+              BorderThickness="1"
+              CornerRadius="4"
+              ToolTip="Путь окна в фокусе. Другое окно — щелчок по его номеру в таблице"
+              Visibility="{Binding IsMulti, Converter={StaticResource BoolToVis}}">
+              <TextBlock
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                FontFamily="Consolas"
+                FontSize="12"
+                Text="{Binding NumberText}" />
+            </Border>
+
+            <Grid Grid.Column="1">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+
+              <!--  вместо подписи «Путь на сервере» — что делать с путём: выбрать на сервере или показать его содержимое  -->
+              <StackPanel
+                Grid.Column="0"
+                Margin="0,0,4,0"
+                Orientation="Horizontal">
+                <!--  под замком не гаснет: смотреть можно, выбрать — нет  -->
+                <ui:Button
+                  Height="Auto"
+                  VerticalAlignment="Stretch"
+                  Click="OnBrowse"
+                  Content="Обзор"
+                  Icon="{ui:SymbolIcon FolderOpen24}"
+                  Style="{StaticResource ToolButtonStyle}"
+                  ToolTip="Выбрать путь на сервере" />
+                <ui:Button
+                  Height="Auto"
+                  Margin="4,0,0,0"
+                  VerticalAlignment="Stretch"
+                  Click="OnListing"
+                  Content="Листинг"
+                  Icon="{ui:SymbolIcon List24}"
+                  Style="{StaticResource ToolButtonStyle}"
+                  ToolTip="ls -la этого пути на отмеченных серверах — вывод в журнал" />
+              </StackPanel>
+              <!--  невидимое поле, как «Куда скачать» на «Скачивании», задаёт высоту строки: у списка своя больше  -->
+              <ui:TextBox
+                x:Name="PathHeight"
+                Grid.Column="1"
+                Padding="10,5,36,6"
+                ClearButtonEnabled="False"
+                Focusable="False"
+                FontSize="12"
+                IsHitTestVisible="False"
+                Visibility="Hidden" />
+              <ComboBox
+                Grid.Column="1"
+                Height="{Binding ActualHeight, ElementName=PathHeight}"
+                MinHeight="0"
+                Padding="10,0,10,0"
+                controls:LockMute.IsOn="{Binding IsPaneLocked}"
+                VerticalContentAlignment="Center"
+                DropDownOpened="OnPathDropDownOpened"
+                FontSize="12"
+                IsEditable="True"
+                IsTextSearchEnabled="False"
+                IsEnabled="{Binding IsNotPaneLocked}"
+                ItemsSource="{Binding Source={x:Static services:AppState.Current}, Path=Settings.RemotePathHistory}"
+                Text="{Binding RemotePath, UpdateSourceTrigger=PropertyChanged}"
+                ToolTip="Путь одинаков для всех отмеченных серверов этого окна. История общая для всех окон и вкладок, крестик убирает строку.">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate>
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                      </Grid.ColumnDefinitions>
+                      <TextBlock
+                        Grid.Column="0"
+                        MinWidth="280"
+                        VerticalAlignment="Center"
+                        FontFamily="Consolas"
+                        Text="{Binding}"
+                        TextTrimming="CharacterEllipsis" />
+                      <Button
+                        x:Name="Remove"
+                        Grid.Column="1"
+                        Click="OnRemoveRemotePath"
+                        Style="{StaticResource HistoryRemoveButtonStyle}" />
                     </Grid>
-                  </Border>
-                </Grid>
-              </Border>
-
-              <!--  окно в фокусе — рамка цвета нижней линии поля, как в «Командах»: панель кнопок и параметры показывают его.
-                    Под замком её нет: в окне почти ничего нельзя  -->
-              <Border
-                x:Name="FocusRing"
-                BorderBrush="{DynamicResource TextControlFocusedBorderBrush}"
-                BorderThickness="2"
-                CornerRadius="4"
-                IsHitTestVisible="False"
-                Visibility="Collapsed" />
-
-              <!--  окно встало на суммах — ненадолго красная рамка, как у ярлыка с ошибкой  -->
-              <Border
-                x:Name="FailRing"
-                BorderBrush="#E85C5C"
-                BorderThickness="2"
-                CornerRadius="4"
-                IsHitTestVisible="False"
-                Visibility="Collapsed" />
+                    <DataTemplate.Triggers>
+                      <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}}" Value="{x:Null}">
+                        <Setter TargetName="Remove" Property="Visibility" Value="Collapsed" />
+                      </DataTrigger>
+                    </DataTemplate.Triggers>
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <!--  копировать путь — внутри поля, слева от стрелки списка  -->
+              <Button
+                Grid.Column="1"
+                Margin="0,0,34,0"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Center"
+                Click="OnCopyRemotePath"
+                Style="{StaticResource RowPathButtonStyle}"
+                ToolTip="Копировать путь">
+                <ui:SymbolIcon FontSize="14" Symbol="Copy24" />
+              </Button>
             </Grid>
-            <DataTemplate.Triggers>
-              <MultiDataTrigger>
-                <MultiDataTrigger.Conditions>
-                  <Condition Binding="{Binding IsMulti}" Value="True" />
-                  <Condition Binding="{Binding IsFocused}" Value="True" />
-                  <Condition Binding="{Binding IsPaneLocked}" Value="False" />
-                </MultiDataTrigger.Conditions>
-                <Setter TargetName="FocusRing" Property="Visibility" Value="Visible" />
-              </MultiDataTrigger>
-              <MultiDataTrigger>
-                <MultiDataTrigger.Conditions>
-                  <Condition Binding="{Binding IsMulti}" Value="True" />
-                  <Condition Binding="{Binding IsFailed}" Value="True" />
-                </MultiDataTrigger.Conditions>
-                <Setter TargetName="FailRing" Property="Visibility" Value="Visible" />
-              </MultiDataTrigger>
-            </DataTemplate.Triggers>
-          </DataTemplate>
-        </ItemsControl.ItemTemplate>
-      </ItemsControl>
-    </ScrollViewer>
+
+            <Border
+              Grid.Column="2"
+              MaxWidth="520"
+              Margin="4,0,0,0"
+              Padding="10,4"
+              VerticalAlignment="Stretch"
+              Background="#26E07A1F"
+              BorderBrush="#80E07A1F"
+              BorderThickness="1"
+              CornerRadius="4"
+              Cursor="Hand"
+              MouseLeftButtonUp="OnNoticeClick"
+              ToolTip="Открыть личную вкладку команд"
+              Visibility="{Binding DataContext.HasNotices, RelativeSource={RelativeSource AncestorType=Page}, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}">
+              <ItemsControl VerticalAlignment="Center" ItemsSource="{Binding DataContext.Notices, RelativeSource={RelativeSource AncestorType=Page}}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <ui:SymbolIcon
+                        Grid.Column="0"
+                        Margin="0,0,8,0"
+                        VerticalAlignment="Center"
+                        FontSize="16"
+                        Foreground="#E07A1F"
+                        Symbol="Warning24" />
+                      <TextBlock
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        FontSize="12"
+                        FontWeight="SemiBold"
+                        Foreground="#E07A1F"
+                        Text="{Binding}"
+                        TextWrapping="Wrap" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </Border>
+          </Grid>
+        </Border>
+      </Grid>
+    </Border>
 
     <!--  границу над нижней полосой двигают мышью  -->
     <GridSplitter

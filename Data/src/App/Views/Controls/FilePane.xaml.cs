@@ -211,6 +211,7 @@ public enum PaneCommand
     OpenWith,
     Properties,
     Compare,
+    Listing,
     Run,
     CommandTabHere,
     SendToCopy,
@@ -218,6 +219,15 @@ public enum PaneCommand
     TransferToOther,
     TransferOptions,
     Excludes,
+
+    /// <summary>Вкладка-фильтр: галочки — на том, что копируется.</summary>
+    FilterCopied,
+
+    /// <summary>Вкладка-фильтр: галочки — на том, что не копируется.</summary>
+    FilterSkipped,
+
+    /// <summary>Вкладка-фильтр: галочки режима — снова по маскам.</summary>
+    FilterReset,
 }
 
 /// <summary>Перетащили в панель: из соседней панели или из проводника Windows.</summary>
@@ -367,11 +377,14 @@ public partial class FilePane : UserControl
         ShowTitle(_title, TitleIcon.Source);
     }
 
-    /// <summary>Подпись сервера над деревом — в окнах выбора пути, где не видно, чья это панель.</summary>
-    public void ShowServerCaption(string name, string host)
+    /// <summary>Плашка сервера над деревом — в окнах выбора пути, где не видно, чья это панель.</summary>
+    public void ShowServerCaption(ServerEntry server, ImageSource? icon)
     {
-        ServerCaptionName.Text = name;
-        ServerCaptionHost.Text = name == host ? string.Empty : "  " + host;
+        ServerCaptionIcon.Source = icon;
+        ServerCaptionName.Text = server.PaneLabel;
+        ServerCaptionUser.Text = string.IsNullOrWhiteSpace(server.User) ? string.Empty : $"({server.User})";
+        ServerCaptionHost.Text = $"{server.Host}:{server.Port}";
+        ServerCaption.ToolTip = _titleTip;
         ServerCaption.Visibility = Visibility.Visible;
     }
 
@@ -402,13 +415,142 @@ public partial class FilePane : UserControl
         set => TransferButton.IsEnabled = value;
     }
 
-    private void OnTitleClick(object sender, RoutedEventArgs e) => TitleClicked?.Invoke(this, TitleButton);
+    private void OnTitleClick(object sender, RoutedEventArgs e) => TitleClicked?.Invoke(this, sender as FrameworkElement ?? TitleButton);
 
     private void OnTransfer(object sender, RoutedEventArgs e) => CommandRequested?.Invoke(this, PaneCommand.TransferToOther);
 
     private void OnTransferOptions(object sender, RoutedEventArgs e) => CommandRequested?.Invoke(this, PaneCommand.TransferOptions);
 
     private void OnExcludes(object sender, RoutedEventArgs e) => CommandRequested?.Invoke(this, PaneCommand.Excludes);
+
+    private void OnFilterCopied(object sender, RoutedEventArgs e) => CommandRequested?.Invoke(this, PaneCommand.FilterCopied);
+
+    private void OnFilterSkipped(object sender, RoutedEventArgs e) => CommandRequested?.Invoke(this, PaneCommand.FilterSkipped);
+
+    private void OnFilterReset(object sender, RoutedEventArgs e) => CommandRequested?.Invoke(this, PaneCommand.FilterReset);
+
+    /// <summary>
+    /// Вкладка-фильтр окна копирования: на месте «Копировать» — режимы галочек, и галочки ставит фильтр.
+    /// <paramref name="ticks"/> — какие строки открытой папки отмечены; null — панель обычная.
+    /// </summary>
+    public void ShowFilter(Func<IReadOnlyList<FsEntry>, IReadOnlyCollection<string>>? ticks)
+    {
+        TickSource = ticks;
+        FilterGroup.Visibility = ticks is null ? Visibility.Collapsed : Visibility.Visible;
+
+        // у вкладки-фильтра с файлами ничего не делают: ни правки, ни удаления, ни ввода адреса, ни избранного
+        var tools = ticks is null ? Visibility.Visible : Visibility.Collapsed;
+        FileActions.Visibility = tools;
+        PathTools.Visibility = tools;
+        BookmarkButton.Visibility = tools;
+        WindowsExplorerButton.Visibility = ticks is null && !IsRemote ? Visibility.Visible : Visibility.Collapsed;
+
+        if (ticks is not null)
+        {
+            TransferGroup.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    /// <summary>
+    /// Вкладка копирования под замком: «Сбросить» тусклый, нажатие страница отказывает плашкой.
+    /// Режимы переключаются — это только просмотр их галочек.
+    /// </summary>
+    public void MuteFilter(bool locked) => LockMute.SetIsOn(FilterResetButton, locked);
+
+    /// <summary>Выбранный режим фильтра — в оранжевой рамке.</summary>
+    public void MarkFilterMode(bool copied)
+    {
+        var ring = new SolidColorBrush(Color.FromArgb(0x80, 0xE0, 0x7A, 0x1F));
+        FilterCopiedRing.BorderBrush = copied ? ring : Brushes.Transparent;
+        FilterSkippedRing.BorderBrush = copied ? Brushes.Transparent : ring;
+    }
+
+    /// <summary>Панель — вкладка-фильтр: только переходы по папкам, галочки, маска и поиск.</summary>
+    private bool IsPicker => TickSource is not null;
+
+    /// <summary>
+    /// Окно обзора пути из «Копирования» и «Скачивания»: там выбирают, а не наводят порядок. Из правки — только
+    /// новая папка (кнопкой наверху, F7, меню) и переименование; удаления, правки файлов, буфера, перетаскивания
+    /// и свойств нет — это в «Проводнике».
+    /// </summary>
+    private bool _browsing;
+
+    /// <summary>Файлы здесь только выбирают: ни перетаскивания, ни открытия файлов.</summary>
+    private bool IsLimited => IsPicker || _browsing;
+
+    public void ShowBrowse()
+    {
+        _browsing = true;
+        NewFolderButton.Visibility = Visibility.Visible;
+        EditButton.Visibility = Visibility.Collapsed;
+        DeleteButton.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>Выбор одной папки: галочки ни к чему — выбирают переходом в папку или щелчком по ней.</summary>
+    private bool _noTicks;
+
+    /// <summary>
+    /// Галочек нет совсем: ни столбца, ни рамки мышью, ни выделения Ctrl/Shift и клавишами — отмеченное сразу
+    /// снимается. Остаётся курсор.
+    /// </summary>
+    public void HideChecks()
+    {
+        _noTicks = true;
+        CheckColumn.Visibility = Visibility.Collapsed;
+        List.SelectionChanged += (_, _) =>
+        {
+            if (List.SelectedItems.Count > 0)
+            {
+                Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() => List.UnselectAll()));
+            }
+        };
+    }
+
+    /// <summary>Папка окна в корне фильтра («Окно 2 · old»): путь условный, на диске её нет.</summary>
+    private static bool IsGroupFolder(FsEntry entry) => entry.FullPath.StartsWith('*');
+
+    /// <summary>Ширина дерева слева, когда оно открыто: в большом окне обзора оно шире.</summary>
+    public double TreeWidth { get; set; } = 200;
+
+    private void OnNewFolder(object sender, RoutedEventArgs e) => _ = CreateAsync(folder: true);
+
+    /// <summary>Галочки берёт не память панели, а фильтр — при каждом открытии папки.</summary>
+    private Func<IReadOnlyList<FsEntry>, IReadOnlyCollection<string>>? TickSource { get; set; }
+
+    /// <summary>Человек поменял галочки, а панель — фильтр: страница передаёт их фильтру.</summary>
+    public event Action<FilePane>? TicksEdited;
+
+    /// <summary>Режим сменили или сбросили — галочки открытой папки заново от фильтра.</summary>
+    public void ReapplyTicks()
+    {
+        if (TickSource is not { } ticks || _view is null)
+        {
+            return;
+        }
+
+        _selectionHold++;
+
+        try
+        {
+            var names = ticks(Entries);
+            _selectionByPath.Clear();
+            RestoreSelection(names);
+        }
+        finally
+        {
+            _selectionHold--;
+        }
+
+        UpdateAllCheck();
+    }
+
+    /// <summary>Строки, которые сейчас видно (маска прячет часть): галочки меняли только у них.</summary>
+    public IReadOnlyList<FsEntry> VisibleEntries =>
+        _view is null ? [] : _view.Cast<PaneRow>().Where(r => !r.IsParent).Select(r => r.Entry).ToList();
+
+    /// <summary>Отмеченные строки открытой папки по именам — для фильтра.</summary>
+    public IReadOnlyCollection<string> TickedNames =>
+        List.SelectedItems.OfType<PaneRow>().Where(r => !r.IsParent).Select(r => r.Name).ToHashSet(StringComparer.Ordinal);
 
     /// <summary>Открыта другая папка, сменился курсор или сортировка — страница сохраняет вкладку.</summary>
     public event Action<FilePane>? StateChanged;
@@ -418,15 +560,35 @@ public partial class FilePane : UserControl
     /// <summary>Вкладка «Проводника», в чей терминал ложатся строки действий панели; нет — в открытую.</summary>
     public Workspace? Tab { get; set; }
 
+    /// <summary>
+    /// Раздел, к которому относятся действия и ошибки панели. Null — открытый: окно «Обзор» из «Копирования»
+    /// не красит красным «Проводник», куда человек не заходил.
+    /// </summary>
+    public AppSection? Section { get; set; } = AppSection.Explorer;
+
     public bool IsRemote => _source?.IsRemote == true;
 
     public string CurrentPath => _current;
 
     /// <summary>Папка, из которой панель сервера не уходит под замком вкладки; null — не закреплена.</summary>
-    private string? LockedRoot => IsRemote && Tab?.ExplorerLockedPath is { Length: > 0 } root ? root : null;
+    private string? LockedRoot => IsRemote
+        ? Tab?.ExplorerLockedPath is { Length: > 0 } root ? root : null
+        : Tab?.ExplorerLockedLocalPath is { Length: > 0 } local ? local : null;
 
+    /// <summary>Под замком — вне закреплённой папки: внутрь неё можно, выше нельзя.</summary>
     private bool OutsideLock(string path) =>
-        LockedRoot is { } root && _source is { } source && source.Normalize(path) != root;
+        (LockedRoot is { } root && _source is { } source && !Within(source.Normalize(path), root))
+        || (_source is LocalSource { IsRooted: true } rooted && !rooted.Allows(path));
+
+    /// <summary>Путь — сама папка или внутри неё.</summary>
+    private bool Within(string path, string root)
+    {
+        var sep = IsRemote ? "/" : "\\";
+        var comparison = IsRemote ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        var prefix = root.EndsWith(sep, StringComparison.Ordinal) ? root : root + sep;
+
+        return string.Equals(path, root, comparison) || path.StartsWith(prefix, comparison);
+    }
 
     /// <summary>Переход из закреплённой замком папки не выполняется — и об этом плашка.</summary>
     private bool RefusedByLock(string path)
@@ -436,7 +598,11 @@ public partial class FilePane : UserControl
             return false;
         }
 
-        AppLog.Hint($"Замок держит папку {LockedRoot} — чтобы перейти в другую, требуется снять замок.", LogLevel.Warning);
+        AppLog.Hint(
+            _source is LocalSource { IsRooted: true }
+                ? "Фильтр показывает только строки окна копирования — выше них не подняться."
+                : $"Замок держит папку {LockedRoot} — внутрь неё можно, выше требуется снять замок.",
+            LogLevel.Warning);
         return true;
     }
 
@@ -811,7 +977,10 @@ public partial class FilePane : UserControl
             FileMaskBox.Text = string.Empty;
         }
 
-        var keep = _restoringSelection ?? _selectionByPath.GetValueOrDefault(target) ?? [];
+        // у вкладки-фильтра галочки — от фильтра, а не из памяти панели
+        var keep = TickSource is { } ticks
+            ? ticks(items)
+            : _restoringSelection ?? _selectionByPath.GetValueOrDefault(target) ?? [];
         _restoringSelection = null;
         _selectionHold++;
 
@@ -1138,6 +1307,11 @@ public partial class FilePane : UserControl
 
         var names = List.SelectedItems.OfType<PaneRow>().Where(r => !r.IsParent).Select(r => r.Name).ToList();
         _selectionByPath[_current] = names;
+
+        if (TickSource is not null)
+        {
+            TicksEdited?.Invoke(this);
+        }
 
         if (!_state.Selected.SequenceEqual(names))
         {
@@ -1506,7 +1680,7 @@ public partial class FilePane : UserControl
     private void ApplyColumns()
     {
         // у компьютера на этом месте «Открыть», у сервера — его значок
-        WindowsExplorerButton.Visibility = IsRemote ? Visibility.Collapsed : Visibility.Visible;
+        WindowsExplorerButton.Visibility = IsRemote || IsPicker ? Visibility.Collapsed : Visibility.Visible;
         ServerGroup.Visibility = IsRemote ? Visibility.Visible : Visibility.Collapsed;
 
         foreach (var column in List.Columns)
@@ -1862,7 +2036,8 @@ public partial class FilePane : UserControl
 
     public void BeginPathEdit()
     {
-        if (_source is null)
+        // у вкладки-фильтра адрес не вводится: ходят только внутри строк окна
+        if (_source is null || IsPicker)
         {
             return;
         }
@@ -2028,7 +2203,7 @@ public partial class FilePane : UserControl
         BackButton.IsEnabled = _back.Count > 0;
         ForwardButton.IsEnabled = _forward.Count > 0;
 
-        var atLockedRoot = _current == LockedRoot;
+        var atLockedRoot = LockedRoot is { } root && Within(_current, root) && Within(root, _current);
 
         LockMute.SetIsOn(BackButton, _back.Count > 0 && OutsideLock(_back.Peek()));
         LockMute.SetIsOn(ForwardButton, _forward.Count > 0 && OutsideLock(_forward.Peek()));
@@ -2057,6 +2232,13 @@ public partial class FilePane : UserControl
     {
         if (_source is not { } source)
         {
+            return;
+        }
+
+        // под замком корень — закреплённая папка: выше неё не уйти
+        if (LockedRoot is { } locked)
+        {
+            await NavigateAsync(locked);
             return;
         }
 
@@ -2149,6 +2331,12 @@ public partial class FilePane : UserControl
     /// <summary>Enter или двойной щелчок: папка — открыть, файл — попросить страницу открыть его.</summary>
     private async Task OpenRowAsync(PaneRow row)
     {
+        // у вкладки-фильтра и в окне обзора файлы не открываются — только папки
+        if (IsLimited && !row.IsDirectory && !row.IsParent)
+        {
+            return;
+        }
+
         if (row.IsDirectory || row.IsParent)
         {
             // строки пересоздаются, и фокус уходит вместе со старой — без возврата следующий Enter терялся
@@ -2199,6 +2387,24 @@ public partial class FilePane : UserControl
                 BeginPathEdit();
             }
 
+            return;
+        }
+
+        // у вкладки-фильтра — только переходы и галочки: ни правки, ни удаления, ни буфера
+        // удалить строку под курсором можно, как в «Проводнике»: галочки здесь — фильтр, а не выделение
+        if (IsPicker && (key is Key.F2 or Key.F7
+            || (ctrl && key is Key.C or Key.X or Key.V)
+            || (ctrl && shift && key == Key.N)
+            || (alt && key == Key.Enter)))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        // в окне обзора — переименование, новая папка и удаление, остальное только в «Проводнике»
+        if (_browsing && ((ctrl && key is Key.C or Key.X or Key.V) || (alt && key == Key.Enter)))
+        {
+            e.Handled = true;
             return;
         }
 
@@ -2429,7 +2635,7 @@ public partial class FilePane : UserControl
     }
 
     private void Warn(string text, IEnumerable<string>? details = null) =>
-        ActionLog.Warn(text, ActionLog.Where(_source), AppSection.Explorer, Tab, details);
+        ActionLog.Warn(text, ActionLog.Where(_source), Section, Tab, details);
 
     /// <summary>Сервер закончил действие: если эта папка открыта здесь — перечитать на месте.</summary>
     private void OnPendingSettled(string side, string dir)
@@ -2624,7 +2830,13 @@ public partial class FilePane : UserControl
 
     public async Task DeleteSelectedAsync()
     {
-        if (_source is not { } source || TargetEntries is not { Count: > 0 } items)
+        // у фильтра галочки — что копируется, а не выделение: удаляется строка под курсором или из меню.
+        // Папки окон в корне фильтра — не настоящие, их не удалить
+        var targets = IsPicker
+            ? (_menuTargets ?? (FocusedEntry is { Kind: FsKind.Normal } one ? [one] : [])).Where(i => !IsGroupFolder(i)).ToList()
+            : TargetEntries;
+
+        if (_source is not { } source || targets is not { Count: > 0 } items)
         {
             return;
         }
@@ -2722,7 +2934,7 @@ public partial class FilePane : UserControl
 
     /// <summary>Действие панели — в журнал и строкой в терминал: сервер или «Компьютер», суть и подробности.</summary>
     private void Log(string text, bool error = false, IEnumerable<string>? details = null) =>
-        ActionLog.Write(error ? LogLevel.Error : LogLevel.Success, text, ActionLog.Where(_source), AppSection.Explorer, Tab, details);
+        ActionLog.Write(error ? LogLevel.Error : LogLevel.Success, text, ActionLog.Where(_source), Section, Tab, details);
 
     // ── контекстное меню ─────────────────────────────────────────────────────
 
@@ -2737,6 +2949,31 @@ public partial class FilePane : UserControl
             var columns = ColumnsMenu();
             columns.PlacementTarget = List;
             columns.IsOpen = true;
+            return;
+        }
+
+        // у фильтра из правки — только удалить строку, по которой щёлкнули: галочки здесь — фильтр, а не выделение
+        if (IsPicker)
+        {
+            e.Handled = true;
+
+            if (FindRow(source)?.Item is PaneRow { IsParent: false, Entry.Kind: FsKind.Normal } target && !IsGroupFolder(target.Entry))
+            {
+                MoveCursor(target);
+                _menuTargets = [target.Entry];
+                var only = new ContextMenu { PlacementTarget = List };
+                var delete = new MenuItem
+                {
+                    Header = new TextBlock { Text = IsRemote ? "Удалить" : "Удалить в корзину" },
+                    Icon = new Wpf.Ui.Controls.SymbolIcon { Symbol = Wpf.Ui.Controls.SymbolRegular.Delete24, FontSize = 16 },
+                    InputGestureText = "Del",
+                };
+                delete.Click += (_, _) => _ = DeleteSelectedAsync();
+                only.Items.Add(delete);
+                only.Closed += (_, _) => Dispatcher.BeginInvoke(() => _menuTargets = null, DispatcherPriority.Background);
+                only.IsOpen = true;
+            }
+
             return;
         }
 
@@ -2796,6 +3033,27 @@ public partial class FilePane : UserControl
         void Ask(PaneCommand command) => CommandRequested?.Invoke(this, command);
 
         var editable = picked.Where(p => !p.IsDirectory && TextFile.IsEditable(p.Name)).ToList();
+
+        // окно обзора: открыть папку, переименовать, новая папка, путь — остальное в «Проводнике»
+        if (_browsing)
+        {
+            if (single is { IsDirectory: true })
+            {
+                Add(Wpf.Ui.Controls.SymbolRegular.FolderOpen24, "Открыть", "Enter", () => _ = OpenRowAsync(new PaneRow(single, remote)));
+            }
+
+            if (picked.Count > 0)
+            {
+                Add(Wpf.Ui.Controls.SymbolRegular.Rename24, "Переименовать", "F2", BeginRename, single is not null);
+                Add(Wpf.Ui.Controls.SymbolRegular.Delete24, remote ? "Удалить" : "Удалить в корзину", "Del", () => _ = DeleteSelectedAsync());
+                Line();
+            }
+
+            Add(Wpf.Ui.Controls.SymbolRegular.FolderAdd24, "Новая папка", "F7", () => _ = CreateAsync(folder: true), canCreate);
+            Line();
+            Add(Wpf.Ui.Controls.SymbolRegular.Link24, "Скопировать путь", string.Empty, CopyPath);
+            return menu;
+        }
 
         // открыть
         if (single is not null)
@@ -2857,6 +3115,12 @@ public partial class FilePane : UserControl
         if (picked.Count > 0)
         {
             Add(Wpf.Ui.Controls.SymbolRegular.BranchCompare24, "Сравнить с соседней панелью", string.Empty, () => Ask(PaneCommand.Compare));
+        }
+
+        // ls -la выбранного, без выбора — открытой папки; вывод в журнал
+        if (remote)
+        {
+            Add(Wpf.Ui.Controls.SymbolRegular.List24, "Листинг", string.Empty, () => Ask(PaneCommand.Listing));
         }
 
         // сервер и другие разделы
@@ -3007,11 +3271,18 @@ public partial class FilePane : UserControl
 
         var from = e.GetPosition(List);
 
-        if (plain && row is { Item: PaneRow { IsParent: false, Entry.Kind: FsKind.Normal } grabbed }
+        // у вкладки-фильтра файлы не перетаскивают: по имени, как и везде, — рамка галочек
+        if (!IsLimited && plain && row is { Item: PaneRow { IsParent: false, Entry.Kind: FsKind.Normal } grabbed }
             && FindParent<DataGridCell>(hit)?.Column == NameColumn)
         {
             _dragFrom = from;
             _dragRow = grabbed;
+            return;
+        }
+
+        // без галочек — и без рамки выделения
+        if (_noTicks)
+        {
             return;
         }
 
@@ -3101,6 +3372,11 @@ public partial class FilePane : UserControl
     /// </summary>
     private void StartDrag(PaneRow grabbed)
     {
+        if (IsLimited)
+        {
+            return;
+        }
+
         var items = SelectedEntries is { Count: > 0 } picked ? picked : [grabbed.Entry];
         var first = items.Count == 1 ? grabbed : List.SelectedItems.OfType<PaneRow>().FirstOrDefault() ?? grabbed;
         var title = items.Count == 1 ? items[0].Name : $"{items.Count} {Plural(items.Count, "объект", "объекта", "объектов")}";
@@ -3174,6 +3450,13 @@ public partial class FilePane : UserControl
     /// <summary>Свои строки — копированием, как F5; файлы из проводника Windows — на сервер заливкой, сюда — копией.</summary>
     private void OnListDragOver(object sender, DragEventArgs e)
     {
+        if (IsLimited)
+        {
+            e.Effects = DragDropEffects.None;
+            e.Handled = true;
+            return;
+        }
+
         var target = DropFolder(e);
         e.Handled = true;
 
@@ -3198,6 +3481,11 @@ public partial class FilePane : UserControl
     private void OnListDrop(object sender, DragEventArgs e)
     {
         MarkDropRow(null);
+
+        if (IsLimited)
+        {
+            return;
+        }
 
         if (DropFolder(e) is not { } target || _source is null)
         {
@@ -3262,7 +3550,7 @@ public partial class FilePane : UserControl
     {
         TreeHost.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         TreeSplitter.Visibility = TreeHost.Visibility;
-        TreeColumn.Width = show ? new GridLength(200) : new GridLength(0);
+        TreeColumn.Width = show ? new GridLength(TreeWidth) : new GridLength(0);
         TreeSplitColumn.Width = show ? new GridLength(4) : new GridLength(0);
         TreeButton.Background = show ? (Brush)FindResource("SubtleFillColorSecondaryBrush") : Brushes.Transparent;
 
@@ -3292,8 +3580,31 @@ public partial class FilePane : UserControl
 
         _treeRoot = source.IsRemote
             ? new PaneNode("/", "/", ShellIcons.Server)
-            : new PaneNode(LocalSource.ComputerTitle, string.Empty, ShellIcons.Computer);
+            : new PaneNode(source.Display(string.Empty), string.Empty, ShellIcons.Computer);
         Tree.ItemsSource = new ObservableCollection<PaneNode> { _treeRoot };
+        TreeRootIcon.Source = _treeRoot.Icon;
+        TreeRootName.Text = _treeRoot.Name;
+    }
+
+    /// <summary>Корень ушёл за верх дерева — его строка закреплена сверху.</summary>
+    private void OnTreeScrolled(object sender, ScrollChangedEventArgs e) =>
+        TreeRootBar.Visibility = _treeRoot is not null && e.VerticalOffset > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Щелчок по закреплённому корню: панель — в корень, дерево — к началу.</summary>
+    private async void OnTreeRootClick(object sender, MouseButtonEventArgs e)
+    {
+        if (_treeRoot is not { } root)
+        {
+            return;
+        }
+
+        _treeScroll ??= FindChild<ScrollViewer>(Tree);
+        _treeScroll?.ScrollToTop();
+
+        if (root.FullPath != _current && !RefusedByLock(root.FullPath))
+        {
+            await OpenFolderAsync(root.FullPath);
+        }
     }
 
     private async Task LoadChildrenAsync(PaneNode node)
@@ -3316,15 +3627,25 @@ public partial class FilePane : UserControl
             items = [];
         }
 
+        var dirs = items.Where(c => c.IsDirectory).OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase).ToList();
+
+        // у компьютера — заранее, в фоне: в каких папках нет папок (диски и быстрые места не трогаем — съёмный диск будил бы)
+        var leaves = source is LocalSource local
+            ? await Task.Run(() => dirs
+                .Where(d => d.Kind == FsKind.Normal && local.HasSubdirs(d.FullPath) == false)
+                .Select(d => d.FullPath)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase))
+            : null;
+
         node.Children.Clear();
 
-        foreach (var dir in items.Where(c => c.IsDirectory).OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase))
+        foreach (var dir in dirs)
         {
             var child = new PaneNode(dir.Name, dir.FullPath,
                 source.IsRemote ? ShellIcons.Folder : ShellIcons.ForLocal(dir.FullPath, true, dir.Kind == FsKind.Drive));
 
             // стрелка — только у папки, где точно есть подпапки: ложная стрелка обещает то, чего нет
-            if (source is RemoteSource remote && remote.HasSubdirs(dir.FullPath) == false)
+            if ((source is RemoteSource remote && remote.HasSubdirs(dir.FullPath) == false) || leaves?.Contains(dir.FullPath) == true)
             {
                 child.IsLoaded = true;
                 child.Children.Clear();
@@ -3341,6 +3662,42 @@ public partial class FilePane : UserControl
             await LoadChildrenAsync(node);
         }
     }
+
+    /// <summary>
+    /// Выбранная папка показывается в дереве только прокруткой по вертикали. Сам WPF тянул дерево и вправо —
+    /// к глубокой папке, и у папок выше пропадали значки и начало имён. По горизонтали дерево — у левого края.
+    /// </summary>
+    private void OnNodeBringIntoView(object sender, RequestBringIntoViewEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.TreeViewItem item)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        _treeScroll ??= FindChild<ScrollViewer>(Tree);
+
+        if (_treeScroll is not { } scroller || !item.IsVisible || !scroller.IsAncestorOf(item))
+        {
+            return;
+        }
+
+        var header = item.Template?.FindName("Bd", item) as FrameworkElement ?? item;
+        var top = header.TransformToAncestor(scroller).Transform(new Point()).Y;
+
+        if (top < 0)
+        {
+            scroller.ScrollToVerticalOffset(scroller.VerticalOffset + top);
+        }
+        else if (top + header.ActualHeight > scroller.ViewportHeight)
+        {
+            scroller.ScrollToVerticalOffset(scroller.VerticalOffset + top + header.ActualHeight - scroller.ViewportHeight);
+        }
+
+        scroller.ScrollToHorizontalOffset(0);
+    }
+
+    private ScrollViewer? _treeScroll;
 
     private async void OnTreeSelected(object sender, RoutedPropertyChangedEventArgs<object> e)
     {
@@ -3378,11 +3735,19 @@ public partial class FilePane : UserControl
         }
 
         var chain = source.Crumbs(path).Skip(1).Select(c => c.Path).ToList();
+        var trail = new List<PaneNode> { node };
 
         // у компьютера первая «крошка» — диск, его путь с «\» на конце
         try
         {
             _syncingTree = true;
+
+            // у вкладки-фильтра корень — строки окна, в окне обзора — корень сервера: они видны в дереве сразу
+            if (chain.Count == 0 && (source is LocalSource { IsRooted: true } || _browsing))
+            {
+                await LoadChildrenAsync(node);
+                node.IsExpanded = true;
+            }
 
             foreach (var step in chain)
             {
@@ -3403,6 +3768,7 @@ public partial class FilePane : UserControl
                 }
 
                 node = next;
+                trail.Add(node);
             }
 
             if (_treeSelected is { } previous && !ReferenceEquals(previous, node))
@@ -3417,6 +3783,50 @@ public partial class FilePane : UserControl
         {
             _syncingTree = false;
         }
+
+        // выбор сам дерево не листает — после разметки проматываем к открытой папке
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+        {
+            if (version == _navVersion)
+            {
+                ScrollTreeTo(trail);
+            }
+        }));
+    }
+
+    private void ScrollTreeTo(IReadOnlyList<PaneNode> trail)
+    {
+        ItemsControl parent = Tree;
+        System.Windows.Controls.TreeViewItem? item = null;
+
+        foreach (var step in trail)
+        {
+            if (parent.ItemContainerGenerator.ContainerFromItem(step) is not System.Windows.Controls.TreeViewItem next)
+            {
+                break;
+            }
+
+            item = next;
+            parent = next;
+        }
+
+        _treeScroll ??= FindChild<ScrollViewer>(Tree);
+
+        if (item is null || _treeScroll is not { } scroller || !item.IsVisible || !scroller.IsAncestorOf(item))
+        {
+            return;
+        }
+
+        // папка за краем — встаёт на треть высоты от низа, а не впритык к нему
+        var header = item.Template?.FindName("Bd", item) as FrameworkElement ?? item;
+        var top = header.TransformToAncestor(scroller).Transform(new Point()).Y;
+
+        if (top < 0 || top + header.ActualHeight > scroller.ViewportHeight)
+        {
+            scroller.ScrollToVerticalOffset(Math.Max(0, scroller.VerticalOffset + top + header.ActualHeight - scroller.ViewportHeight * 2 / 3));
+        }
+
+        scroller.ScrollToHorizontalOffset(0);
     }
 
     // ── закладки и последние папки ───────────────────────────────────────────

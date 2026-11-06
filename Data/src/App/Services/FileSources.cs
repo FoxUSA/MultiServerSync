@@ -127,9 +127,120 @@ public sealed class LocalSource : IFileSource
     private readonly Dictionary<string, IReadOnlyList<FsEntry>> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _sync = new();
 
+    /// <summary>Корень вместо «Этого компьютера» — строки окон копирования у вкладки-фильтра (всех окон вместе); null — обычный компьютер.</summary>
+    private readonly IReadOnlyList<string>? _roots;
+
+    /// <summary>
+    /// Окон копирования больше одного: в корне — папка на каждое окно, в ней его строки. Null — строки прямо в корне.
+    /// </summary>
+    private readonly IReadOnlyList<(string Title, IReadOnlyList<string> Roots)>? _groups;
+
+    /// <summary>В папку какого окна заходили последней: строка, которая есть в двух окнах, уходит «наверх» в неё.</summary>
+    private int _lastGroup = -1;
+
+    private readonly string _rootTitle = ComputerTitle;
+
+    /// <summary>Начало пути папки окна: «*» в путях Windows не бывает, с настоящей папкой не спутать.</summary>
+    private const char GroupMark = '*';
+
+    public LocalSource()
+    {
+    }
+
+    /// <summary>
+    /// Компьютер, на котором видно только строки окон копирования, выше них не подняться. Корень называется
+    /// <paramref name="title"/>; окно одно — его строки прямо в корне, больше — в корне папка на каждое окно.
+    /// </summary>
+    public LocalSource(IReadOnlyList<(string Title, IReadOnlyList<string> Roots)> groups, string title)
+    {
+        var full = groups
+            .Select(g => (g.Title, (IReadOnlyList<string>)g.Roots.Select(r => Path.GetFullPath(r).TrimEnd('\\')).ToList()))
+            .ToList();
+
+        _groups = full.Count > 1 ? full : null;
+        _roots = full.SelectMany(g => g.Item2).ToList();
+        _rootTitle = title;
+    }
+
+    /// <summary>Корень — заданные строки, а не весь компьютер.</summary>
+    public bool IsRooted => _roots is not null;
+
+    /// <summary>Путь папки окна номер <paramref name="index"/> (с нуля).</summary>
+    public static string GroupPath(int index) => GroupMark + index.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>Номер окна, если путь — папка окна; иначе null.</summary>
+    private int? GroupIndex(string p) =>
+        _groups is not null && p.Length > 1 && p[0] == GroupMark
+            && int.TryParse(p.AsSpan(1), NumberStyles.None, CultureInfo.InvariantCulture, out var i) && i < _groups.Count
+            ? i
+            : null;
+
+    private static bool Under(string p, string root) =>
+        string.Equals(p, root, StringComparison.OrdinalIgnoreCase) || p.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// В каком окне путь: сама папка окна или внутри одной из его строк. Строка есть в двух окнах — то, куда заходили последним.
+    /// Null — окно одно или путь вне строк.
+    /// </summary>
+    public int? GroupOf(string path)
+    {
+        var p = Normalize(path);
+
+        if (_groups is null)
+        {
+            return null;
+        }
+
+        if (GroupIndex(p) is { } own)
+        {
+            return own;
+        }
+
+        var found = Enumerable.Range(0, _groups.Count).Where(i => _groups[i].Roots.Any(r => Under(p, r))).ToList();
+        return found.Count == 0 ? null : found.Contains(_lastGroup) ? _lastGroup : found[0];
+    }
+
+    /// <summary>Путь — корень, папка окна или внутри одной из строк: туда можно перейти.</summary>
+    public bool Allows(string path)
+    {
+        if (_roots is null)
+        {
+            return true;
+        }
+
+        var p = Normalize(path);
+        return p.Length == 0 || GroupIndex(p) is not null || _roots.Any(r => Under(p, r));
+    }
+
+    /// <summary>Есть ли внутри папки папки — для стрелки в дереве. Папка окна у фильтра — да; не прочесть — null.</summary>
+    public bool? HasSubdirs(string path)
+    {
+        var p = Normalize(path);
+
+        if (p.Length == 0 || GroupIndex(p) is not null)
+        {
+            return true;
+        }
+
+        try
+        {
+            return Directory.EnumerateDirectories(p, "*", new EnumerationOptions { IgnoreInaccessible = true, AttributesToSkip = 0 }).Any();
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Настоящие строки под путём: корень — все, папка окна — его строки, иначе — сам путь.</summary>
+    private IReadOnlyList<string> RealRoots(string p) =>
+        p.Length == 0 && _roots is not null ? _roots
+        : GroupIndex(p) is { } group ? _groups![group].Roots
+        : [p];
+
     public bool IsRemote => false;
 
-    public string HomePath => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    public string HomePath => _roots is null ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) : string.Empty;
 
     public Task PrepareAsync() => Task.CompletedTask;
 
@@ -137,9 +248,14 @@ public sealed class LocalSource : IFileSource
     {
         var p = (path ?? string.Empty).Trim().Trim('"');
 
-        if (p.Length == 0 || p.Equals(ComputerTitle, StringComparison.OrdinalIgnoreCase))
+        if (p.Length == 0 || p.Equals(_rootTitle, StringComparison.OrdinalIgnoreCase))
         {
             return string.Empty;
+        }
+
+        if (GroupIndex(p) is not null)
+        {
+            return p;
         }
 
         if (p == "~" || p.StartsWith("~\\", StringComparison.Ordinal) || p.StartsWith("~/", StringComparison.Ordinal))
@@ -176,6 +292,17 @@ public sealed class LocalSource : IFileSource
             return null;
         }
 
+        if (GroupIndex(p) is not null)
+        {
+            return string.Empty;
+        }
+
+        // строка окна — сразу под корнем фильтра, а у нескольких окон — под папкой своего окна
+        if (_roots is not null && _roots.Any(r => string.Equals(p, r, StringComparison.OrdinalIgnoreCase)))
+        {
+            return GroupOf(p) is { } group ? GroupPath(group) : string.Empty;
+        }
+
         return string.Equals(p, Path.GetPathRoot(p), StringComparison.OrdinalIgnoreCase)
             ? string.Empty
             : Path.GetDirectoryName(p) ?? string.Empty;
@@ -186,10 +313,36 @@ public sealed class LocalSource : IFileSource
     public IReadOnlyList<(string Title, string Path)> Crumbs(string path)
     {
         var p = Normalize(path);
-        var crumbs = new List<(string, string)> { (ComputerTitle, string.Empty) };
+        var crumbs = new List<(string, string)> { (_rootTitle, string.Empty) };
 
         if (p.Length == 0)
         {
+            return crumbs;
+        }
+
+        if (GroupOf(p) is { } group)
+        {
+            crumbs.Add((_groups![group].Title, GroupPath(group)));
+
+            if (GroupIndex(p) is not null)
+            {
+                return crumbs;
+            }
+        }
+
+        // у фильтра адрес — от строки окна: что выше неё, не показывается
+        if (_roots?.FirstOrDefault(r => Under(p, r)) is { } top)
+        {
+            crumbs.Add((Path.GetFileName(top), top));
+
+            var inside = top;
+
+            foreach (var part in p[top.Length..].Split('\\', StringSplitOptions.RemoveEmptyEntries))
+            {
+                inside = Path.Combine(inside, part);
+                crumbs.Add((part, inside));
+            }
+
             return crumbs;
         }
 
@@ -210,7 +363,7 @@ public sealed class LocalSource : IFileSource
     public string Display(string path)
     {
         var p = Normalize(path);
-        return p.Length == 0 ? ComputerTitle : p;
+        return p.Length == 0 ? _rootTitle : GroupIndex(p) is { } group ? $"{_rootTitle} › {_groups![group].Title}" : p;
     }
 
     public bool IsFresh(string path) => false;
@@ -226,7 +379,19 @@ public sealed class LocalSource : IFileSource
     public async Task<IReadOnlyList<FsEntry>> ListAsync(string path, bool refresh)
     {
         var p = Normalize(path);
-        var list = await Task.Run(() => p.Length == 0 ? Computer() : Read(p));
+        var group = GroupIndex(p);
+
+        if (group is not null)
+        {
+            _lastGroup = group.Value;
+        }
+
+        var list = await Task.Run(() =>
+            group is { } g ? Rows(_groups![g].Roots)
+            : p.Length > 0 ? Read(p)
+            : _roots is null ? Computer()
+            : _groups is not null ? Groups(_groups)
+            : Rows(_roots));
 
         lock (_sync)
         {
@@ -268,6 +433,36 @@ public sealed class LocalSource : IFileSource
                 info.LastWriteTime,
                 IsLink: link is not null,
                 LinkTarget: link ?? string.Empty,
+                IsHidden: (info.Attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0));
+        }
+
+        return items;
+    }
+
+    /// <summary>Корень фильтра у нескольких окон: папка на каждое окно.</summary>
+    private static IReadOnlyList<FsEntry> Groups(IReadOnlyList<(string Title, IReadOnlyList<string> Roots)> groups) =>
+        groups.Select((g, i) => new FsEntry(g.Title, GroupPath(i), true, 0, default, Type: "Окно копирования")).ToList();
+
+    /// <summary>Корень фильтра: строки окна копирования, какие есть на диске.</summary>
+    private static IReadOnlyList<FsEntry> Rows(IReadOnlyList<string> roots)
+    {
+        var items = new List<FsEntry>();
+
+        foreach (var root in roots)
+        {
+            FileSystemInfo info = Directory.Exists(root) ? new DirectoryInfo(root) : new FileInfo(root);
+
+            if (!info.Exists)
+            {
+                continue;
+            }
+
+            items.Add(new FsEntry(
+                info.Name,
+                info.FullName,
+                info is DirectoryInfo,
+                info is FileInfo file ? SafeLength(file) : 0,
+                info.LastWriteTime,
                 IsHidden: (info.Attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0));
         }
 
@@ -457,21 +652,25 @@ public sealed class LocalSource : IFileSource
                 AttributesToSkip = 0,
             };
 
-            foreach (var dir in new DirectoryInfo(root).EnumerateDirectories("*", options))
+            // у фильтра из корня и из папки окна ищется по его строкам
+            foreach (var start in RealRoots(Normalize(root)).Where(Directory.Exists))
             {
-                ct.ThrowIfCancellationRequested();
-
-                if (!NameMask.Matches(dir.Name, mask))
+                foreach (var dir in new DirectoryInfo(start).EnumerateDirectories("*", options))
                 {
-                    continue;
-                }
+                    ct.ThrowIfCancellationRequested();
 
-                found.Add(new FsEntry(dir.Name, dir.FullName, true, 0, dir.LastWriteTime,
-                    IsHidden: (dir.Attributes & FileAttributes.Hidden) != 0));
+                    if (!NameMask.Matches(dir.Name, mask))
+                    {
+                        continue;
+                    }
 
-                if (found.Count >= limit)
-                {
-                    break;
+                    found.Add(new FsEntry(dir.Name, dir.FullName, true, 0, dir.LastWriteTime,
+                        IsHidden: (dir.Attributes & FileAttributes.Hidden) != 0));
+
+                    if (found.Count >= limit)
+                    {
+                        return found;
+                    }
                 }
             }
 
@@ -484,19 +683,36 @@ public sealed class LocalSource : IFileSource
         var files = 0;
         var dirs = 0;
         var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = 0 };
+        var p = Normalize(path);
 
-        foreach (var info in new DirectoryInfo(path).EnumerateFileSystemInfos("*", options))
+        // папка окна у фильтра — это его строки
+        foreach (var start in RealRoots(p))
         {
-            ct.ThrowIfCancellationRequested();
-
-            if (info is FileInfo file)
+            if (!ReferenceEquals(start, p) && File.Exists(start))
             {
                 files++;
-                bytes += SafeLength(file);
+                bytes += SafeLength(new FileInfo(start));
+                continue;
             }
-            else
+
+            if (!ReferenceEquals(start, p))
             {
                 dirs++;
+            }
+
+            foreach (var info in new DirectoryInfo(start).EnumerateFileSystemInfos("*", options))
+            {
+                ct.ThrowIfCancellationRequested();
+
+                if (info is FileInfo file)
+                {
+                    files++;
+                    bytes += SafeLength(file);
+                }
+                else
+                {
+                    dirs++;
+                }
             }
         }
 
