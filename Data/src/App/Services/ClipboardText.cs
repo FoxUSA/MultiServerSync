@@ -80,8 +80,9 @@ public static class ClipboardText
     /// не подвешивает его. Файл удаляется, как только в буфере окажется что-то другое.
     /// </summary>
     /// <param name="name">Чей лог — для имени файла: вкладка или сервер.</param>
+    /// <param name="auto">Автокопия; кнопкой — CopyPass не взводится, как и у текста.</param>
     /// <returns>Имя файла, если он в буфере; null — не вышло, причина в журнале.</returns>
-    public static string? CopyTerminalOutputFile(string text, string name, Workspace tab)
+    public static string? CopyTerminalOutputFile(string text, string name, Workspace tab, bool auto = true)
     {
         string path;
 
@@ -131,9 +132,17 @@ public static class ClipboardText
 
         _logFile = path;
         _terminalOutput = null;
-        _terminalOutputAuto = true;
+        _terminalOutputAuto = auto;
 
-        CopyPass.Arm(tab);
+        if (auto)
+        {
+            CopyPass.Arm(tab);
+        }
+        else
+        {
+            CopyPass.Disarm();
+        }
+
         return Path.GetFileName(path);
     }
 

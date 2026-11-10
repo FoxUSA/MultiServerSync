@@ -940,7 +940,7 @@ public static class DownloadService
             try
             {
                 extra = SshService.NewSftp(server, settings);
-                extra.Connect();
+                SshService.Connect(extra);
                 own.Add(extra);
                 pool.Add(extra);
             }

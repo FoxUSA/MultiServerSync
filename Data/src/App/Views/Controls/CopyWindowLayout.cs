@@ -121,7 +121,18 @@ public static class CopyWindowLayout
     /// в общем словаре стилей, без своего кода, поэтому страница ловит их на таблице по именам.
     /// </summary>
     /// <param name="number">Номер на разделителе: фокус на окне и галочки всех его строк, как галочка в шапке.</param>
-    public static void HookGroups(DataGrid grid, WindowRows rows, Action<CopyWindow> number, Action<CopyWindow> focus, Action<CopyWindow> add, Action<CopyWindow> remove, Action<FrameworkElement, CopyWindow> rename)
+    /// <param name="copyAddress">Значок «Копировать путь» у адреса окна.</param>
+    /// <param name="editAddress">Значок «Вписать другой путь» у адреса окна.</param>
+    public static void HookGroups(
+        DataGrid grid,
+        WindowRows rows,
+        Action<CopyWindow> number,
+        Action<CopyWindow> focus,
+        Action<CopyWindow> add,
+        Action<CopyWindow> remove,
+        Action<FrameworkElement, CopyWindow> rename,
+        Action<CopyWindow> copyAddress,
+        Action<CopyWindow> editAddress)
     {
         grid.AddHandler(ButtonBase.ClickEvent, new RoutedEventHandler((_, e) =>
         {
@@ -133,6 +144,8 @@ public static class CopyWindowLayout
             Action<CopyWindow>? act = name switch
             {
                 "GroupNumber" => number,
+                "GroupCopy" => copyAddress,
+                "GroupEdit" => editAddress,
                 "GroupAdd" => add,
                 "GroupRemove" => remove,
                 "GroupCollapse" => w => Collapse(grid, w),

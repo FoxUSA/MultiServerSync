@@ -490,7 +490,7 @@ public sealed class RemoteSession : IDisposable
 
         try
         {
-            ssh.Connect();
+            SshService.Connect(ssh);
         }
         catch
         {
@@ -532,7 +532,7 @@ public sealed class RemoteSession : IDisposable
 
         try
         {
-            sftp.Connect();
+            SshService.Connect(sftp);
         }
         catch
         {

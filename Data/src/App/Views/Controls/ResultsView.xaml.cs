@@ -694,18 +694,19 @@ public partial class ResultsView : UserControl
         var text = Build(null);
         string? cut = null;
 
-        // автокопия длиннее LogTrim.AllServers строк подвешивала программу, куда её вставляли (и CopyPass):
-        // с «*.txt» — файлом с полным логом, без неё — обрезкой, всем серверам поровну. Кнопка — целиком
-        if (finished is not null && LogTrim.Count(text) > LogTrim.AllServers)
+        // лог длиннее LogTrim.AllServers строк подвешивал программу, куда его вставляли (и CopyPass):
+        // с «*.txt» — файлом с полным логом, и автокопией, и кнопкой. Без неё автокопия — обрезкой,
+        // всем серверам поровну, кнопка — целиком
+        if (LogTrim.Count(text) > LogTrim.AllServers && (finished is not null || tab.LogAsFile))
         {
             if (tab.LogAsFile)
             {
                 var lines = LogTrim.Count(text);
                 var name = batch.Results.FirstOrDefault()?.Scope is { Length: > 0 } scope ? scope : "все серверы";
 
-                if (ClipboardText.CopyTerminalOutputFile(text, name, tab) is { } file)
+                if (ClipboardText.CopyTerminalOutputFile(text, name, tab, auto: finished is not null) is { } file)
                 {
-                    AppLog.Hint($"{finished} — лог длинный ({lines:N0} строк), в буфере файлом: {file}.", level);
+                    AppLog.Hint((finished ?? "Вывод скопирован") + $" — лог длинный ({lines:N0} строк), в буфере файлом: {file}.", level);
                 }
 
                 return;
@@ -805,14 +806,15 @@ public partial class ResultsView : UserControl
         var full = Build(null);
         string? cut = null;
 
-        // автокопия длиннее LogTrim.PerServer строк: с «*.txt» — файлом с полным логом, без неё — обрезкой
-        if (auto && LogTrim.Count(full) > LogTrim.PerServer)
+        // длиннее LogTrim.PerServer строк: с «*.txt» — файлом с полным логом, и автокопией, и кнопкой;
+        // без неё автокопия — обрезкой, кнопка — целиком
+        if (LogTrim.Count(full) > LogTrim.PerServer && (auto || tab is { LogAsFile: true }))
         {
             if (tab is { LogAsFile: true })
             {
-                if (ClipboardText.CopyTerminalOutputFile(full + Environment.NewLine, result.Server.PaneLabel, tab) is { } file)
+                if (ClipboardText.CopyTerminalOutputFile(full + Environment.NewLine, result.Server.PaneLabel, tab, auto) is { } file)
                 {
-                    AppLog.Hint($"{finished} — лог длинный ({LogTrim.Count(full):N0} строк), в буфере файлом: {file}.", level);
+                    AppLog.Hint((finished ?? "Вывод скопирован") + $" — лог длинный ({LogTrim.Count(full):N0} строк), в буфере файлом: {file}.", level);
                 }
 
                 return;

@@ -53,7 +53,7 @@ public partial class FilesPage : Page
             }
         };
 
-        Controls.CopyWindowLayout.HookGroups(RowsGrid, _rows, ToggleWindowItems, FocusOn, AddWindowAfter, RemoveWindow, Rename);
+        Controls.CopyWindowLayout.HookGroups(RowsGrid, _rows, ToggleWindowItems, FocusOn, AddWindowAfter, RemoveWindow, Rename, CopyAddress, EditAddress);
         Controls.CopyWindowLayout.WatchFailures(this, () => Workspace);
         Controls.CopyWindowLayout.RestoreBand(BandRow, BandLeft);
 
@@ -299,9 +299,28 @@ public partial class FilesPage : Page
     }
 
     /// <summary>Значок в поле «Путь на сервере»: путь окна — в буфер обмена.</summary>
-    private void OnCopyRemotePath(object sender, RoutedEventArgs e)
+    private void OnCopyRemotePath(object sender, RoutedEventArgs e) => CopyAddress(WindowOf(sender));
+
+    /// <summary>Значок у адреса на строке окна: вписать другой путь на сервере.</summary>
+    private void EditAddress(CopyWindow window)
     {
-        var path = WindowOf(sender)?.RemotePath?.Trim();
+        if (Workspace is not { } workspace || workspace.BlockedByLock())
+        {
+            return;
+        }
+
+        var dialog = new InputDialog("Путь на сервере", "Куда копировать на сервере:", window.RemotePath) { Owner = Window.GetWindow(this) };
+
+        if (dialog.ShowDialog() == true && dialog.Value.Length > 0)
+        {
+            window.RemotePath = dialog.Value;
+        }
+    }
+
+    /// <summary>Путь окна на сервере — в буфер обмена: из поля и со строки окна.</summary>
+    private static void CopyAddress(CopyWindow? window)
+    {
+        var path = window?.RemotePath?.Trim();
 
         if (string.IsNullOrEmpty(path))
         {

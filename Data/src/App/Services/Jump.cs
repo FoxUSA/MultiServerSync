@@ -63,7 +63,7 @@ internal static class Jump
         try
         {
             client = SshService.NewSsh(jump, settings);
-            client.Connect();
+            SshService.Connect(client);
 
             var forward = new ForwardedPortLocal("127.0.0.1", 0, server.Host.Trim(), (uint)(server.Port <= 0 ? 22 : server.Port));
             client.AddForwardedPort(forward);

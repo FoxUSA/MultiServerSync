@@ -1294,19 +1294,38 @@ public sealed class Workspace : ObservableObject
     public bool OverwriteFiles
     {
         get => _overwrite;
-        set { if (Set(ref _overwrite, value)) { RaiseMode(); Save(); } }
+        set { if (Set(ref _overwrite, value)) { SpreadOptions(o => o with { Overwrite = value }); RaiseMode(); Save(); } }
     }
 
     public bool PreserveTimestamps
     {
         get => _preserveTimestamps;
-        set { if (Set(ref _preserveTimestamps, value)) { Save(); } }
+        set { if (Set(ref _preserveTimestamps, value)) { SpreadOptions(o => o with { PreserveTimestamps = value }); Save(); } }
     }
 
     public bool VerifyChecksums
     {
         get => _verifyChecksums;
-        set { if (Set(ref _verifyChecksums, value)) { Save(); } }
+        set { if (Set(ref _verifyChecksums, value)) { SpreadOptions(o => o with { VerifyChecksums = value }); Save(); } }
+    }
+
+    /// <summary>
+    /// В шапке таблицы отмечено всё, во всех окнах — выбор в параметрах копирования ложится во все окна вкладки,
+    /// а не только в окно в фокусе. Маски у окон свои и сюда не входят.
+    /// </summary>
+    private void SpreadOptions(Func<CopyOptions, CopyOptions> change)
+    {
+        var all = IsDownloadTab ? AllWindowsDownloadsSelected : AllWindowsItemsSelected;
+
+        if (CopyWindows.Count < 2 || all != true)
+        {
+            return;
+        }
+
+        foreach (var window in CopyWindows.Where(w => !ReferenceEquals(w, _focusedWindow)))
+        {
+            window.Options = change(OptionsOf(window));
+        }
     }
 
     /// <summary>
@@ -1375,14 +1394,14 @@ public sealed class Workspace : ObservableObject
     public bool MatchByDate
     {
         get => _matchByDate;
-        set { if (Set(ref _matchByDate, value)) { RaiseMode(); Save(); } }
+        set { if (Set(ref _matchByDate, value)) { SpreadOptions(o => o with { MatchByDate = value }); RaiseMode(); Save(); } }
     }
 
     /// <summary>Заменять файлы с другой контрольной суммой: решение по содержимому, а не по дате.</summary>
     public bool MatchByHash
     {
         get => _matchByHash;
-        set { if (Set(ref _matchByHash, value)) { RaiseMode(); Save(); } }
+        set { if (Set(ref _matchByHash, value)) { SpreadOptions(o => o with { MatchByHash = value }); RaiseMode(); Save(); } }
     }
 
     // ── что отправлять: один выбор из четырёх ──────────────────────────────────
@@ -1424,6 +1443,7 @@ public sealed class Workspace : ObservableObject
         _overwrite = overwrite;
         _matchByDate = byDate;
         _matchByHash = byHash;
+        SpreadOptions(o => o with { Overwrite = overwrite, MatchByDate = byDate, MatchByHash = byHash });
 
         RaiseMany(nameof(OverwriteFiles), nameof(MatchByDate), nameof(MatchByHash));
         RaiseMode();
@@ -2930,18 +2950,21 @@ public sealed class Workspace : ObservableObject
     /// Строки, о которых известно, что они на всех серверах: залиты, какими были до захода.
     /// Копирование отвечает за окно целиком, сравнение — за каждую строку.
     /// </summary>
+    /// <param name="targets">Серверы захода: строка запоминает те, куда шло её окно, — на них её файлы проверены.</param>
     private void RememberSent(
         IReadOnlyList<UploadJob> jobs,
         Dictionary<UploadJob, Lazy<List<string?>>> dates,
-        Func<UploadJob, TransferItem, bool> sent)
+        Func<UploadJob, TransferItem, bool> sent,
+        IReadOnlyList<ServerEntry> targets)
     {
         foreach (var job in jobs.Where(j => j.Window is not null))
         {
             for (var i = 0; i < job.Payload.Count; i++)
             {
-                if (sent(job, job.Payload[i]))
+                if (sent(job, job.Payload[i]) && dates[job].Value[i] is { } date)
                 {
-                    job.Payload[i].Memory.Date = dates[job].Value[i] ?? job.Payload[i].Memory.Date;
+                    job.Payload[i].Memory.Date = date;
+                    job.Payload[i].Memory.Servers = targets.Where(s => Goes(job, s)).Select(s => s.Id).ToList();
                 }
             }
         }
@@ -2951,6 +2974,43 @@ public sealed class Workspace : ObservableObject
             Save();
             _ = FollowUnsentAsync();
         }
+    }
+
+    /// <summary>
+    /// Для свитча «Отметить незалитые»: файл строки не новее её даты при прошлой удачной заливке на этот сервер —
+    /// там он уже проверен. Строкам без такой памяти (сервер новый, память старой версии) не доверяем.
+    /// </summary>
+    private static Func<string, bool>? SettledOn(UploadJob job, ServerEntry server)
+    {
+        var roots = new List<(string Root, DateTime Date)>();
+
+        foreach (var item in job.Payload)
+        {
+            if (item.Memory.Servers?.Contains(server.Id) == true
+                && DateTime.TryParse(item.Memory.Date, null, System.Globalization.DateTimeStyles.RoundtripKind, out var date))
+            {
+                roots.Add((item.FullPath.TrimEnd(Path.DirectorySeparatorChar), date.ToUniversalTime()));
+            }
+        }
+
+        if (roots.Count == 0)
+        {
+            return null;
+        }
+
+        return path =>
+        {
+            foreach (var (root, date) in roots)
+            {
+                if (path.Equals(root, StringComparison.OrdinalIgnoreCase)
+                    || path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                {
+                    return File.GetLastWriteTimeUtc(path) <= date;
+                }
+            }
+
+            return false;
+        };
     }
 
     /// <summary>Дата строк скачивания до захода — сменится по ходу, строка останется нескачанной.</summary>
@@ -3298,6 +3358,9 @@ public sealed class Workspace : ObservableObject
         var matched = new System.Collections.Concurrent.ConcurrentDictionary<TransferItem, int>();
         var differs = new System.Collections.Concurrent.ConcurrentDictionary<TransferItem, bool>();
 
+        // свитч включён — сверяется только незалитое внутри строк, как и при копировании; всё — со свитчем выключенным
+        var trustSent = UnsentHeld;
+
         await CompareCoreAsync(
             rows.Select(r => r.Server).ToList(),
             async (server, result, ct) =>
@@ -3316,7 +3379,7 @@ public sealed class Workspace : ObservableObject
                     settings,
                     job.Payload,
                     job.RemotePath,
-                    job.Options,
+                    trustSent ? job.Options with { Settled = SettledOn(job, server) } : job.Options,
                     _localHashes,
                     line => result.Append(line),
                     ct,
@@ -3353,7 +3416,7 @@ public sealed class Workspace : ObservableObject
             item.Memory.Date = null;
         }
 
-        RememberSent(jobs, dates, (job, item) => matched.GetValueOrDefault(item) == targets.Count(s => Goes(job, s)));
+        RememberSent(jobs, dates, (job, item) => matched.GetValueOrDefault(item) == targets.Count(s => Goes(job, s)), targets);
         await RemarkUnsentAsync();
 
         if (notify)
@@ -3489,6 +3552,27 @@ public sealed class Workspace : ObservableObject
     /// <summary>Сколько отличий, не влияющих на итог, показать в выводе: дата может разойтись у всех файлов сразу.</summary>
     private const int IgnoredShown = 200;
 
+    /// <summary>Лежащее на сервере сверх сравниваемого — только список, на итог не влияет. Папка — одной строкой.</summary>
+    private static void AppendExtras(OperationResult result, IReadOnlyList<CompareExtra> extras)
+    {
+        if (extras.Count == 0)
+        {
+            return;
+        }
+
+        result.Append($"── ещё на сервере в этих папках, не сравнивалось ({extras.Count}) ──");
+
+        foreach (var extra in extras.Take(IgnoredShown))
+        {
+            result.Append(extra.IsDirectory ? $"· {extra.Path}/  (файлов внутри: {extra.Files})" : $"· {extra.Path}");
+        }
+
+        if (extras.Count > IgnoredShown)
+        {
+            result.Append($"…и ещё {extras.Count - IgnoredShown}");
+        }
+    }
+
     /// <summary>
     /// Итог сравнения в строку сервера. Статус — сразу ответ «сошлось или нет»; в выводе — счёт
     /// и списки: чего нет, что отличается и чем. «Не сошлось» — не ошибка, а ответ: оранжевым.
@@ -3517,6 +3601,13 @@ public sealed class Workspace : ObservableObject
         if (stats.Ignored.Count > 0)
         {
             result.Append($"на итог не влияют: {stats.Ignored.Count}");
+        }
+
+        var extras = stats.Extras ?? [];
+
+        if (extras.Count > 0)
+        {
+            result.Append($"ещё на сервере в этих папках, не сравнивалось: {extras.Count}");
         }
 
         result.Append("время: " + stats.Clock);
@@ -3565,6 +3656,8 @@ public sealed class Workspace : ObservableObject
                 result.Append($"…и ещё {stats.Ignored.Count - IgnoredShown}");
             }
         }
+
+        AppendExtras(result, extras);
 
         // среди совпавших есть файлы с отличиями, которые режим не сверяет: «одинаковыми» их не назвать
         var hasIgnored = stats.Ignored.Count > 0;
@@ -3673,6 +3766,9 @@ public sealed class Workspace : ObservableObject
         var dates = RowDates(jobs);
         var delivered = new System.Collections.Concurrent.ConcurrentDictionary<UploadJob, int>();
 
+        // свитч включён — проверенное прошлой заливкой сервер не перечитывает; всё сверить — свитч выключить
+        var trustSent = UnsentHeld;
+
         await CopyBatch.RunAsync(
             Operation("Копирование"),
             rows.Select(r => r.Server).ToList(),
@@ -3707,7 +3803,7 @@ public sealed class Workspace : ObservableObject
                     settings,
                     payload,
                     remotePath,
-                    options,
+                    trustSent ? options with { Settled = SettledOn(job, server) } : options,
                     _localHashes,
                     line => result.Append(line),
                     ct,
@@ -3841,7 +3937,7 @@ public sealed class Workspace : ObservableObject
             concurrent: concurrent,
             prepare: WindowRows(rows, j => j.Window, prepare, chained: true));
 
-        RememberSent(jobs, dates, (job, _) => delivered.GetValueOrDefault(job) == targets.Count(s => Goes(job, s)));
+        RememberSent(jobs, dates, (job, _) => delivered.GetValueOrDefault(job) == targets.Count(s => Goes(job, s)), targets);
 
         // запуски «Проводника» идут рядом — итог на ярлыке, когда закончился последний
         if (CopyBatch.IsRunning)

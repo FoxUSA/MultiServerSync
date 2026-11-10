@@ -28,7 +28,13 @@ public sealed class RowMemory
     /// <summary>Какой галочку поставила кнопка: разошлась с ней по вине человека — рамка кнопки гаснет.</summary>
     public bool Marked { get; set; }
 
-    public RowMemory Copy() => new() { Date = Date, Before = Before, Marked = Marked };
+    /// <summary>
+    /// Серверы, на которые строка дошла при том заходе, что записал <see cref="Date"/>. Файлы не новее этой даты
+    /// там уже проверены, и при включённом свитче их суммы не спрашиваются. null — не известно (старая память).
+    /// </summary>
+    public List<string>? Servers { get; set; }
+
+    public RowMemory Copy() => new() { Date = Date, Before = Before, Marked = Marked, Servers = Servers?.ToList() };
 }
 
 /// <summary>Локальный файл или папка, выбранные для отправки на серверы.</summary>

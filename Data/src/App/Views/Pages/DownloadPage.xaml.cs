@@ -24,7 +24,7 @@ public partial class DownloadPage : Page
     {
         InitializeComponent();
 
-        Controls.CopyWindowLayout.HookGroups(RowsGrid, _rows, ToggleWindowItems, FocusOn, AddWindowAfter, RemoveWindow, Rename);
+        Controls.CopyWindowLayout.HookGroups(RowsGrid, _rows, ToggleWindowItems, FocusOn, AddWindowAfter, RemoveWindow, Rename, CopyFolder, EditFolder);
         Controls.CopyWindowLayout.WatchFailures(this, () => Workspace);
         Controls.CopyWindowLayout.RestoreBand(BandRow, BandLeft);
 
@@ -179,9 +179,28 @@ public partial class DownloadPage : Page
     }
 
     /// <summary>Значок в поле «Куда скачать»: папка окна — в буфер обмена.</summary>
-    private void OnCopyLocalFolder(object sender, RoutedEventArgs e)
+    private void OnCopyLocalFolder(object sender, RoutedEventArgs e) => CopyFolder(WindowOf(sender));
+
+    /// <summary>Значок у адреса на строке окна: вписать другую папку для скачивания.</summary>
+    private void EditFolder(CopyWindow window)
     {
-        var path = WindowOf(sender)?.LocalFolder?.Trim();
+        if (Workspace is not { } workspace || workspace.BlockedByLock())
+        {
+            return;
+        }
+
+        var dialog = new InputDialog("Куда скачать", "Папка на этом компьютере:", window.LocalFolder) { Owner = Window.GetWindow(this) };
+
+        if (dialog.ShowDialog() == true && dialog.Value.Length > 0)
+        {
+            window.LocalFolder = dialog.Value;
+        }
+    }
+
+    /// <summary>Папка окна — в буфер обмена: из поля и со строки окна.</summary>
+    private static void CopyFolder(CopyWindow? window)
+    {
+        var path = window?.LocalFolder?.Trim();
 
         if (string.IsNullOrEmpty(path))
         {

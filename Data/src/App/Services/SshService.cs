@@ -59,6 +59,14 @@ public sealed record UploadOptions(
     /// Кроме сверки только по размеру: правку того же размера она не заметит.
     /// </summary>
     public bool CompareConfirms => !Overwrite || Matching;
+
+    /// <summary>
+    /// Файл уже лежит на этом сервере проверенным: не менялся после прошлой удачной заливки строки.
+    /// Его сумма не спрашивается — сервер не перечитывает тысячи файлов ради одного изменённого.
+    /// Пропавшее и другой размер опись ловит и так. Только при включённом свитче «Отметить незалитые».
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Func<string, bool>? Settled { get; init; }
 }
 
 public sealed record UploadedFile(string LocalPath, string RemotePath, long Size);
@@ -109,6 +117,12 @@ public sealed record UploadStats(
 public sealed record CompareDiff(string Path, string Reason);
 
 /// <summary>
+/// Лежит на сервере в отмеченной папке, но не отмечено и не сравнивалось — только для сведения,
+/// есть ли такое здесь, неважно. У папки — сколько файлов внутри: содержимое отдельно не перечисляется.
+/// </summary>
+public sealed record CompareExtra(string Path, bool IsDirectory, int Files);
+
+/// <summary>
 /// Итог сравнения с одного сервера — что было бы при копировании или скачивании, но без них:
 /// сколько файлов совпало, каких нет в назначении, какие отличаются и каких папок нет.
 /// <paramref name="Ignored"/> — отличия, которые выбранный режим не сверяет: файлы уже посчитаны
@@ -120,7 +134,8 @@ public sealed record CompareStats(
     IReadOnlyList<CompareDiff> Different,
     IReadOnlyList<CompareDiff> Ignored,
     IReadOnlyList<string> MissingDirs,
-    StageClock Clock)
+    StageClock Clock,
+    IReadOnlyList<CompareExtra>? Extras = null)
 {
     public int Total => Same + MissingFiles.Count + Different.Count;
 
@@ -417,7 +432,7 @@ public static class SshService
             connected =>
             {
                 using var client = NewSsh(server, settings);
-                client.Connect();
+                Connect(client);
                 connected();
 
                 // Скрипт идёт через stdin, но сервер забирает ровно его байты во временный файл
@@ -951,9 +966,78 @@ public static class SshService
                     different.OrderBy(d => d.Path, StringComparer.Ordinal).ToList(),
                     ignored.OrderBy(d => d.Path, StringComparer.Ordinal).ToList(),
                     absentDirs,
-                    clock);
+                    clock,
+                    inventory is null ? null : ServerExtras(inventory, plan, items, root));
             },
             ct);
+    }
+
+    /// <summary>
+    /// Что ещё лежит на сервере в отмеченных папках, кроме сравниваемого: из той же описи, без запросов.
+    /// Лишняя папка идёт одной строкой со счётом файлов внутри.
+    /// </summary>
+    private static List<CompareExtra> ServerExtras(Inventory inventory, Plan plan, IReadOnlyList<TransferItem> items, string root)
+    {
+        var compared = new HashSet<string>(plan.Files.Select(f => f.RemotePath).Concat(plan.Dirs.Select(d => d.RemotePath)), StringComparer.Ordinal);
+        var bases = items
+            .Where(i => i.IsDirectory)
+            .Select(i => CombineRemote(root, i.Name))
+            .Where(plan.Roots.Contains)
+            .ToList();
+
+        var extras = new List<CompareExtra>();
+        var dirs = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        // родитель идёт раньше детей: лишняя папка попадает в список раньше своего содержимого
+        foreach (var (path, stat) in inventory.Entries.OrderBy(e => e.Key, StringComparer.Ordinal))
+        {
+            if (compared.Contains(path))
+            {
+                continue;
+            }
+
+            var top = bases.Find(b => path.StartsWith(b + "/", StringComparison.Ordinal));
+
+            if (top is null)
+            {
+                continue;
+            }
+
+            var inside = InsideExtra(path, top, dirs);
+
+            if (inside is not null)
+            {
+                if (!stat.IsDirectory)
+                {
+                    dirs[inside]++;
+                }
+
+                continue;
+            }
+
+            if (stat.IsDirectory)
+            {
+                dirs[path] = 0;
+            }
+
+            extras.Add(new CompareExtra(path, stat.IsDirectory, 0));
+        }
+
+        return extras.Select(e => e.IsDirectory ? e with { Files = dirs[e.Path] } : e).ToList();
+    }
+
+    /// <summary>Лишняя папка, внутри которой лежит путь, — или null.</summary>
+    private static string? InsideExtra(string path, string top, Dictionary<string, int> dirs)
+    {
+        for (var p = ParentRemote(path); p.Length > top.Length; p = ParentRemote(p))
+        {
+            if (dirs.ContainsKey(p))
+            {
+                return p;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>По какому правилу сравниваются файлы — первой строкой в выводе сравнения.</summary>
@@ -1028,11 +1112,49 @@ public static class SshService
     {
         try
         {
-            Parallel.Invoke(ssh.Connect, sftp.Connect);
+            Parallel.Invoke(() => Connect(ssh), () => Connect(sftp));
         }
         catch (AggregateException ae) when (ae.InnerExceptions.Count > 0)
         {
             ThrowFirst(ae);
+        }
+    }
+
+    /// <summary>Сколько входов на один сервер идут одновременно: у sshd до 10 недоделанных входов, дальше он сбрасывает новые наугад.</summary>
+    private const int ConnectsPerHost = 4;
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> HostGates = new();
+
+    /// <summary>
+    /// Вход на сервер — все подключения программы идут через него. Восемь окон сравнения разом открывали
+    /// по два-три подключения каждое, и sshd (MaxStartups) закрывал лишние без приветствия — падали случайные окна.
+    /// Поэтому входы на один сервер идут не больше <see cref="ConnectsPerHost"/> сразу, остальные ждут;
+    /// сброшенный без приветствия вход повторяется с паузой.
+    /// </summary>
+    internal static void Connect(BaseClient client)
+    {
+        var info = client.ConnectionInfo;
+        var gate = HostGates.GetOrAdd($"{info.Host}:{info.Port}", _ => new SemaphoreSlim(ConnectsPerHost));
+
+        for (var attempt = 1; ; attempt++)
+        {
+            gate.Wait();
+
+            try
+            {
+                client.Connect();
+                return;
+            }
+            catch (SshConnectionException ex) when (attempt < 4 && ex.Message.Contains("identification string", StringComparison.OrdinalIgnoreCase))
+            {
+                // пауза вразброс: повторы окон не должны прийти на сервер снова все вместе
+            }
+            finally
+            {
+                gate.Release();
+            }
+
+            Thread.Sleep(Random.Shared.Next(300, 800) * attempt);
         }
     }
 
@@ -1338,7 +1460,7 @@ public static class SshService
             () =>
             {
                 using var sftp = NewSftp(server, settings);
-                sftp.Connect();
+                Connect(sftp);
                 EnsureDirectory(sftp, NormalizeRemote(path), new Counters(), _ => { });
                 sftp.Disconnect();
             },
@@ -1374,7 +1496,7 @@ public static class SshService
 
                 try
                 {
-                    client.Connect();
+                    Connect(client);
                     client.Disconnect();
                 }
                 catch (SshAuthenticationException)
@@ -2006,7 +2128,7 @@ public static class SshService
             {
                 // через промежуточный сервер ошибка бывает уже здесь — не повод валить всё копирование
                 client = NewSsh(server, settings);
-                client.Connect();
+                Connect(client);
                 opened.Add(client);
             }
             catch (Exception)
@@ -2220,7 +2342,7 @@ public static class SshService
             {
                 // через промежуточный сервер ошибка бывает уже здесь — не повод валить всё копирование
                 client = NewSftp(server, settings);
-                client.Connect();
+                Connect(client);
                 own.Add(client);
                 pool.Add(client);
             }
@@ -2862,6 +2984,12 @@ public static class SshService
 
         if (ctx.Options.MatchByHash)
         {
+            // размер тот же, а после прошлой заливки файл не менялся — там он уже проверен
+            if (ctx.Settled(local.FullName))
+            {
+                return null;
+            }
+
             if (ctx.RemoteHashes is null || !ctx.RemoteHashes.TryGetValue(remoteFile, out var actual))
             {
                 return "сумма с сервера не получена";
@@ -2950,10 +3078,20 @@ public static class SshService
         Action<UploadStep>? step)
     {
         var candidates = files.Where(ctx.NeedsHash).ToList();
+        var settled = ctx.Options.Settled is null ? 0 : files.Count(f => ctx.Settled(f.LocalPath) && ctx.SameSize(f));
+
+        if (settled > 0)
+        {
+            report($"не менялись после прошлой заливки — суммы не нужны: {settled} файл(ов) (свитч «Отметить незалитые»)");
+        }
 
         if (candidates.Count == 0)
         {
-            report("сверять суммы не с чем: таких файлов на сервере нет или у них другой размер");
+            if (settled == 0)
+            {
+                report("сверять суммы не с чем: таких файлов на сервере нет или у них другой размер");
+            }
+
             return new Dictionary<string, string>(StringComparer.Ordinal);
         }
 
@@ -3098,7 +3236,7 @@ public static class SshService
                     ct);
 
                 using var client = NewSsh(server, settings);
-                client.Connect();
+                Connect(client);
                 connected();
 
                 var remote = RemoteSums(client, files.Select(f => f.RemotePath).ToList(), ct, out var complaint);
@@ -3632,8 +3770,14 @@ public static class SshService
             return attrs is null ? null : new RemoteStat(attrs.IsDirectory, attrs.Size, attrs.LastWriteTimeUtc, attrs);
         }
 
-        /// <summary>Сумму стоит спрашивать, только если файл есть и размер у него тот же.</summary>
-        public bool NeedsHash(FileJob job)
+        /// <summary>Файл не менялся после прошлой удачной заливки на этот сервер — см. <see cref="UploadOptions.Settled"/>.</summary>
+        public bool Settled(string localPath) => Options.Settled?.Invoke(localPath) == true;
+
+        /// <summary>Сумму стоит спрашивать, только если файл есть, размер у него тот же и он менялся после прошлой заливки.</summary>
+        public bool NeedsHash(FileJob job) => !Settled(job.LocalPath) && SameSize(job);
+
+        /// <summary>Файл есть на сервере, и размер у него тот же; без описи — неизвестно, считаем, что да.</summary>
+        public bool SameSize(FileJob job)
         {
             if (inventory is null || inventory.IsBlind(job.RemotePath))
             {
