@@ -389,6 +389,9 @@ public static class SshService
     /// </summary>
     private const string Prologue =
         "export PATH=\"$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"\n"
+        // без /dev/fd (роутеры, BusyBox) скрипт идёт из самого временного файла — он убирается сразу,
+        // открытый файл оболочка дочитает и так
+        + "case \"$0\" in /dev/fd/*) ;; *) rm -f -- \"$0\" 2>/dev/null ;; esac\n"
         // чем идёт команда на сервере: по этим номерам ей потом посылается Ctrl+C.
         // Строка служебная — из вывода она вырезается и до пользователя не доходит
         + "__mss_pgid=$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')\n"
@@ -447,14 +450,19 @@ public static class SshService
 
                 var marker = "MSS-BEGIN-" + Guid.NewGuid().ToString("N");
 
+                // Загрузчик — на обычном sh: на роутерах и в BusyBox нет ни bash, ни mktemp, ни /dev/fd.
+                // Есть bash — скрипт идёт в нём, как прежде; нет mktemp — файл в /tmp, закрытый для чужих
                 var loader =
                     "while IFS= read -r __mss_l; do [ \"$__mss_l\" = " + marker + " ] && break; done; "
-                    + "__mss_f=$(mktemp) || exit 1; "
+                    + "__mss_f=$(mktemp 2>/dev/null) || { __mss_f=\"${TMPDIR:-/tmp}/mss.$$\"; (umask 077; : > \"$__mss_f\") || exit 1; }; "
                     + "head -c " + payload.Length + " > \"$__mss_f\" || exit 1; "
-                    + "exec 3<\"$__mss_f\"; rm -f \"$__mss_f\"; exec bash /dev/fd/3";
+                    + "__mss_sh=sh; command -v bash >/dev/null 2>&1 && __mss_sh=bash; "
+                    + "exec 3<\"$__mss_f\"; "
+                    + "if [ -r /dev/fd/3 ]; then rm -f \"$__mss_f\"; exec \"$__mss_sh\" /dev/fd/3; fi; "
+                    + "exec 3<&-; exec \"$__mss_sh\" \"$__mss_f\"";
 
                 // -p '' убирает приглашение sudo, чтобы оно не попало в вывод
-                var runner = (sudo ? "sudo -S -p '' -- " : string.Empty) + "bash -c " + ShellQuote(loader);
+                var runner = (sudo ? "sudo -S -p '' -- " : string.Empty) + "sh -c " + ShellQuote(loader);
 
                 using var cmd = client.CreateCommand(runner);
 
@@ -590,6 +598,11 @@ public static class SshService
         string signal,
         bool sudo)
     {
+        if (server.IsLocalPc)
+        {
+            return LocalShell.Stop(pid, signal);
+        }
+
         // сначала всей группе — вместе с потомками команды; если группы нет, хотя бы самому процессу
         var script = $"kill -s {signal} -- -{group} 2>/dev/null || kill -s {signal} -- {pid}";
 
@@ -4087,11 +4100,15 @@ public sealed class CommandInput
     private readonly Lock _lock = new();
     private bool _closed;
 
-    internal CommandInput(Stream stream, LinePump output, LinePump errors)
+    /// <summary>Консоль Windows сама повторяет набранное в выводе (а пароль — нет): дописывать ответ не нужно.</summary>
+    private readonly bool _echoes;
+
+    internal CommandInput(Stream stream, LinePump output, LinePump errors, bool echoes = false)
     {
         _stream = stream;
         _out = output;
         _err = errors;
+        _echoes = echoes;
     }
 
     public bool IsOpen
@@ -4125,6 +4142,11 @@ public sealed class CommandInput
                 _closed = true;
                 return false;
             }
+        }
+
+        if (_echoes)
+        {
+            return true;
         }
 
         // вопрос мог прийти и в обычный вывод, и в вывод ошибок (read -p пишет туда)

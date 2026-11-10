@@ -14,9 +14,12 @@ public static class CommandBook
 
     private static AppSettings Settings => AppState.Current.Settings;
 
-    public static ObservableCollection<CommandSnippet> Snippets => Settings.CommandBook;
+    /// <summary>«Ваш ПК» на «Команде» — своё избранное: команды для этого компьютера с серверными не мешаются.</summary>
+    private static bool Pc => AppState.Current.CommandLocalPc;
 
-    public static ObservableCollection<string> Groups => Settings.CommandBookGroups;
+    public static ObservableCollection<CommandSnippet> Snippets => Pc ? Settings.LocalCommandBook : Settings.CommandBook;
+
+    public static ObservableCollection<string> Groups => Pc ? Settings.LocalCommandBookGroups : Settings.CommandBookGroups;
 
     /// <summary>Вкладок нет — появляется «Общее»; запись без вкладки уходит в первую, с незнакомой — вкладка заводится.</summary>
     public static void Normalize()
@@ -102,7 +105,7 @@ public static class CommandBook
         AppState.Current.SaveSettings();
 
         // вкладки программы, которые помнят старое название, остаются на своём месте
-        foreach (var workspace in AppState.Current.AllWorkspaces.Where(w => w.BookGroup == old))
+        foreach (var workspace in AppState.Current.AllWorkspaces.Where(w => w.BookGroup == old && w.LocalPc == Pc))
         {
             workspace.SetBookPlace(name, workspace.BookScroll, workspace.BookHistory);
         }

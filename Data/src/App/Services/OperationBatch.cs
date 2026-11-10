@@ -161,7 +161,7 @@ public sealed class OperationBatch : ObservableObject
             source.RestartLife();
         }
 
-        if (!IsRunning && Results.Count > 0 && _lifeFrom is not null)
+        if ((!IsRunning || _sessionIdle) && Results.Count > 0 && _lifeFrom is not null)
         {
             _lifeFrom = DateTime.Now;
             TerminalStore.MarkDirty();
@@ -175,9 +175,33 @@ public sealed class OperationBatch : ObservableObject
 
     /// <summary>Сколько осталось, пока новый запуск ещё дописывается ниже; null — отсчёта нет (идёт работа, пусто или «Сохранять лог»).</summary>
     private TimeSpan? LifeLeft =>
-        _sources.Count == 0 && !KeepLog && !IsRunning && Companion?.IsRunning != true && AllRows.Count > 0 && LifeFrom is { } from
+        _sources.Count == 0 && !KeepLog && (!IsRunning || _sessionIdle) && Companion?.IsRunning != true && AllRows.Count > 0 && LifeFrom is { } from
             ? AppState.Current.OutputLife - (DateTime.Now - from)
             : null;
+
+    /// <summary>
+    /// Сессия «Ваш ПК» ждёт ввода: прогон формально идёт, но ответ отработал — для срока «Хранить вывод»
+    /// это то же, что конец запуска: отсчёт идёт, а ответ, отправленный после нуля, начинает журнал заново.
+    /// </summary>
+    private volatile bool _sessionIdle;
+
+    internal void SetSessionIdle(bool idle)
+    {
+        if (_sessionIdle == idle)
+        {
+            return;
+        }
+
+        _sessionIdle = idle;
+
+        if (idle)
+        {
+            _lifeFrom = DateTime.Now;
+            TerminalStore.MarkDirty();
+        }
+
+        RaiseMany(nameof(LifeText), nameof(LifeExpired));
+    }
 
     /// <summary>
     /// Прогон, чьи строки идут в том же терминале: на «Копировании» и «Скачивании» это копирование и
@@ -699,6 +723,7 @@ public sealed class OperationBatch : ObservableObject
         // галочку не снимут. Без неё прошлые строки уходят, только если новый прогон начат позже
         // срока «Хранить лог» после окончания прошлого (пока что-то идёт, сюда не попасть).
         StartOverIfExpired();
+        _sessionIdle = false;
 
         // вставший в очередь запуск уже виден строкой «в очереди» — он занимает её, а не добавляет новую.
         // Только свою: копирование, стартовавшее рядом на тот же сервер, чужую ждущую строку не берёт
@@ -789,6 +814,48 @@ public sealed class OperationBatch : ObservableObject
 
         Results.Add(row);
         _lifeFrom = DateTime.Now;
+        TerminalStore.MarkDirty();
+        return row;
+    }
+
+    /// <summary>
+    /// Ответ в сессию «Ваш ПК» — новой строкой, как новый запуск: в выводе ответ и всё, что пришло после него.
+    /// Только из потока окна.
+    /// </summary>
+    public OperationResult AddSessionTurn(OperationResult session, IReadOnlyList<string> lines)
+    {
+        // ответ после нуля «Хранить вывод» — как новый запуск после срока: прошлые законченные строки уходят,
+        // идущие (сама сессия) и ждущие очереди остаются. «Не очищать» держит всё
+        if (_sessionIdle && !KeepLog && LifeFrom is { } last && DateTime.Now - last > AppState.Current.OutputLife)
+        {
+            var gone = Results.Where(r => !r.IsRunning && !_waiting.Contains(r)).ToList();
+
+            foreach (var old in gone)
+            {
+                Results.Remove(old);
+            }
+
+            AppLog.Debug($"Ваш ПК: срок «Хранить вывод» вышел — из журнала убрано строк: {gone.Count}.");
+        }
+
+        _sessionIdle = false;
+        RaiseMany(nameof(LifeText), nameof(LifeExpired));
+
+        var row = new OperationResult(session.Server, Scope) { Batch = this, RunId = NextRunId(), SessionOf = session };
+
+        row.Append("── ответ в сессию ──");
+
+        foreach (var line in lines)
+        {
+            row.Append("$ " + line);
+        }
+
+        row.Append("── вывод ──");
+        row.Message = string.Empty;
+        row.Status = OperationStatus.Running;
+        row.Input = session.Input;
+
+        Results.Add(row);
         TerminalStore.MarkDirty();
         return row;
     }
@@ -1177,6 +1244,7 @@ public sealed class OperationBatch : ObservableObject
         {
             _finishedAt = DateTime.Now;
             _lifeFrom = _finishedAt;
+            _sessionIdle = false;
             TerminalStore.MarkDirty();
             IsRunning = false;
         }

@@ -380,7 +380,7 @@ public sealed class OperationResult : ObservableObject
             return Task.CompletedTask;
         }
 
-        var row = Parent ?? this;
+        var row = SessionOf ?? Parent ?? this;
         return row.Batch?.StopRowAsync(row) ?? Task.CompletedTask;
     }
 
@@ -781,6 +781,29 @@ public sealed class OperationResult : ObservableObject
     }
 
     /// <summary>Показывает незаконченную строку в конце вывода; пусто — убирает.</summary>
+    /// <summary>Незаконченная строка вывода — вопрос, на котором команда ждёт ответа.</summary>
+    public string TailText
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _tail;
+            }
+        }
+    }
+
+    // ── сессия «Ваш ПК»: каждый ответ — своей строкой журнала ─────────────────
+
+    /// <summary>Строка сессии, если это строка одного ответа в неё. Стоп в такой строке останавливает сессию.</summary>
+    public OperationResult? SessionOf { get; init; }
+
+    /// <summary>У строки сессии — строка последнего ответа: вывод после него идёт туда. Null — в саму строку.</summary>
+    public OperationResult? Turn { get; set; }
+
+    /// <summary>Куда идёт вывод сессии сейчас.</summary>
+    public OperationResult OutputRow => Turn ?? this;
+
     public void SetTail(string tail)
     {
         lock (_sync)

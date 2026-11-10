@@ -119,6 +119,19 @@ public sealed class AppSettings
 
     /// <summary>Вкладки избранного по порядку: пустые тоже живут, пока их не удалят.</summary>
     public ObservableCollection<string> CommandBookGroups { get; set; } = new();
+
+    /// <summary>«Сохранять команду» в окне ответа сессии «Ваш ПК»: после отправки набранное остаётся. По умолчанию — нет.</summary>
+    public bool SessionKeepCommand { get; set; }
+
+    /// <summary>«Сохранять вывод» у окна вывода: весь вывод сервера по всем строкам журнала подряд.</summary>
+    public bool OutputWhole { get; set; }
+
+    /// <summary>Избранное режима «Ваш ПК» на «Команде» — своё, отдельно от серверного.</summary>
+    public ObservableCollection<CommandSnippet> LocalCommandBook { get; set; } = new();
+
+    /// <summary>Вкладки избранного режима «Ваш ПК».</summary>
+    public ObservableCollection<string> LocalCommandBookGroups { get; set; } = new();
+
     /// <summary>Id сервера, который открывается в обзоре папок по умолчанию.</summary>
     public string BrowseServerId { get; set; } = string.Empty;
 

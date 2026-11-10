@@ -28,6 +28,9 @@ public sealed class WorkspaceState
     /// <summary>CopyPass в строке терминала. Null — сохранено, пока галочка была у раздела.</summary>
     public bool? CopyPass { get; set; }
 
+    /// <summary>Вкладка режима «Ваш ПК» на «Команде»: команды идут на этот компьютер, ярлык — в ряду «Ваш ПК».</summary>
+    public bool LocalPc { get; set; }
+
     /// <summary>Серверы, отмеченные в разделе «Копирование».</summary>
     public List<string> SelectedServerIds { get; set; } = new();
 
@@ -224,6 +227,9 @@ public sealed class WorkspacesFile
 
     /// <summary>Открытая вкладка раздела «Команда».</summary>
     public string ActiveCommandId { get; set; } = string.Empty;
+
+    /// <summary>Открытая вкладка другого ряда «Команды» («Ваш ПК» или серверы) — на неё вернёт переключение режима.</summary>
+    public string? OtherCommandId { get; set; }
 
     /// <summary>
     /// Вкладки раздела «Команда» — свои, отдельные от копирования. Используются только

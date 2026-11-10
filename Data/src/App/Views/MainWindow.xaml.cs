@@ -71,7 +71,16 @@ public partial class MainWindow : FluentWindow
 
         // умный режим спрашивает посреди окна
         SmartSwitch.IsChecked = settings.SmartMode;
-        RunHistory.Choose = (headline, detail, confirm, extra) =>
+
+        // режим админа стоит так, как на деле запущен терминал «Ваш ПК»
+        ShowAdminSwitch();
+        AdminShell.Changed += () =>
+        {
+            ShowAdminSwitch();
+            ShowExplorerServer();
+        };
+
+        RunHistory.Choose =(headline, detail, confirm, extra) =>
             ConfirmDialog.Choose(this, headline, detail, confirm, extra, "Отменить");
 
         // операция запущена — сразу показываем терминал, чтобы вывод был перед глазами;
@@ -164,6 +173,15 @@ public partial class MainWindow : FluentWindow
         SetupTray();
 
         AppState.Current.OperationFinished += OnOperationFinished;
+
+        // ответ в сессию «Ваш ПК» отработал — «авто» вкладки кладёт в буфер его вывод, как вывод законченной команды
+        AppState.Current.TurnFinished += turn =>
+        {
+            if (turn.Batch is { } batch && State.TabOfBatch(batch).AutoCopy)
+            {
+                Terminal.CopyTurn(turn);
+            }
+        };
         AppState.Current.OperationFinished += FinishSound.OnFinished;
 
         Loaded += (_, _) =>
@@ -463,7 +481,7 @@ public partial class MainWindow : FluentWindow
 
         if (State.ShowsWorkspaceTabs && !_archiveMode)
         {
-            var archived = State.Tabs.Where(t => t.IsArchived && !t.IsPersonal).ToList();
+            var archived = State.Tabs.Where(t => t.IsArchived && !t.IsPersonal && t.LocalPc == _pcMode).ToList();
 
             status = archived.Any(t => t.Status is WorkspaceStatus.Failed or WorkspaceStatus.Partial) ? WorkspaceStatus.Failed
                 : archived.Any(t => t.Status == WorkspaceStatus.Warning) ? WorkspaceStatus.Warning
@@ -812,9 +830,30 @@ public partial class MainWindow : FluentWindow
     {
         if (sender is FrameworkElement { DataContext: ServerSet set })
         {
+            // «Ваш ПК»: набор — это снова серверы, и выбранный набор ложится на серверную вкладку
+            State.SwitchLocalPc(false);
             State.PickPaneSet(set);
         }
     }
+
+    /// <summary>
+    /// Двойной щелчок по набору в панели слева — раздел «Серверы» на вкладке этого набора: поправить его, не ища
+    /// по ленте. Первый щелчок двойного уже выбрал набор для вкладки — это остаётся.
+    /// </summary>
+    private void OnOpenSetInServers(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left || sender is not FrameworkElement { DataContext: ServerSet set })
+        {
+            return;
+        }
+
+        e.Handled = true;
+        State.ActiveServerSet = set;
+        Navigate(typeof(ServersPage));
+    }
+
+    /// <summary>«Ваш ПК» под наборами: «Команда» переходит на свои вкладки этого компьютера.</summary>
+    private void OnPickLocalPc(object sender, RoutedEventArgs e) => State.SwitchLocalPc(true);
 
     private void OnSmartModeChanged(object sender, RoutedEventArgs e)
     {
@@ -827,9 +866,70 @@ public partial class MainWindow : FluentWindow
             : "Умный режим выключен.");
     }
 
+    /// <summary>Свитч «Режим админа» — по тому, от кого на деле выполняются команды «Ваш ПК».</summary>
+    private void ShowAdminSwitch()
+    {
+        AdminSwitch.IsChecked = AdminShell.IsOn;
+        AdminSwitch.ToolTip = AdminShell.ProcessElevated
+            ? "Программа запущена от администратора — команды «Ваш ПК» и так идут с его правами. Выключить — перезапустить программу обычным способом"
+            : AdminShell.IsOn
+                ? "Команды «Ваш ПК» выполняются от администратора. Выключение вернёт права пользователя"
+                : "Команды «Ваш ПК» выполняются от пользователя. Включение спросит права администратора в окне Windows";
+    }
+
+    /// <summary>Режим админа: включение — окно UAC и помощник с правами администратора, выключение — помощник закрывается.</summary>
+    private async void OnAdminModeClick(object sender, RoutedEventArgs e)
+    {
+        var want = AdminSwitch.IsChecked == true;
+
+        // до ответа свитч стоит как было: на деле режим ещё не сменился
+        ShowAdminSwitch();
+
+        if (want == AdminShell.IsOn)
+        {
+            return;
+        }
+
+        if (!want)
+        {
+            if (AdminShell.ProcessElevated)
+            {
+                AppLog.Hint("Программа запущена от администратора — выключить режим можно, только перезапустив её обычным способом.", LogLevel.Warning);
+            }
+            else if (AdminShell.Busy)
+            {
+                AppLog.Hint("Команда от администратора ещё выполняется — дождитесь конца или остановите её.", LogLevel.Warning);
+            }
+            else
+            {
+                AdminShell.Stop();
+                AppLog.Hint("Режим админа выключен: команды «Ваш ПК» — от пользователя.");
+            }
+
+            ShowAdminSwitch();
+            return;
+        }
+
+        AdminSwitch.IsEnabled = false;
+        var refused = await AdminShell.StartAsync();
+        AdminSwitch.IsEnabled = true;
+        ShowAdminSwitch();
+
+        if (refused is not null)
+        {
+            AppLog.Hint(refused, LogLevel.Warning);
+        }
+        else
+        {
+            AppLog.Hint("Режим админа включён: команды «Ваш ПК» выполняются от администратора.", LogLevel.Success);
+        }
+    }
+
     /// <summary>«Все» в переключателе наборов: в панели открытой вкладки серверы всех наборов.</summary>
     private void OnPickAllSets(object sender, RoutedEventArgs e)
     {
+        State.SwitchLocalPc(false);
+
         if (!State.PaneAllSets)
         {
             State.PaneAllSets = true;
@@ -847,6 +947,15 @@ public partial class MainWindow : FluentWindow
     private void OnPaneServerPress(object sender, MouseButtonEventArgs e)
     {
         _paneServerToEdit = null;
+
+        // «Ваш ПК»: щелчок по серверу возвращает к серверам — на серверную вкладку, и сервер там отмечается.
+        // Строки в панели уже от другой вкладки: щелчок до галочки не идёт
+        if (e.ClickCount == 1 && sender is FrameworkElement { DataContext: Models.ServerCheck picked } && State.CommandLocalPc)
+        {
+            e.Handled = true;
+            BackToServers(picked.Server);
+            return;
+        }
 
         if (e.ClickCount != 2 || sender is not FrameworkElement { DataContext: Models.ServerCheck check })
         {
@@ -879,6 +988,19 @@ public partial class MainWindow : FluentWindow
         _paneServerToEdit = null;
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, new Action(() =>
             ServerEditDialog.EditExisting(this, server, State.Section, State.ShowsWorkspaceTabs ? State.ActiveWorkspace : null)));
+    }
+
+    /// <summary>Из «Ваш ПК» — к серверам: сервер, по которому щёлкнули, отмечается, если ещё не отмечен.</summary>
+    private void BackToServers(Models.ServerEntry server)
+    {
+        State.SwitchLocalPc(false);
+
+        var tab = State.ActiveWorkspace;
+
+        if (!tab.LocalPc && !tab.SelectedServers.Any(s => s.Id == server.Id))
+        {
+            tab.PickTargetServer(server);
+        }
     }
 
     /// <summary>Замок в строке целевого сервера: закрепить вкладку за ним или снять замок.</summary>
@@ -1178,12 +1300,26 @@ public partial class MainWindow : FluentWindow
         }
 
         var explorer = State.Section == AppSection.Explorer;
+
+        // «Ваш ПК»: цель — этот компьютер, без адреса и замка
+        if (State.Section == AppSection.Command && tab.LocalPc)
+        {
+            ExplorerServerIcon.Source = ShellIcons.Computer;
+            ExplorerServerName.Text = "Ваш ПК";
+            ExplorerServerUser.Text = string.Empty;
+            ExplorerServerAddress.Text = AdminShell.IsOn ? "PowerShell · админ" : "PowerShell";
+            ExplorerServerTag.ToolTip = "Команды вкладки выполняются на этом компьютере. Щелчок — список серверов: выбор сервера вернёт к серверам";
+            ExplorerServerLock.Visibility = Visibility.Collapsed;
+            ExplorerServerTag.Visibility = Visibility.Visible;
+            return;
+        }
+
+        ExplorerServerIcon.Source = ShellIcons.Server;
         var picked = explorer
             ? (tab.ExplorerServer is { } one ? [one] : [])
             : tab.SelectedServers;
         var server = picked.Count == 1 ? picked[0] : null;
 
-        ExplorerServerIcon.Source ??= ShellIcons.Server;
         ExplorerServerName.Text = server?.PaneLabel ?? (picked.Count > 1 ? $"Серверов: {picked.Count}" : "Сервер не выбран");
         ExplorerServerUser.Text = server is null || string.IsNullOrWhiteSpace(server.User) ? string.Empty : $"({server.User})";
         ExplorerServerAddress.Text = server is null ? string.Empty : $"{server.Host}:{server.Port}";
@@ -1229,7 +1365,7 @@ public partial class MainWindow : FluentWindow
     private void OnExplorerTagTabChanged(object? sender, PropertyChangedEventArgs e)
     {
         // отметки серверов поднимают и то и другое — подпись перечитывается по любому
-        if (e.PropertyName is nameof(Workspace.ExplorerServer) or nameof(Workspace.SelectionInfo) or nameof(Workspace.IsPaneLocked) or nameof(Workspace.ExplorerLockedPath))
+        if (e.PropertyName is nameof(Workspace.ExplorerServer) or nameof(Workspace.SelectionInfo) or nameof(Workspace.IsPaneLocked) or nameof(Workspace.ExplorerLockedPath) or nameof(Workspace.LocalPc))
         {
             ShowExplorerServer();
         }
@@ -1254,13 +1390,17 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        // замки — те же, что в строках панели слева; отметки читаются заново: замок отмечает сервер
+        // замки — те же, что в строках панели слева; отметки читаются заново: замок отмечает сервер.
+        // «Ваш ПК» — все серверы приглушены, выбор любого возвращает к серверам
+        var onPc = State.Section == AppSection.Command && tab.LocalPc;
+
         Controls.ServerMenu.Show(
             ExplorerServerTag,
-            s => tab.SelectedServers.Contains(s),
-            tab.PickTargetServer,
-            Controls.ServerMenu.Locks.For(tab),
-            alignRight: true);
+            s => !onPc && tab.SelectedServers.Contains(s),
+            onPc ? BackToServers : tab.PickTargetServer,
+            onPc ? null : Controls.ServerMenu.Locks.For(tab),
+            alignRight: true,
+            muted: onPc);
     }
 
     /// <summary>Высота ленты ярлыков сейчас и самая низкая за сеанс — в один ряд.</summary>
@@ -1378,6 +1518,9 @@ public partial class MainWindow : FluentWindow
     /// <summary>Лента показывает архив, а не основные вкладки.</summary>
     private bool _archiveMode;
 
+    /// <summary>«Команда» в режиме «Ваш ПК»: на ленте только вкладки этого компьютера.</summary>
+    private bool _pcMode;
+
     /// <summary>На ленте «Команд» одна личная вкладка — на неё перешли с «Копирования». Null — лента обычная, личных на ней нет.</summary>
     private Workspace? _personalShown;
 
@@ -1399,7 +1542,7 @@ public partial class MainWindow : FluentWindow
                 Filter = item => item is Workspace workspace
                     && (_personalShown is { } only
                         ? ReferenceEquals(workspace, only)
-                        : !workspace.IsPersonal && workspace.IsArchived == _archiveMode),
+                        : !workspace.IsPersonal && workspace.IsArchived == _archiveMode && workspace.LocalPc == _pcMode),
                 IsLiveFiltering = true,
             };
             view.LiveFilteringProperties.Add(nameof(Workspace.IsArchived));
@@ -1408,6 +1551,7 @@ public partial class MainWindow : FluentWindow
         }
 
         _archiveMode = State.ShowsWorkspaceTabs && State.ActiveWorkspace.IsArchived;
+        _pcMode = State.CommandLocalPc;
         _personalShown = State.PersonalShown;
         view.Refresh();
 
@@ -1464,10 +1608,12 @@ public partial class MainWindow : FluentWindow
     {
         var archive = State.ShowsWorkspaceTabs && State.ActiveWorkspace.IsArchived;
         var personal = State.PersonalShown;
+        var pc = State.CommandLocalPc;
 
-        if (archive != _archiveMode || !ReferenceEquals(personal, _personalShown))
+        if (archive != _archiveMode || pc != _pcMode || !ReferenceEquals(personal, _personalShown))
         {
             _archiveMode = archive;
+            _pcMode = pc;
             _personalShown = personal;
 
             if (_tabViews.TryGetValue(State.Tabs, out var view))
@@ -1488,6 +1634,7 @@ public partial class MainWindow : FluentWindow
         // в основной ленте первая (основная) вкладка закреплена, в архиве закреплённых нет
         if (_tabReorder is not null)
         {
+            // у ряда «Ваш ПК» своя основная вкладка — тоже первой и закреплена
             _tabReorder.FixedCount = _archiveMode ? 0 : 1;
         }
 
@@ -1509,7 +1656,7 @@ public partial class MainWindow : FluentWindow
         var shown = State.ShowsWorkspaceTabs || sets;
         var mode = sets ? _setArchiveMode : _archiveMode;
         var archived = sets ? State.ServerSets.Count(s => s.IsArchived)
-            : shown ? State.Tabs.Count(t => t.IsArchived) : 0;
+            : shown ? State.Tabs.Count(t => t.IsArchived && t.LocalPc == _pcMode) : 0;
         var what = sets ? "набор" : "вкладку";
 
         TabButtons.Visibility = _personalShown is null ? Visibility.Visible : Visibility.Collapsed;
@@ -1621,13 +1768,18 @@ public partial class MainWindow : FluentWindow
 
         var tabs = State.Tabs;
 
+        // «Ваш ПК» — свой ряд и свой архив: из него — только в его же вкладки
+        bool Mine(Workspace? t) => t is not null && t.LocalPc == _pcMode && !t.IsPersonal;
+
         if (_archiveMode)
         {
-            State.ActiveWorkspace = State.LastInStrip(tabs, archived: false) ?? State.MainWorkspace;
+            State.ActiveWorkspace = (State.LastInStrip(tabs, archived: false) is { } back && Mine(back) ? back : null)
+                ?? tabs.FirstOrDefault(t => !t.IsArchived && Mine(t))
+                ?? State.MainWorkspace;
             return;
         }
 
-        var archived = tabs.Where(t => t.IsArchived).ToList();
+        var archived = tabs.Where(t => t.IsArchived && Mine(t)).ToList();
 
         if (archived.Count == 0)
         {
@@ -1635,7 +1787,7 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        State.ActiveWorkspace = State.LastInStrip(tabs, archived: true) ?? archived[0];
+        State.ActiveWorkspace = State.LastInStrip(tabs, archived: true) is { } last && Mine(last) ? last : archived[0];
     }
 
     /// <summary>Значок на «Серверах»: основная лента наборов ↔ архив, в выбранной таблице — последний открытый там набор.</summary>

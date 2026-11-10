@@ -58,17 +58,19 @@ public static class HostKeys
         where T : BaseClient
     {
         var id = Id(server);
+        var address = Address(server);
+        var serverId = server.Id;
         var label = server.PaneLabel;
-        client.HostKeyReceived += (_, e) => e.CanTrust = Check(id, label, e);
+        client.HostKeyReceived += (_, e) => e.CanTrust = Check(id, address, serverId, label, e);
         return client;
     }
 
-    /// <summary>Запомненный отпечаток сервера, если он есть.</summary>
+    /// <summary>Запомненный отпечаток сервера, если он есть: свой у записи, а нет — прежний, по адресу.</summary>
     public static KnownHostKey? Get(ServerEntry server)
     {
         lock (Gate)
         {
-            return Known.GetValueOrDefault(Id(server));
+            return Known.GetValueOrDefault(Id(server)) ?? Known.GetValueOrDefault(Address(server));
         }
     }
 
@@ -82,7 +84,11 @@ public static class HostKeys
 
         lock (Gate)
         {
-            if (!Known.Remove(id))
+            // и свой ключ записи, и прежний по адресу — иначе запись снова подхватила бы прежний
+            var removed = Known.Remove(id);
+            removed |= Known.Remove(Address(server));
+
+            if (!removed)
             {
                 return;
             }
@@ -113,7 +119,7 @@ public static class HostKeys
         AppLog.Info($"Принят новый ключ сервера {server.PaneLabel}: {fresh.Fingerprint}.");
     }
 
-    private static bool Check(string id, string label, HostKeyEventArgs e)
+    private static bool Check(string id, string address, string serverId, string label, HostKeyEventArgs e)
     {
         var seen = new KnownHostKey
         {
@@ -126,9 +132,23 @@ public static class HostKeys
         {
             if (!Known.TryGetValue(id, out var known))
             {
+                // своего ключа у записи ещё нет. Прежний, запомненный по адресу (до 3.3.5), подошёл — он её.
+                // Не подошёл: прежний ключ запоминала самая старая запись с этим адресом — для неё это подмена.
+                // Записи, добавленные позже (второй роутер на том же стандартном адресе), заводят свой ключ
+                var owner = AppState.Current.Servers.FirstOrDefault(s => Address(s) == address)?.Id;
+
+                if (Known.TryGetValue(address, out var old) && old.Fingerprint != seen.Fingerprint
+                    && (owner is null || owner == serverId))
+                {
+                    Mismatches[id] = seen;
+                    return false;
+                }
+
                 Known[id] = seen;
                 Save();
-                AppLog.Info($"Ключ сервера запомнен: {seen.Algorithm} {seen.Fingerprint}.", label);
+                AppLog.Info(old?.Fingerprint == seen.Fingerprint
+                    ? $"Ключ сервера перенесён за записью: {seen.Algorithm} {seen.Fingerprint}."
+                    : $"Ключ сервера запомнен: {seen.Algorithm} {seen.Fingerprint}.", label);
                 return true;
             }
 
@@ -143,8 +163,15 @@ public static class HostKeys
         return false;
     }
 
-    /// <summary>Как у ssh: ключ привязан к адресу и порту, а не к записи в списке.</summary>
-    private static string Id(ServerEntry server) =>
+    /// <summary>
+    /// Ключ — за записью сервера и её адресом: два устройства на одном адресе (роутеры с одинаковым
+    /// стандартным IP в разных сетях) — две записи, у каждой свой ключ. Сменили адрес записи — ключ
+    /// запоминается заново.
+    /// </summary>
+    private static string Id(ServerEntry server) => $"{server.Id}@{Address(server)}";
+
+    /// <summary>Как у ssh: «адрес:порт». Так ключи хранились до 3.3.5 — их забирает себе подошедшая запись.</summary>
+    private static string Address(ServerEntry server) =>
         $"{server.Host.Trim().ToLowerInvariant()}:{(server.Port <= 0 ? 22 : server.Port)}";
 
     private static Dictionary<string, KnownHostKey> Load()

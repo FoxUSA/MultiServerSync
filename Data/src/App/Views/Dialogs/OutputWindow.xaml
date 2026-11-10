@@ -78,8 +78,8 @@
         VerticalAlignment="Center"
         Content="Сохранять вывод"
         FontSize="11"
-        IsChecked="{Binding DataContext.KeepLog, ElementName=StatusHost, Mode=TwoWay}"
-        ToolTip="Своя у каждой вкладки. Отмечено — журнал вкладки хранит все запуски, пока галочку не снять. Снято — запуск позже срока «Хранить вывод» после окончания прошлого начинает журнал заново." />
+        IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=OutputWhole, Mode=TwoWay}"
+        ToolTip="Отмечено — в окне весь вывод выбранного сервера подряд, по всем строкам журнала: например, вся сессия «Ваш ПК» со всеми ответами. Снято — только выбранная строка" />
 
       <controls:OutputZoom
         Grid.Column="3"

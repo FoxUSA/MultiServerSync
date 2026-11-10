@@ -112,15 +112,139 @@
       </ComboBox.ItemTemplate>
     </ComboBox>
 
-    <!--  окна команды: делят место поровну  -->
+    <!--  окна команды: делят место поровну. «Ваш ПК» с открытой сессией (ssh, diskpart…) переворачивает их
+          окном ответа — как окно вывода в «Проводнике»; сессия кончилась — переворот обратно  -->
     <Grid
+      x:Name="FlipHost"
       Grid.Row="1"
       Grid.Column="0"
-      Grid.ColumnSpan="2">
+      Grid.ColumnSpan="2"
+      RenderTransformOrigin="0.5,0.5">
+      <Grid.RenderTransform>
+        <ScaleTransform x:Name="FlipScale" />
+      </Grid.RenderTransform>
+
+      <!--  оборот: ввод в идущую сессию. Enter — отправить, Shift+Enter — новая строка  -->
+      <Grid
+        x:Name="SessionFace"
+        Margin="0,4,0,0"
+        Visibility="Collapsed">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Margin="2,0,0,4">
+          <TextBlock
+            VerticalAlignment="Center"
+            FontSize="12"
+            Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+            Text="Сессия открыта — набранное уходит в неё, а не запускает новую команду"
+            TextTrimming="CharacterEllipsis" />
+          <CheckBox
+            x:Name="KeepSessionCommand"
+            MinWidth="0"
+            MinHeight="0"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Center"
+            Click="OnKeepSessionCommand"
+            Content="Сохранять команду"
+            FontSize="12"
+            ToolTip="Отмечено — после отправки набранное остаётся в окне: поправить и отправить снова. Снято — окно очищается" />
+        </Grid>
+
+        <ui:TextBox
+          x:Name="SessionBox"
+          Grid.Row="1"
+          Padding="10,8,240,44"
+          VerticalContentAlignment="Top"
+          AcceptsReturn="True"
+          AcceptsTab="True"
+          ClearButtonEnabled="False"
+          FontFamily="Consolas"
+          HorizontalScrollBarVisibility="Auto"
+          PlaceholderText="Ответ сессии: команда, пароль, yes… Enter — отправить, Shift+Enter — новая строка. Длинное можно вставить целиком — уйдёт построчно"
+          PreviewKeyDown="OnSessionKeyDown"
+          TextChanged="OnSessionTextChanged"
+          TextWrapping="NoWrap"
+          VerticalScrollBarVisibility="Auto" />
+
+        <!--  значки — как у окна команды, на том же месте: вставить, отправить, остановить, копировать вывод, очистить; под ними избранное  -->
+        <StackPanel
+          Grid.Row="1"
+          Margin="0,4,8,0"
+          HorizontalAlignment="Right"
+          VerticalAlignment="Top">
+          <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+            <Button
+              Click="OnPasteSession"
+              Style="{StaticResource EditorIconStyle}"
+              ToolTip="Вставить из буфера — заменяет всё окно ответа">
+              <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="ClipboardPaste24" />
+            </Button>
+            <Button
+              Click="OnSendSession"
+              Style="{StaticResource EditorIconStyle}"
+              ToolTip="Отправить в сессию — построчно, каждая строка с Enter (Enter в окне). Пустое — просто Enter">
+              <ui:SymbolIcon
+                FontSize="{StaticResource IconGlyphSize}"
+                Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
+                Symbol="Play24" />
+            </Button>
+            <Button
+              Click="OnInterruptSession"
+              Style="{StaticResource EditorIconStyle}"
+              ToolTip="Ctrl+C — прервать то, что сейчас идёт в сессии (например ping). Сама сессия остаётся. То же — Ctrl+C в окне без выделения">
+              <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="HandRight24" />
+            </Button>
+            <Button
+              Click="OnInterrupt"
+              Style="{StaticResource EditorIconStyle}"
+              ToolTip="Остановить команду — сессия закончится, окно вернётся к командам">
+              <ui:SymbolIcon
+                FontSize="{StaticResource IconGlyphSize}"
+                Foreground="#E0574A"
+                Symbol="Stop24" />
+            </Button>
+            <Button
+              Click="OnCopyOutput"
+              Style="{StaticResource EditorIconStyle}"
+              ToolTip="Копировать вывод (Ctrl+Shift+C) — то же, что «Текущий лог» в журнале">
+              <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Copy24" />
+            </Button>
+
+            <Border
+              Width="1"
+              Height="20"
+              Margin="3,0,1,0"
+              VerticalAlignment="Center"
+              Background="{DynamicResource ControlStrokeColorDefaultBrush}" />
+
+            <Button
+              Click="OnClearSession"
+              Style="{StaticResource EditorIconStyle}"
+              ToolTip="Очистить окно ответа">
+              <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Delete24" />
+            </Button>
+          </StackPanel>
+
+          <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+            <Button
+              Click="OnOpenBookSession"
+              Style="{StaticResource EditorIconStyle}"
+              ToolTip="Избранное: команда по щелчку встаёт в окно ответа. Там же — добавить в избранное то, что набрано">
+              <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Heart24" />
+            </Button>
+          </StackPanel>
+        </StackPanel>
+
+      </Grid>
 
       <!--  окна делят высоту поровну, но не ниже своего минимума — дальше их листает прокрутка  -->
       <ScrollViewer
         x:Name="StepsScroll"
+        Grid.Row="0"
         Focusable="False"
         HorizontalScrollBarVisibility="Disabled"
         VerticalScrollBarVisibility="Auto">

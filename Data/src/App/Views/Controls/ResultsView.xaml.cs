@@ -411,6 +411,23 @@ public partial class ResultsView : UserControl
             ResultsGrid.ItemsSource = _rows;
         }
 
+        // ответ в сессию «Ваш ПК» — новая строка: таблица переходит на неё, и её вывод сразу перед глазами.
+        // Только если смотрели на ту же сессию: чужой выбор не сбивается
+        if (_rows.Where(r => r.SessionOf is not null && !_seenTurns.Contains(r)).ToList() is { Count: > 0 } fresh)
+        {
+            foreach (var turn in fresh)
+            {
+                _seenTurns.Add(turn);
+            }
+
+            var newest = fresh[^1];
+
+            if (picked is null || picked is OperationResult was && (ReferenceEquals(was, newest.SessionOf) || ReferenceEquals(was.SessionOf, newest.SessionOf)))
+            {
+                picked = newest;
+            }
+        }
+
         if (picked is not null && _rows.Contains(picked) && !ReferenceEquals(ResultsGrid.SelectedItem, picked))
         {
             ResultsGrid.SelectedItem = picked;
@@ -418,6 +435,9 @@ public partial class ResultsView : UserControl
 
         FitServerColumn();
     }
+
+    /// <summary>Строки ответов в сессию, которые таблица уже видела, — на новую она переходит один раз.</summary>
+    private readonly HashSet<OperationResult> _seenTurns = [];
 
     /// <summary>Строки команд, у которых таблица ждёт появления следующей команды.</summary>
     private readonly HashSet<OperationResult> _stepsWatched = [];
@@ -747,8 +767,9 @@ public partial class ResultsView : UserControl
     public void CopyCurrentAfter(OperationBatch batch, string finished)
     {
         // строки разовых действий и прошлых запусков — не в счёт: автокопия про запуск, что закончился
+        // строка ответа в сессию «Ваш ПК» — часть запуска самой сессии
         bool Usable(OperationResult row) => !row.IsAction
-            && (batch.LastRun.Count == 0 || batch.LastRun.Any(r => r.RunId == (row.Parent ?? row).RunId));
+            && (batch.LastRun.Count == 0 || batch.LastRun.Any(r => r.RunId == (row.SessionOf ?? row.Parent ?? row).RunId));
 
         var result = ReferenceEquals(Batch, batch) && ResultsGrid.SelectedItem is OperationResult shown && Usable(shown)
             ? shown
@@ -763,6 +784,13 @@ public partial class ResultsView : UserControl
         }
 
         CopyResult(result, finished, batch);
+    }
+
+    /// <summary>«Авто» для ответа в сессию «Ваш ПК»: только этот ответ и его вывод.</summary>
+    public void CopyTurn(OperationResult turn)
+    {
+        AppLog.Debug($"Ваш ПК: «авто» — вывод ответа в буфер, {turn.Output.Length} символов.");
+        CopyResult(turn, "Ответ пришёл", turn.Batch, turnOnly: true);
     }
 
     /// <summary>Вывод только выбранного сервера.</summary>
@@ -784,7 +812,8 @@ public partial class ResultsView : UserControl
     }
 
     /// <summary>Вывод одного сервера в буфер — по кнопке или галочкой «после …».</summary>
-    private static void CopyResult(OperationResult result, string? finished, OperationBatch? batch)
+    /// <param name="turnOnly">Ответ в сессию — только он, а не вся сессия.</param>
+    private static void CopyResult(OperationResult result, string? finished, OperationBatch? batch, bool turnOnly = false)
     {
         if (result.Output.TrimEnd().Length == 0)
         {
@@ -793,6 +822,18 @@ public partial class ResultsView : UserControl
         }
 
         var auto = finished is not null;
+
+        // сессия «Ваш ПК»: каждый ответ — своей строкой; автокопия по её окончании берёт всю сессию —
+        // запуск и все ответы с их выводом. Кнопка на строке ответа — только этот ответ
+        var session = result.SessionOf ?? result;
+        var turns = batch?.AllRows.Where(r => ReferenceEquals(r.SessionOf, session)).ToList() ?? [];
+
+        if (auto && turns.Count > 0 && !turnOnly)
+        {
+            result = session;
+        }
+
+        var wholeSession = turns.Count > 0 && ReferenceEquals(result, session);
         var tab = batch is null ? null : AppState.Current.TabOfBatch(batch);
         var after = batch is not null && AppState.Current.ChainFor(batch) is { } chain
             ? AppState.AfterRowOf(batch, result, chain)
@@ -801,7 +842,10 @@ public partial class ResultsView : UserControl
 
         // в буфер — то же, что показано в выводе: шапка с сервером, разделом и вкладкой,
         // «+ команды» — следом вывод личных команд этого же сервера
-        string Build(int? max) => OutputFeed.Compose(result, after, max, "Текущий лог").TrimEnd();
+        string Build(int? max) => wholeSession
+            ?string.Join(Environment.NewLine + Environment.NewLine,
+                new[] { session }.Concat(turns).Select(r => OutputFeed.Compose(r, null, max, "Текущий лог").TrimEnd()))
+            : OutputFeed.Compose(result, after, max, "Текущий лог").TrimEnd();
 
         var full = Build(null);
         string? cut = null;

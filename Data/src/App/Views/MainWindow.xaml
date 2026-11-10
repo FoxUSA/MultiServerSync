@@ -1591,8 +1591,18 @@
                 смена набора меняет длину списка выше, а сами наборы под мышью не прыгают  -->
           <Border Grid.Row="3" Margin="0,4,0,0">
             <StackPanel>
+                <!--  «Ваш ПК»: вместо умного режима — режим админа. Стоит так, как на деле запущен терминал  -->
+                <ui:ToggleSwitch
+                  x:Name="AdminSwitch"
+                  Click="OnAdminModeClick"
+                  Content="Режим админа"
+                  FontSize="13"
+                  Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                  ToolTipService.ShowDuration="30000"
+                  Visibility="{Binding State.CommandLocalPc, Converter={StaticResource BoolToVis}}" />
                 <ui:ToggleSwitch
                   x:Name="SmartSwitch"
+                  Visibility="{Binding State.ShowsSmartMode, Converter={StaticResource BoolToVis}}"
                   Click="OnSmartModeChanged"
                   Content="Умный режим"
                   FontSize="13"
@@ -1618,6 +1628,22 @@
                   Margin="0,0,0,2"
                   Style="{StaticResource PaneHeaderStyle}"
                   Text="НАБОРЫ СЕРВЕРОВ" />
+                  <!--  «Ваш ПК» на «Команде»: свой ряд вкладок, команды — на этот компьютер. Набор или сервер — назад к серверам  -->
+                  <Button
+                    Click="OnPickLocalPc"
+                    Content="Ваш ПК"
+                    ToolTip="Команды — на этом компьютере, в PowerShell. Свои вкладки, история и избранное. Щелчок по серверу или набору вернёт к серверам"
+                    Visibility="{Binding State.ShowsLocalPc, Converter={StaticResource BoolToVis}}">
+                    <Button.Style>
+                      <Style BasedOn="{StaticResource PaneSetButtonStyle}" TargetType="Button">
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding State.CommandLocalPc}" Value="True">
+                            <Setter Property="Tag" Value="Active" />
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </Button.Style>
+                  </Button>
                   <!--  «Все»: в панели серверы всех наборов разом  -->
                   <Button
                     Click="OnPickAllSets"
@@ -1626,9 +1652,13 @@
                     <Button.Style>
                       <Style BasedOn="{StaticResource PaneSetButtonStyle}" TargetType="Button">
                         <Style.Triggers>
-                          <DataTrigger Binding="{Binding State.PaneAllSets}" Value="True">
+                          <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                              <Condition Binding="{Binding State.PaneAllSets}" Value="True" />
+                              <Condition Binding="{Binding State.CommandLocalPc}" Value="False" />
+                            </MultiDataTrigger.Conditions>
                             <Setter Property="Tag" Value="Active" />
-                          </DataTrigger>
+                          </MultiDataTrigger>
                         </Style.Triggers>
                       </Style>
                     </Button.Style>
@@ -1639,6 +1669,7 @@
                         <Button
                           x:Name="Pick"
                           Click="OnPickServerSet"
+                          MouseDoubleClick="OnOpenSetInServers"
                           Content="{Binding Title}"
                           Style="{StaticResource PaneSetButtonStyle}"
                           ToolTip="{Binding TabTooltip}" />

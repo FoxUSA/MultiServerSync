@@ -216,6 +216,12 @@ public sealed class ServerEntry : ObservableObject
     [JsonIgnore]
     public bool IsPseudo => string.IsNullOrWhiteSpace(Host);
 
+    public const string LocalPcId = "local:pc";
+
+    /// <summary>«Ваш ПК» — команда выполняется на этом компьютере.</summary>
+    [JsonIgnore]
+    public bool IsLocalPc => Id == LocalPcId;
+
     [JsonIgnore]
     public string Display => IsPseudo
         ? Name

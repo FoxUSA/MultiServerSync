@@ -284,6 +284,7 @@ public sealed class Workspace : ObservableObject
             return;
         }
 
+
         if (!_paneAllSets && PaneSet is { } current && !current.Contains(server)
             && AppState.Current.ServerSets.FirstOrDefault(s => s.Contains(server)) is { } owner)
         {
@@ -2313,8 +2314,128 @@ public sealed class Workspace : ObservableObject
     /// <summary>Куда пойдёт копирование этой вкладки — отмеченные из выбранного набора.</summary>
     public IReadOnlyList<ServerEntry> CopyTargets => Picked(InActiveSet(CopyServers));
 
-    /// <summary>Где выполнится команда этой вкладки — отмеченные из выбранного набора.</summary>
-    public IReadOnlyList<ServerEntry> CommandTargets => Picked(InActiveSet(CommandServers));
+    /// <summary>Где выполнится команда этой вкладки — отмеченные из выбранного набора, а в режиме «Ваш ПК» — этот компьютер.</summary>
+    public IReadOnlyList<ServerEntry> CommandTargets => _localPc ? [ActionLog.LocalPc] : Picked(InActiveSet(CommandServers));
+
+    // ── «Ваш ПК»: вкладки команд этого компьютера — свой ряд ярлыков на «Команде» ──
+
+    private bool _localPc;
+
+    /// <summary>
+    /// Вкладка режима «Ваш ПК»: её команды идут на этот компьютер (PowerShell), серверы приглушены.
+    /// Такие вкладки — свой ряд ярлыков на «Команде»: у каждой свои окна команд, история и всё остальное.
+    /// </summary>
+    public bool LocalPc => _localPc;
+
+    /// <summary>
+    /// Открытая сессия «Ваш ПК»: команда идёт и принимает ввод (`ssh`, `diskpart`…). Пока она есть, верхнее
+    /// окно «Команды» перевёрнуто окном ответа — набранное уходит в неё, а не запускает новую команду.
+    /// </summary>
+    public OperationResult? Session =>
+        _localPc ? CommandBatch.Results.FirstOrDefault(r => r.SessionOf is null && r.IsRunning && r.Input is { IsOpen: true }) : null;
+
+    public bool HasSession => Session is not null;
+
+    /// <summary>Набранное в окне ответа, ещё не отправленное, — своё у вкладки.</summary>
+    public string SessionDraft { get; set; } = string.Empty;
+
+    /// <summary>Ctrl+C в сессию: прерывается то, что в ней идёт, сама сессия остаётся.</summary>
+    public string? InterruptSession()
+    {
+        if (Session is not { RemotePid: > 0 } session)
+        {
+            return "Сессия уже закончилась.";
+        }
+
+        LocalShell.Stop(session.RemotePid, "INT");
+        AppLog.Echo($"В сессию послан Ctrl+C · {session.Server.PaneLabel}");
+        return null;
+    }
+
+    /// <summary>Ввод сессии появился или закрылся — окно переворачивается.</summary>
+    internal void RaiseSession() => RaiseMany(nameof(Session), nameof(HasSession));
+
+    /// <summary>
+    /// Текст окна ответа — в сессию, построчно, каждая строка с Enter, как набранная. Пустой — просто Enter.
+    /// Возвращает причину отказа или null.
+    /// </summary>
+    public string? SendToSession(string text)
+    {
+        if (Session is not { Input: { } input } session)
+        {
+            AppLog.Debug($"Ваш ПК [{Title}]: ответ не отправлен — сессии нет (идёт: {CommandBatch.IsRunning}).");
+            return "Сессия уже закончилась — ответить некому.";
+        }
+
+        var lines = text.Replace("\r\n", "\n").Split('\n');
+
+        // последняя пустая строка — это Enter после последней, а не ещё один
+        if (lines.Length > 1 && lines[^1].Length == 0)
+        {
+            lines = lines[..^1];
+        }
+
+        // спросили пароль — в журнал и историю он не идёт
+        var secret = session.OutputRow.TailText is var prompt
+            && (prompt.Contains("pass", StringComparison.OrdinalIgnoreCase) || prompt.Contains("пароль", StringComparison.OrdinalIgnoreCase));
+
+        // ответ — новой строкой журнала, как новый запуск; прошлая закрывается
+        FinishTurn(session);
+        var turn = CommandBatch.AddSessionTurn(session, secret ? ["********"] : lines.Select(l => l.Length == 0 ? "(Enter)" : l).ToList());
+        session.Turn = turn;
+        _turnStarted[turn] = DateTime.UtcNow;
+
+        // запуск больше не ждёт — ждать будет строка ответа; на запуске видно, что сессия идёт
+        session.IsWaitingInput = false;
+        session.Message = "сессия открыта · ответов: " + CommandBatch.AllRows.Count(r => ReferenceEquals(r.SessionOf, session));
+
+        AppLog.Debug($"Ваш ПК [{Title}]: ответ в сессию, строк {lines.Length}: "
+            + (secret ? "********" : Preview(string.Join(" ⏎ ", lines))));
+
+        foreach (var line in lines)
+        {
+            if (!input.Send(line))
+            {
+                AppLog.Debug($"Ваш ПК [{Title}]: ввод не принят — консоль уже закрыта.");
+                return "Сессия уже не принимает ввод.";
+            }
+        }
+
+        if (!secret && text.Trim().Length > 0)
+        {
+            RememberCommand(text);
+            Save();
+        }
+
+        return null;
+    }
+
+    /// <summary>Когда пошли строки ответов — для их времени.</summary>
+    private readonly Dictionary<OperationResult, DateTime> _turnStarted = [];
+
+    /// <summary>Строка прошлого ответа закончилась: следующий ответ или конец сессии.</summary>
+    private void FinishTurn(OperationResult session, OperationStatus status = OperationStatus.Success)
+    {
+        if (session.Turn is not { } turn)
+        {
+            return;
+        }
+
+        session.Turn = null;
+        turn.Input = null;
+        turn.IsWaitingInput = false;
+
+        // «ждёт ответа» — про идущую строку; закончившаяся пишет свой итог
+        turn.Message = string.Empty;
+
+        if (_turnStarted.Remove(turn, out var started))
+        {
+            turn.Duration = DateTime.UtcNow - started;
+        }
+
+        turn.Status = status;
+        AppLog.Debug($"Ваш ПК [{Title}]: строка ответа закрыта за {turn.Duration.TotalSeconds:0.0} с, вывода {turn.Output.Length} символов.");
+    }
 
     /// <summary>Какой набор галочек сейчас правится — чтобы «отмечено 0 из 6» не путало разделы.</summary>
     private bool CommandSet => AppState.Current.Section == AppSection.Command;
@@ -2361,6 +2482,11 @@ public sealed class Workspace : ObservableObject
     {
         get
         {
+            if (_localPc)
+            {
+                return "Будет выполнено на этом компьютере, в PowerShell.";
+            }
+
             var count = CommandTargets.Count;
             return count == 0
                 ? "Ни один сервер не отмечен — отметьте нужные в панели слева: "
@@ -4182,8 +4308,11 @@ public sealed class Workspace : ObservableObject
             return Refuse("команда", "Не отмечено ни одного сервера для команды.");
         }
 
+        // этот компьютер, а не сервер: «непривычного сервера» тут не бывает, и sudo на Windows нет
+        var local = targets.Any(s => s.IsLocalPc);
+
         // умный режим: сервер непривычный для этих команд — сначала спросить, одним окном на все
-        if (!approved)
+        if (!approved && !local)
         {
             var check = RunHistory.CheckCommands(this, Numbered(steps), targets);
 
@@ -4300,10 +4429,11 @@ public sealed class Workspace : ObservableObject
                     }
                 }
 
-                // вывод — и в общую строку сервера, и в строку команды
+                // вывод — и в общую строку сервера, и в строку команды. В сессии «Ваш ПК» после ответа —
+                // в строку этого ответа
                 void Write(string line)
                 {
-                    result.Append(line);
+                    result.OutputRow.Append(line);
                     row?.Append(line);
                 }
 
@@ -4338,7 +4468,8 @@ public sealed class Workspace : ObservableObject
                         var current = row = result.BeginStep(step.Number, step.Text);
                         rowClock.Restart();
 
-                        Write(step.UseSudo ? "── команда, через sudo ──" : "── команда ──");
+                        var onPc = server.IsLocalPc;
+                        Write(onPc ? (AdminShell.IsOn ? "── команда, PowerShell от администратора ──" : "── команда, PowerShell на этом компьютере ──") :step.UseSudo ? "── команда, через sudo ──" : "── команда ──");
 
                         foreach (var line in step.Text.Replace("\r\n", "\n").Split('\n'))
                         {
@@ -4354,37 +4485,83 @@ public sealed class Workspace : ObservableObject
 
                         result.Message = label + "выполняется…";
 
-                        var outcome = await SshService.RunScriptAsync(
-                            server,
-                            settings,
-                            step.Text,
-                            step.UseSudo,
-                            Write,
-                            ct,
-                            (pid, group) =>
+                        void OnJob(int pid, int group)
+                        {
+                            result.RemotePid = pid;
+                            result.RemoteGroup = group;
+                        }
+
+                        void OnWaiting(bool waiting)
+                        {
+                            // сессия ждёт ввода — для срока «Хранить вывод» это как конец запуска
+                            if (onPc)
                             {
-                                result.RemotePid = pid;
-                                result.RemoteGroup = group;
-                            },
-                            input => result.Input = input,
-                            waiting =>
+                                CommandBatch.SetSessionIdle(waiting);
+                            }
+
+                            // сессия «Ваш ПК» после первого ответа: ждёт строка последнего ответа, а не запуск
+                            if (result.Turn is { } turn)
                             {
-                                result.IsWaitingInput = waiting;
-                                result.Message = label + (waiting ? "ждёт ответа" : "выполняется…");
-                                current.Message = waiting ? "ждёт ответа" : string.Empty;
+                                turn.IsWaitingInput = waiting;
+                                turn.Message = waiting ? "ждёт ответа" : string.Empty;
 
                                 if (waiting)
                                 {
-                                    AppLog.Warn(
-                                        OnTab("Ждёт ответа — введите его в строке под выводом в журнале"),
-                                        server.Display);
+                                    AppLog.Debug($"Ваш ПК [{Title}]: ждёт ответа — «{turn.TailText.Trim()}».");
+
+                                    // сессия снова ждёт ввода — ответ отработал, как закончившаяся команда: «авто» берёт его вывод
+                                    Application.Current.Dispatcher.BeginInvoke(() => AppState.Current.NotifyTurnFinished(turn));
                                 }
-                            },
-                            tail =>
+
+                                return;
+                            }
+
+                            if (waiting && onPc)
                             {
-                                result.SetTail(tail);
-                                current.SetTail(tail);
-                            });
+                                AppLog.Debug($"Ваш ПК [{Title}]: ждёт ответа — «{result.TailText.Trim()}».");
+                            }
+
+                            result.IsWaitingInput = waiting;
+
+                            result.Message = label + (waiting ? "ждёт ответа" : "выполняется…");
+                            current.Message = waiting ? "ждёт ответа" : string.Empty;
+
+                            if (waiting)
+                            {
+                                AppLog.Warn(
+                                    OnTab("Ждёт ответа — введите его в строке под выводом в журнале"),
+                                    server.Display);
+                            }
+                        }
+
+                        void OnTail(string tail)
+                        {
+                            result.OutputRow.SetTail(tail);
+                            current.SetTail(tail);
+                        }
+
+                        var outcome = onPc
+                            ? await LocalShell.RunScriptAsync(
+                                settings, step.Text, Write, ct, OnJob,
+                                input =>
+                                {
+                                    // открылась или закрылась сессия — верхнее окно переворачивается;
+                                    // закрылась — строка последнего ответа закончена
+                                    result.Input = input;
+                                    AppLog.Debug(input is null
+                                        ? $"Ваш ПК [{Title}]: ввод закрыт — сессия кончилась."
+                                        : $"Ваш ПК [{Title}]: ввод открыт — окно ответа доступно.");
+
+                                    if (input is null)
+                                    {
+                                        Application.Current.Dispatcher.Invoke(() => FinishTurn(result));
+                                    }
+
+                                    RaiseSession();
+                                },
+                                OnWaiting, OnTail)
+                            : await SshService.RunScriptAsync(
+                                server, settings, step.Text, step.UseSudo, Write, ct, OnJob, input => result.Input = input, OnWaiting, OnTail);
 
                         // оборвали нашей же кнопкой — это не ошибка, а выполненная просьба.
                         // Проверяется до всего прочего: после kill сервер может и не успеть
@@ -4713,6 +4890,7 @@ public sealed class Workspace : ObservableObject
         CommandText = CommandText,
         UseSudo = UseSudo,
         Commands = SaveSteps(),
+        LocalPc = _localPc,
         PaneSetId = PaneOf(CopyWindows[0]).SetId,
         PaneAllSets = PaneOf(CopyWindows[0]).AllSets,
         PaneScopes = PaneOf(CopyWindows[0]).Scopes,
@@ -4961,6 +5139,7 @@ public sealed class Workspace : ObservableObject
                 CopyWindows[0].Downloads.Add(DownloadItem.From(saved));
             }
 
+            _localPc = state.LocalPc;
             SetSteps(state.Commands is { Count: > 0 }
                 ? state.Commands
                 : [new SavedCommandStep { Text = state.CommandText ?? string.Empty, UseSudo = state.UseSudo }]);
@@ -5573,7 +5752,9 @@ public sealed class Workspace : ObservableObject
         {
             var pinned = _lockedIds?.Contains(check.Server.Id) == true;
             check.IsLocked = pinned;
-            check.IsMuted = _lockedIds is not null && !pinned;
+
+            // «Ваш ПК»: команды идут не на серверы — приглушены все, щелчок по любому вернёт к серверам
+            check.IsMuted = (_lockedIds is not null && !pinned) || _localPc;
         }
 
         RaiseMany(nameof(IsPaneLocked), nameof(IsNotPaneLocked), nameof(IsContentLocked), nameof(ExplorerLockedPath), nameof(ExplorerLockedLocalPath));
@@ -5587,6 +5768,12 @@ public sealed class Workspace : ObservableObject
     {
         if (_lockedIds is null)
         {
+            // «Ваш ПК» приглушает и пришедшие серверы
+            if (_localPc)
+            {
+                ApplyLock();
+            }
+
             return;
         }
 

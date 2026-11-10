@@ -31,6 +31,22 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        // помощник «Режима админа»: без окна, без настроек и без проверки второго экземпляра
+        if (e.Args.Length >= 3 && e.Args[0] == AdminShell.HelperArg)
+        {
+            try
+            {
+                AdminShell.RunHelper(e.Args[1], int.TryParse(e.Args[2], out var parent) ? parent : 0);
+            }
+            catch (Exception)
+            {
+                // программа не дождалась — выходим
+            }
+
+            Environment.Exit(0);
+            return;
+        }
+
         // замер запуска по этапам — в отладочный журнал, чтобы видеть, на что уходят секунды
         var startup = StartupTiming.Begin();
 
@@ -134,6 +150,9 @@ public partial class App : Application
         }
 
         AtomicFile.Flush();
+
+        // помощник администратора уходит вместе с программой
+        AdminShell.Stop();
 
         base.OnExit(e);
     }

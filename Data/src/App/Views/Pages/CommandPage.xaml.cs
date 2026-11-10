@@ -247,6 +247,9 @@ public partial class CommandPage : Page
         }
 
         SyncPickers();
+
+        // у другой вкладки своя сессия (или её нет) — сторона окна без переворота
+        ApplyFace();
     }
 
     private void OnWorkspaceProperty(object? sender, PropertyChangedEventArgs e)
@@ -255,6 +258,227 @@ public partial class CommandPage : Page
         {
             SyncPickers();
         }
+        else if (e.PropertyName == nameof(Services.Workspace.HasSession))
+        {
+            // ввод сессии открывается и закрывается в фоне — переворот в потоке окна
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (ReferenceEquals(sender, Workspace))
+                {
+                    Flip(Workspace!.HasSession);
+                }
+            });
+        }
+    }
+
+    // ── окно ответа сессии на обороте окон команды («Ваш ПК») ────────────────
+
+    /// <summary>Половина переворота — как у окна вывода в «Проводнике».</summary>
+    private static readonly Duration FlipHalf = new(TimeSpan.FromMilliseconds(130));
+
+    private bool _sessionShown;
+
+    private bool _flipping;
+
+    /// <summary>Переворот как у страницы: окна сжимаются к середине и разворачиваются другой стороной.</summary>
+    private void Flip(bool session)
+    {
+        if (session == _sessionShown)
+        {
+            return;
+        }
+
+        if (_flipping || !IsVisible)
+        {
+            ApplyFace();
+            return;
+        }
+
+        _flipping = true;
+        _sessionShown = session;
+
+        var fold = new DoubleAnimation(1, 0, FlipHalf) { EasingFunction = new SineEase { EasingMode = EasingMode.EaseIn } };
+        fold.Completed += (_, _) =>
+        {
+            ShowFace(session);
+
+            var unfold = new DoubleAnimation(0, 1, FlipHalf) { EasingFunction = new SineEase { EasingMode = EasingMode.EaseOut } };
+            unfold.Completed += (_, _) =>
+            {
+                FlipScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+                _flipping = false;
+
+                // пока крутилось, сессия могла кончиться или начаться снова
+                if (Workspace is { } now && now.HasSession != _sessionShown)
+                {
+                    Flip(now.HasSession);
+                }
+                else if (session)
+                {
+                    SessionBox.Focus();
+                }
+            };
+            FlipScale.BeginAnimation(ScaleTransform.ScaleXProperty, unfold);
+        };
+        FlipScale.BeginAnimation(ScaleTransform.ScaleXProperty, fold);
+    }
+
+    /// <summary>Сторона без переворота — при смене вкладки.</summary>
+    private void ApplyFace()
+    {
+        FlipScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        _flipping = false;
+        _sessionShown = Workspace?.HasSession == true;
+        ShowFace(_sessionShown);
+    }
+
+    private void ShowFace(bool session)
+    {
+        SessionFace.Visibility = session ? Visibility.Visible : Visibility.Collapsed;
+        KeepSessionCommand.IsChecked = AppState.Current.Settings.SessionKeepCommand;
+        StepsScroll.Visibility = session ? Visibility.Collapsed : Visibility.Visible;
+
+        // черновик ответа — свой у вкладки
+        _loadingDraft = true;
+        SessionBox.Text = Workspace?.SessionDraft ?? string.Empty;
+        _loadingDraft = false;
+    }
+
+    private bool _loadingDraft;
+
+    private void OnSessionTextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (!_loadingDraft && Workspace is { } workspace)
+        {
+            workspace.SessionDraft = SessionBox.Text;
+        }
+    }
+
+    /// <summary>Enter — отправить, Shift+Enter — новая строка, Ctrl+C без выделения — прервать в сессии, как в терминале.</summary>
+    private void OnSessionKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.C
+            && System.Windows.Input.Keyboard.Modifiers == System.Windows.Input.ModifierKeys.Control
+            && SessionBox.SelectionLength == 0)
+        {
+            e.Handled = true;
+            OnInterruptSession(sender, e);
+            return;
+        }
+
+        if (e.Key == System.Windows.Input.Key.Enter
+            && (System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Shift) == 0)
+        {
+            e.Handled = true;
+            SendSession();
+        }
+    }
+
+    private void OnSendSession(object sender, RoutedEventArgs e) => SendSession();
+
+    /// <summary>«Сохранять команду» — одна на программу, по умолчанию снята.</summary>
+    private void OnKeepSessionCommand(object sender, RoutedEventArgs e)
+    {
+        AppState.Current.Settings.SessionKeepCommand = KeepSessionCommand.IsChecked == true;
+        AppState.Current.SaveSettings();
+        SessionBox.Focus();
+    }
+
+    private void SendSession()
+    {
+        if (Workspace is not { } workspace)
+        {
+            return;
+        }
+
+        if (workspace.SendToSession(SessionBox.Text) is { } refused)
+        {
+            AppLog.Hint(refused, LogLevel.Warning);
+            return;
+        }
+
+        // «Сохранять команду»: набранное остаётся — поправить и отправить снова; без неё окно очищается
+        if (!AppState.Current.Settings.SessionKeepCommand)
+        {
+            SessionBox.Clear();
+        }
+
+        SessionBox.Focus();
+    }
+
+    /// <summary>Вставка из буфера заменяет окно ответа целиком — как у окна команды.</summary>
+    private void OnPasteSession(object sender, RoutedEventArgs e)
+    {
+        string text;
+
+        try
+        {
+            text = Clipboard.ContainsText() ? Clipboard.GetText() : string.Empty;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Hint("Не удалось прочитать буфер обмена: " + ex.Message, LogLevel.Warning);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            AppLog.Hint("В буфере обмена нет текста.", LogLevel.Warning);
+            return;
+        }
+
+        text = text.Replace("\r\n", "\n", StringComparison.Ordinal).Trim();
+        SessionBox.Text = text;
+        SessionBox.CaretIndex = text.Length;
+        SessionBox.Focus();
+    }
+
+    private void OnClearSession(object sender, RoutedEventArgs e)
+    {
+        SessionBox.Clear();
+        SessionBox.Focus();
+    }
+
+    /// <summary>♡ у окна ответа: команда из избранного встаёт в него; запись из нескольких окон — строками подряд.</summary>
+    private void OnOpenBookSession(object sender, RoutedEventArgs e)
+    {
+        if (Workspace is not { } workspace)
+        {
+            return;
+        }
+
+        var window = new SavedCommandStep { Text = SessionBox.Text.Trim() };
+        var request = new CommandBookRequest
+        {
+            Section = AppSection.Command,
+            Tab = workspace,
+            Window = window,
+            AllWindows = [window],
+        };
+
+        if (CommandBookDialog.Ask(Window.GetWindow(this), request) is not { } snippet)
+        {
+            return;
+        }
+
+        var text = snippet.IsMulti
+            ? string.Join("\n", snippet.AsSteps().Select(s => s.Text.TrimEnd()))
+            : snippet.Command;
+
+        SessionBox.Text = text;
+        SessionBox.CaretIndex = text.Length;
+        SessionBox.Focus();
+        AppLog.Echo($"Подставлена команда {CommandBookDialog.Origin(snippet)}");
+    }
+
+    private void OnInterruptSession(object sender, RoutedEventArgs e)
+    {
+        if (Workspace?.InterruptSession() is { } refused)
+        {
+            AppLog.Hint(refused, LogLevel.Warning);
+        }
+
+        SessionBox.Focus();
     }
 
     /// <summary>
@@ -282,6 +506,16 @@ public partial class CommandPage : Page
 
     private void OnHistoryPicked(object sender, SelectionChangedEventArgs e)
     {
+        // сессия открыта — команда из истории встаёт в окно ответа, а не в окно команды
+        if (e.AddedItems.Count > 0 && HistoryBox.SelectedItem is string picked && _sessionShown)
+        {
+            SessionBox.Text = picked;
+            SessionBox.CaretIndex = picked.Length;
+            SessionBox.Focus();
+            HistoryBox.SelectedItem = null;
+            return;
+        }
+
         if (e.AddedItems.Count > 0 && HistoryBox.SelectedItem is string text && ActiveStep is { } step)
         {
             step.Text = text;
@@ -526,7 +760,8 @@ public partial class CommandPage : Page
     /// </summary>
     private async Task RunEverywhereAsync(Workspace workspace)
     {
-        var all = AppState.Current.CommandTabs.Where(t => !t.IsPersonal).ToList();
+        // «Ваш ПК» и серверы — разные ряды вкладок: «везде» — это все вкладки открытого ряда
+        var all = AppState.Current.CommandTabs.Where(t => !t.IsPersonal && t.LocalPc == workspace.LocalPc).ToList();
 
         // широкое действие: команды уходят со всех вкладок сразу — сначала спросить
         if (!ConfirmDialog.Ask(

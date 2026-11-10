@@ -123,10 +123,30 @@ public sealed class OutputFeed
         UnbindChain();
     }
 
+    /// <summary>«Не очищать»: прогон, за строками которого следим, и сами строки этого сервера.</summary>
+    private OperationBatch? _wholeBatch;
+    private readonly List<OperationResult> _wholeRows = [];
+
     /// <summary>Чьи команды идут следом — заново: сменилась галочка, строка или прогон команд.</summary>
     private void Rebind()
     {
         UnbindChain();
+
+        // «Не очищать» — весь вывод сервера по строкам журнала подряд: следим за всеми его строками
+        if (AppState.Current.OutputWhole && _row?.Batch is { } batch)
+        {
+            _wholeBatch = batch;
+            batch.Results.CollectionChanged += OnChainResults;
+
+            foreach (var row in batch.AllRows.Where(r => r.Server.Id == _row.Server.Id && !ReferenceEquals(r, _row)))
+            {
+                row.PropertyChanged += OnTextChanged;
+                _wholeRows.Add(row);
+            }
+
+            Push();
+            return;
+        }
 
         _chain = _row is null ? null : AppState.Current.ChainBatchOf(_row);
 
@@ -156,13 +176,25 @@ public sealed class OutputFeed
             _after.PropertyChanged -= OnTextChanged;
         }
 
+        if (_wholeBatch is not null)
+        {
+            _wholeBatch.Results.CollectionChanged -= OnChainResults;
+        }
+
+        foreach (var row in _wholeRows)
+        {
+            row.PropertyChanged -= OnTextChanged;
+        }
+
+        _wholeRows.Clear();
+        _wholeBatch = null;
         _chain = null;
         _after = null;
     }
 
     private void OnStateChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(AppState.CopyWithChain))
+        if (e.PropertyName is nameof(AppState.CopyWithChain) or nameof(AppState.OutputWhole))
         {
             Rebind();
         }
@@ -178,7 +210,19 @@ public sealed class OutputFeed
         }
     }
 
-    private void Push() => OutputColoring.SetText(_box, Compose(_row, _after));
+    private void Push()
+    {
+        // «Не очищать»: строки этого сервера подряд, от ранней к поздней, — как один терминал
+        if (_wholeBatch is not null && _row is not null)
+        {
+            var rows = _wholeBatch.AllRows.Where(r => r.Server.Id == _row.Server.Id).ToList();
+            OutputColoring.SetText(_box, string.Join(Environment.NewLine + Environment.NewLine,
+                rows.Select(r => Compose(r, null)).Where(t => t.Trim().Length > 0)));
+            return;
+        }
+
+        OutputColoring.SetText(_box, Compose(_row, _after));
+    }
 
     /// <summary>
     /// Вывод сервера и, если есть, вывод его команд после копирования — одним текстом.

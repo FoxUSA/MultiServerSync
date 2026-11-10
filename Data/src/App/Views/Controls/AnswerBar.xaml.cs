@@ -69,6 +69,20 @@ public partial class AnswerBar : UserControl
                 return;
             }
 
+            // сессия «Ваш ПК»: ответ — новой строкой журнала, как из окна ответа наверху
+            if (result.Server.IsLocalPc
+                && AppState.Current.AllWorkspaces.FirstOrDefault(w => ReferenceEquals(w.Session, result.SessionOf ?? result)) is { } tab)
+            {
+                if (tab.SendToSession(text) is { } refused)
+                {
+                    AppLog.Hint(refused, LogLevel.Warning);
+                    return;
+                }
+
+                AnswerBox.Clear();
+                return;
+            }
+
             if (!input.Send(text))
             {
                 AppLog.Hint($"{result.Server.PaneLabel}: команда уже не принимает ввод.", LogLevel.Warning);

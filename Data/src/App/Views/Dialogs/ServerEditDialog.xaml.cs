@@ -77,6 +77,8 @@ public partial class ServerEditDialog : FluentWindow
 
     private ServerEntry Snapshot() => new()
     {
+        // ключ сервера запоминается за записью — проверка в окне идёт от её имени
+        Id = _target.Id,
         Name = NameBox.Text.Trim(),
         Host = HostBox.Text.Trim(),
         Port = (int)(PortBox.Value ?? 22),
