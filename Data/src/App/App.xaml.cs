@@ -82,6 +82,10 @@ public partial class App : Application
         // крестик и другие кнопки заголовка подсвечиваются под курсором всегда, а не через раз
         TitleBarHover.Register();
 
+        // иконки папок заново при каждом запуске, где бы папка ни лежала: архиваторы, облака и
+        // переносы между ПК их съедают. Сразу, до пароля — закрыли окно пароля, а иконки уже на месте
+        Task.Run(FolderIcons.Restore);
+
         startup.Mark("подготовка");
         AppState.Current.Load();
         startup.Mark("загрузка серверов и вкладок");
@@ -116,9 +120,6 @@ public partial class App : Application
         AppLog.Debug($"Запуск. Версия {AppVersion.Details}.");
         AppLog.Debug($"Программа: {AppPaths.DataDir}");
         AppLog.Debug($"Настройки пользователя: {AppPaths.UserDataDir}");
-
-        // иконки папок чинятся при каждом запуске: архиваторы и переносы между ПК их съедают
-        Task.Run(FolderIcons.Restore);
 
         var window = new MainWindow();
         startup.Mark("создание окна");

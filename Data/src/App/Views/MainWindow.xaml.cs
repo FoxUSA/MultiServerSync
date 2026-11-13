@@ -72,7 +72,7 @@ public partial class MainWindow : FluentWindow
         // умный режим спрашивает посреди окна
         SmartSwitch.IsChecked = settings.SmartMode;
 
-        // режим админа стоит так, как на деле запущен терминал «Ваш ПК»
+        // режим админа стоит так, как на деле запущен терминал «PowerShell»
         ShowAdminSwitch();
         AdminShell.Changed += () =>
         {
@@ -174,7 +174,7 @@ public partial class MainWindow : FluentWindow
 
         AppState.Current.OperationFinished += OnOperationFinished;
 
-        // ответ в сессию «Ваш ПК» отработал — «авто» вкладки кладёт в буфер его вывод, как вывод законченной команды
+        // ответ в сессию «PowerShell» отработал — «авто» вкладки кладёт в буфер его вывод, как вывод законченной команды
         AppState.Current.TurnFinished += turn =>
         {
             if (turn.Batch is { } batch && State.TabOfBatch(batch).AutoCopy)
@@ -830,7 +830,7 @@ public partial class MainWindow : FluentWindow
     {
         if (sender is FrameworkElement { DataContext: ServerSet set })
         {
-            // «Ваш ПК»: набор — это снова серверы, и выбранный набор ложится на серверную вкладку
+            // «PowerShell»: набор — это снова серверы, и выбранный набор ложится на серверную вкладку
             State.SwitchLocalPc(false);
             State.PickPaneSet(set);
         }
@@ -852,7 +852,7 @@ public partial class MainWindow : FluentWindow
         Navigate(typeof(ServersPage));
     }
 
-    /// <summary>«Ваш ПК» под наборами: «Команда» переходит на свои вкладки этого компьютера.</summary>
+    /// <summary>«PowerShell» под наборами: «Команда» переходит на свои вкладки этого компьютера.</summary>
     private void OnPickLocalPc(object sender, RoutedEventArgs e) => State.SwitchLocalPc(true);
 
     private void OnSmartModeChanged(object sender, RoutedEventArgs e)
@@ -866,15 +866,15 @@ public partial class MainWindow : FluentWindow
             : "Умный режим выключен.");
     }
 
-    /// <summary>Свитч «Режим админа» — по тому, от кого на деле выполняются команды «Ваш ПК».</summary>
+    /// <summary>Свитч «Режим админа» — по тому, от кого на деле выполняются команды «PowerShell».</summary>
     private void ShowAdminSwitch()
     {
         AdminSwitch.IsChecked = AdminShell.IsOn;
         AdminSwitch.ToolTip = AdminShell.ProcessElevated
-            ? "Программа запущена от администратора — команды «Ваш ПК» и так идут с его правами. Выключить — перезапустить программу обычным способом"
+            ? "Программа запущена от администратора — команды «PowerShell» и так идут с его правами. Выключить — перезапустить программу обычным способом"
             : AdminShell.IsOn
-                ? "Команды «Ваш ПК» выполняются от администратора. Выключение вернёт права пользователя"
-                : "Команды «Ваш ПК» выполняются от пользователя. Включение спросит права администратора в окне Windows";
+                ? "Команды «PowerShell» выполняются от администратора. Выключение вернёт права пользователя"
+                : "Команды «PowerShell» выполняются от пользователя. Включение спросит права администратора в окне Windows";
     }
 
     /// <summary>Режим админа: включение — окно UAC и помощник с правами администратора, выключение — помощник закрывается.</summary>
@@ -903,7 +903,7 @@ public partial class MainWindow : FluentWindow
             else
             {
                 AdminShell.Stop();
-                AppLog.Hint("Режим админа выключен: команды «Ваш ПК» — от пользователя.");
+                AppLog.Hint("Режим админа выключен: команды «PowerShell» — от пользователя.");
             }
 
             ShowAdminSwitch();
@@ -921,7 +921,7 @@ public partial class MainWindow : FluentWindow
         }
         else
         {
-            AppLog.Hint("Режим админа включён: команды «Ваш ПК» выполняются от администратора.", LogLevel.Success);
+            AppLog.Hint("Режим админа включён: команды «PowerShell» выполняются от администратора.", LogLevel.Success);
         }
     }
 
@@ -948,7 +948,7 @@ public partial class MainWindow : FluentWindow
     {
         _paneServerToEdit = null;
 
-        // «Ваш ПК»: щелчок по серверу возвращает к серверам — на серверную вкладку, и сервер там отмечается.
+        // «PowerShell»: щелчок по серверу возвращает к серверам — на серверную вкладку, и сервер там отмечается.
         // Строки в панели уже от другой вкладки: щелчок до галочки не идёт
         if (e.ClickCount == 1 && sender is FrameworkElement { DataContext: Models.ServerCheck picked } && State.CommandLocalPc)
         {
@@ -990,7 +990,7 @@ public partial class MainWindow : FluentWindow
             ServerEditDialog.EditExisting(this, server, State.Section, State.ShowsWorkspaceTabs ? State.ActiveWorkspace : null)));
     }
 
-    /// <summary>Из «Ваш ПК» — к серверам: сервер, по которому щёлкнули, отмечается, если ещё не отмечен.</summary>
+    /// <summary>Из «PowerShell» — к серверам: сервер, по которому щёлкнули, отмечается, если ещё не отмечен.</summary>
     private void BackToServers(Models.ServerEntry server)
     {
         State.SwitchLocalPc(false);
@@ -1301,13 +1301,13 @@ public partial class MainWindow : FluentWindow
 
         var explorer = State.Section == AppSection.Explorer;
 
-        // «Ваш ПК»: цель — этот компьютер, без адреса и замка
+        // «PowerShell»: цель — этот компьютер, без адреса и замка
         if (State.Section == AppSection.Command && tab.LocalPc)
         {
             ExplorerServerIcon.Source = ShellIcons.Computer;
-            ExplorerServerName.Text = "Ваш ПК";
+            ExplorerServerName.Text = "PowerShell";
             ExplorerServerUser.Text = string.Empty;
-            ExplorerServerAddress.Text = AdminShell.IsOn ? "PowerShell · админ" : "PowerShell";
+            ExplorerServerAddress.Text = AdminShell.IsOn ? "админ" : string.Empty;
             ExplorerServerTag.ToolTip = "Команды вкладки выполняются на этом компьютере. Щелчок — список серверов: выбор сервера вернёт к серверам";
             ExplorerServerLock.Visibility = Visibility.Collapsed;
             ExplorerServerTag.Visibility = Visibility.Visible;
@@ -1391,7 +1391,7 @@ public partial class MainWindow : FluentWindow
         }
 
         // замки — те же, что в строках панели слева; отметки читаются заново: замок отмечает сервер.
-        // «Ваш ПК» — все серверы приглушены, выбор любого возвращает к серверам
+        // «PowerShell» — все серверы приглушены, выбор любого возвращает к серверам
         var onPc = State.Section == AppSection.Command && tab.LocalPc;
 
         Controls.ServerMenu.Show(
@@ -1518,7 +1518,7 @@ public partial class MainWindow : FluentWindow
     /// <summary>Лента показывает архив, а не основные вкладки.</summary>
     private bool _archiveMode;
 
-    /// <summary>«Команда» в режиме «Ваш ПК»: на ленте только вкладки этого компьютера.</summary>
+    /// <summary>«Команда» в режиме «PowerShell»: на ленте только вкладки этого компьютера.</summary>
     private bool _pcMode;
 
     /// <summary>На ленте «Команд» одна личная вкладка — на неё перешли с «Копирования». Null — лента обычная, личных на ней нет.</summary>
@@ -1634,7 +1634,7 @@ public partial class MainWindow : FluentWindow
         // в основной ленте первая (основная) вкладка закреплена, в архиве закреплённых нет
         if (_tabReorder is not null)
         {
-            // у ряда «Ваш ПК» своя основная вкладка — тоже первой и закреплена
+            // у ряда «PowerShell» своя основная вкладка — тоже первой и закреплена
             _tabReorder.FixedCount = _archiveMode ? 0 : 1;
         }
 
@@ -1768,7 +1768,7 @@ public partial class MainWindow : FluentWindow
 
         var tabs = State.Tabs;
 
-        // «Ваш ПК» — свой ряд и свой архив: из него — только в его же вкладки
+        // «PowerShell» — свой ряд и свой архив: из него — только в его же вкладки
         bool Mine(Workspace? t) => t is not null && t.LocalPc == _pcMode && !t.IsPersonal;
 
         if (_archiveMode)

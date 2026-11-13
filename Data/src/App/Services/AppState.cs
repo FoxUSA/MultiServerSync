@@ -365,25 +365,25 @@ public sealed class AppState : ObservableObject
     /// <summary>«Отметить все» в одиночном выборе смысла не имеет — кнопку прячем.</summary>
     public bool ShowsToggleAllServers => !PaneSingleSelect;
 
-    /// <summary>«Ваш ПК» под «Наборы серверов» — только на «Команде».</summary>
+    /// <summary>«PowerShell» под «Наборы серверов» — только на «Команде».</summary>
     public bool ShowsLocalPc => _section == AppSection.Command;
 
-    /// <summary>Название основной вкладки ряда «Ваш ПК».</summary>
-    public const string LocalPcTitle = "Ваш ПК";
+    /// <summary>Название основной вкладки ряда «PowerShell».</summary>
+    public const string LocalPcTitle = "PowerShell";
 
     /// <summary>Открытая вкладка другого ряда «Команды»: переключение режима возвращает на неё.</summary>
     private Workspace? _commandOtherMode;
 
-    /// <summary>«Команда» в режиме «Ваш ПК»: открыта вкладка этого компьютера, на ленте — только такие.</summary>
+    /// <summary>«Команда» в режиме «PowerShell»: открыта вкладка этого компьютера, на ленте — только такие.</summary>
     public bool CommandLocalPc => _section == AppSection.Command && ActiveWorkspace.LocalPc;
 
-    /// <summary>«Умный режим» — про серверы; у «Ваш ПК» на его месте «Режим админа».</summary>
+    /// <summary>«Умный режим» — про серверы; у «PowerShell» на его месте «Режим админа».</summary>
     public bool ShowsSmartMode => !CommandLocalPc;
 
     /// <summary>
-    /// Переключение «Команды» между серверами и «Ваш ПК». У каждого режима свои вкладки — и с ними своя
+    /// Переключение «Команды» между серверами и «PowerShell». У каждого режима свои вкладки — и с ними своя
     /// память: окна команд, история, место в избранном. Открывается вкладка, на которой режим оставили;
-    /// вкладок «Ваш ПК» ещё нет — заводится первая.
+    /// вкладок «PowerShell» ещё нет — заводится первая.
     /// </summary>
     public void SwitchLocalPc(bool on)
     {
@@ -405,7 +405,7 @@ public sealed class AppState : ObservableObject
         ActiveWorkspace = target;
         RaiseMany(nameof(CommandLocalPc), nameof(ShowsSmartMode));
         AppLog.Hint(on
-            ? "Ваш ПК: команды выполняются на этом компьютере, вкладки и избранное — свои. Щелчок по серверу или набору вернёт к серверам."
+            ? "PowerShell: команды выполняются на этом компьютере, вкладки и избранное — свои. Щелчок по серверу или набору вернёт к серверам."
             : "Команды снова выполняются на серверах.");
     }
 
@@ -726,7 +726,7 @@ public sealed class AppState : ObservableObject
     /// <summary>Галочка «+ команды» у копирования вывода: копировать и вывод личных команд вкладки.</summary>
     /// <summary>
     /// «Сохранять вывод» у окна вывода: в нём весь вывод выбранного сервера по всем строкам журнала подряд —
-    /// например, вся сессия «Ваш ПК» со всеми ответами. Снято — только выбранная строка.
+    /// например, вся сессия «PowerShell» со всеми ответами. Снято — только выбранная строка.
     /// </summary>
     public bool OutputWhole
     {
@@ -857,7 +857,7 @@ public sealed class AppState : ObservableObject
 
     public void NotifyFinished(OperationBatch batch) => OperationFinished?.Invoke(batch);
 
-    /// <summary>Ответ в сессию «Ваш ПК» отработал: сессия снова ждёт ввода. Для «авто» — как конец команды.</summary>
+    /// <summary>Ответ в сессию «PowerShell» отработал: сессия снова ждёт ввода. Для «авто» — как конец команды.</summary>
     public event Action<OperationResult>? TurnFinished;
 
     public void NotifyTurnFinished(OperationResult turn) => TurnFinished?.Invoke(turn);
@@ -918,7 +918,7 @@ public sealed class AppState : ObservableObject
             switch (section)
             {
                 case AppSection.Command:
-                    // перешли в другой ряд («Ваш ПК» / серверы) — прежняя вкладка запоминается за своим рядом
+                    // перешли в другой ряд («PowerShell» / серверы) — прежняя вкладка запоминается за своим рядом
                     if (current is { IsPersonal: false } before && !value.IsPersonal && before.LocalPc != value.LocalPc)
                     {
                         _commandOtherMode = before;
@@ -1296,14 +1296,14 @@ public sealed class AppState : ObservableObject
     /// Новая вкладка в открытом разделе — копирования или команды. <paramref name="archived"/> —
     /// добавили, глядя в архив: ярлык сразу там, а не в основной ленте.
     /// </summary>
-    /// <param name="localPc">Вкладка «Ваш ПК»; null — того же ряда, что открытая.</param>
+    /// <param name="localPc">Вкладка «PowerShell»; null — того же ряда, что открытая.</param>
     public Workspace AddWorkspace(string? title = null, bool archived = false, bool? localPc = null)
     {
         var tabs = Tabs;
         var source = tabs.Count > 0 ? ActiveWorkspace : null;
         var pc = localPc ?? (source?.LocalPc == true && !source.IsPersonal);
 
-        // первая вкладка «Ваш ПК» — основная своего ряда: не закрывается и не переименовывается
+        // первая вкладка «PowerShell» — основная своего ряда: не закрывается и не переименовывается
         var pcMain = pc && !tabs.Any(t => t.LocalPc);
 
         var workspace = new Workspace(
@@ -1627,7 +1627,7 @@ public sealed class AppState : ObservableObject
     /// </summary>
     private static Workspace NeighborInStrip(IList<Workspace> tabs, int index, bool archived, bool localPc)
     {
-        // «Ваш ПК» — свой ряд: сосед из него же; закрыли последнюю — назад к серверам
+        // «PowerShell» — свой ряд: сосед из него же; закрыли последнюю — назад к серверам
         bool Same(Workspace t) => t.IsArchived == archived && !t.IsPersonal && t.LocalPc == localPc;
 
         for (var i = Math.Min(index, tabs.Count) - 1; i >= 0; i--)
@@ -2267,7 +2267,7 @@ public sealed class AppState : ObservableObject
                 });
             }
 
-            // у ряда «Ваш ПК» своя основная вкладка — первая из его вкладок
+            // у ряда «PowerShell» своя основная вкладка — первая из его вкладок
             var pcMain = commandStates.FindIndex(s => s.LocalPc);
 
             for (var i = 0; i < commandStates.Count; i++)

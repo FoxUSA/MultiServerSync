@@ -14,7 +14,7 @@ public static class CommandBook
 
     private static AppSettings Settings => AppState.Current.Settings;
 
-    /// <summary>«Ваш ПК» на «Команде» — своё избранное: команды для этого компьютера с серверными не мешаются.</summary>
+    /// <summary>«PowerShell» на «Команде» — своё избранное: команды для этого компьютера с серверными не мешаются.</summary>
     private static bool Pc => AppState.Current.CommandLocalPc;
 
     public static ObservableCollection<CommandSnippet> Snippets => Pc ? Settings.LocalCommandBook : Settings.CommandBook;

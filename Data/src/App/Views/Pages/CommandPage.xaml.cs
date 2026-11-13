@@ -271,7 +271,7 @@ public partial class CommandPage : Page
         }
     }
 
-    // ── окно ответа сессии на обороте окон команды («Ваш ПК») ────────────────
+    // ── окно ответа сессии на обороте окон команды («PowerShell») ────────────────
 
     /// <summary>Половина переворота — как у окна вывода в «Проводнике».</summary>
     private static readonly Duration FlipHalf = new(TimeSpan.FromMilliseconds(130));
@@ -760,7 +760,7 @@ public partial class CommandPage : Page
     /// </summary>
     private async Task RunEverywhereAsync(Workspace workspace)
     {
-        // «Ваш ПК» и серверы — разные ряды вкладок: «везде» — это все вкладки открытого ряда
+        // «PowerShell» и серверы — разные ряды вкладок: «везде» — это все вкладки открытого ряда
         var all = AppState.Current.CommandTabs.Where(t => !t.IsPersonal && t.LocalPc == workspace.LocalPc).ToList();
 
         // широкое действие: команды уходят со всех вкладок сразу — сначала спросить

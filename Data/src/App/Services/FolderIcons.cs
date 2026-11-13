@@ -10,10 +10,10 @@ namespace MultiServerSync.Services;
 /// Родные иконки папок: MultiServerSync, Data и UserData.
 ///
 /// Иконки живут в Data и обновляются вместе с программой, а сами .ico зашиты
-/// ещё и в саму сборку ресурсами. Архиваторы, синхронизация и переносы между
-/// компьютерами регулярно съедают и desktop.ini, и .ico — поэтому при каждом
-/// запуске раскладка проверяется и молча восстанавливается: и файлы иконок,
-/// и desktop.ini, и атрибуты, без которых проводник иконку не покажет.
+/// ещё и в саму сборку ресурсами. Архиваторы, облака и переносы между компьютерами
+/// регулярно съедают и desktop.ini, и .ico, и атрибуты — поэтому при каждом запуске
+/// иконки назначаются заново, где бы папка ни лежала: файлы иконок, desktop.ini,
+/// атрибуты, пометка «скачано из интернета», и проводнику говорится перерисовать папки.
 /// </summary>
 public static class FolderIcons
 {
@@ -22,7 +22,7 @@ public static class FolderIcons
     public const string UserDataIconName = "user_data.ico";
 
     /// <summary>
-    /// Проверить и при необходимости восстановить иконки всех трёх папок.
+    /// Проверить и назначить иконки всех трёх папок заново.
     /// Ошибки только в журнал: без иконок программа работает как обычно.
     /// </summary>
     public static void Restore()
@@ -33,7 +33,7 @@ public static class FolderIcons
 
             foreach (var name in new[] { AppIconName, DataIconName, UserDataIconName })
             {
-                if (EnsureIconFile(name))
+                if (Try(() => EnsureIconFile(name), name))
                 {
                     restoredIcons.Add(name);
                 }
@@ -42,17 +42,17 @@ public static class FolderIcons
             var changed = new List<string>();
 
             // путь в desktop.ini относительный: папку можно перенести куда угодно, иконка не отвяжется
-            if (ApplyFolderIcon(AppPaths.RootDir, $"Data\\{AppIconName}"))
+            if (Try(() => ApplyFolderIcon(AppPaths.RootDir, $"Data\\{AppIconName}"), AppPaths.RootDir))
             {
                 changed.Add(Path.GetFileName(AppPaths.RootDir));
             }
 
-            if (ApplyFolderIcon(AppPaths.DataDir, DataIconName))
+            if (Try(() => ApplyFolderIcon(AppPaths.DataDir, DataIconName), AppPaths.DataDir))
             {
                 changed.Add("Data");
             }
 
-            if (ApplyFolderIcon(AppPaths.UserDataDir, $"..\\Data\\{UserDataIconName}"))
+            if (Try(() => ApplyFolderIcon(AppPaths.UserDataDir, $"..\\Data\\{UserDataIconName}"), AppPaths.UserDataDir))
             {
                 changed.Add("UserData");
             }
@@ -65,12 +65,29 @@ public static class FolderIcons
             if (changed.Count > 0)
             {
                 AppLog.Debug("Восстановлены иконки папок: " + string.Join(", ", changed) + ".");
-                RefreshShell();
             }
+
+            // проводник держит иконки в кэше: на новом ПК он успевает показать папки голыми
+            // ещё до первого запуска — перерисовать их просим каждый раз, а не только после починки
+            RefreshShell(restoredIcons.Count > 0 || changed.Count > 0);
         }
         catch (Exception ex)
         {
             AppLog.Debug("Не удалось восстановить иконки папок: " + ex.Message);
+        }
+    }
+
+    /// <summary>Одна папка или иконка не далась — остальные всё равно чинятся.</summary>
+    private static bool Try(Func<bool> action, string what)
+    {
+        try
+        {
+            return action();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Debug($"Иконка папки: {what} — {ex.Message}");
+            return false;
         }
     }
 
@@ -99,19 +116,22 @@ public static class FolderIcons
             bytes = buffer.ToArray();
         }
 
-        // сравниваем по размеру: битый или обрезанный архиватором файл так и ловится
-        if (File.Exists(target) && new FileInfo(target).Length == bytes.Length)
+        // сравниваем содержимое целиком: заодно облако (Dropbox, OneDrive) докачивает файл,
+        // который лежал на диске только ссылкой, — из такого проводник иконку не берёт
+        var same = File.Exists(target) && SafeReadBytes(target).AsSpan().SequenceEqual(bytes);
+
+        if (!same)
         {
-            return false;
+            if (File.Exists(target))
+            {
+                File.SetAttributes(target, FileAttributes.Normal);
+            }
+
+            File.WriteAllBytes(target, bytes);
         }
 
-        if (File.Exists(target))
-        {
-            File.SetAttributes(target, FileAttributes.Normal);
-        }
-
-        File.WriteAllBytes(target, bytes);
-        return true;
+        var unblocked = DropInternetMark(target);
+        return !same || unblocked;
     }
 
     /// <summary>Прописать папке иконку. true — если что-то пришлось починить.</summary>
@@ -146,6 +166,9 @@ public static class FolderIcons
             File.WriteAllText(iniPath, expected, new UTF8Encoding(false));
         }
 
+        // распакованный из скачанного архива desktop.ini несёт пометку «из интернета»
+        var unblocked = DropInternetMark(iniPath);
+
         // desktop.ini обязан быть скрытым и системным, иначе он просто мозолит глаза
         var wantedFileAttributes = FileAttributes.Hidden | FileAttributes.System;
         var fileAttributesOk = (File.GetAttributes(iniPath) & wantedFileAttributes) == wantedFileAttributes;
@@ -164,8 +187,11 @@ public static class FolderIcons
             dir.Attributes |= FileAttributes.ReadOnly;
         }
 
-        return !iniOk || !fileAttributesOk || !dirAttributesOk;
+        return !iniOk || unblocked || !fileAttributesOk || !dirAttributesOk;
     }
+
+    /// <summary>Снять с файла пометку «скачано из интернета». true — если она была.</summary>
+    private static bool DropInternetMark(string path) => DeleteFile(path + ":Zone.Identifier");
 
     private static string SafeRead(string path)
     {
@@ -179,31 +205,77 @@ public static class FolderIcons
         }
     }
 
-    /// <summary>Сказать проводнику перечитать папки: иначе иконка сменится когда-нибудь потом.</summary>
-    private static void RefreshShell()
+    private static byte[] SafeReadBytes(string path)
     {
-        foreach (var folder in new[] { AppPaths.RootDir, AppPaths.DataDir, AppPaths.UserDataDir })
+        try
         {
-            var pointer = Marshal.StringToHGlobalUni(folder);
+            return File.ReadAllBytes(path);
+        }
+        catch
+        {
+            return Array.Empty<byte>();
+        }
+    }
 
-            try
+    /// <summary>
+    /// Сказать проводнику перерисовать иконки самих папок (в окне, где они лежат) и их содержимое.
+    /// Иначе иконка сменится когда-нибудь потом — или так и останется голой до перезагрузки.
+    /// </summary>
+    private static void RefreshShell(bool changed)
+    {
+        var folders = new[] { AppPaths.RootDir, AppPaths.DataDir, AppPaths.UserDataDir };
+        var parents = new List<string>();
+
+        foreach (var folder in folders)
+        {
+            Notify(SHCNE_UPDATEITEM, folder);
+            Notify(SHCNE_UPDATEDIR, folder);
+
+            var parent = Path.GetDirectoryName(folder);
+
+            if (!string.IsNullOrEmpty(parent) && !parents.Contains(parent, StringComparer.OrdinalIgnoreCase))
             {
-                SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW, pointer, IntPtr.Zero);
-            }
-            finally
-            {
-                Marshal.FreeHGlobal(pointer);
+                parents.Add(parent);
             }
         }
 
-        SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, IntPtr.Zero, IntPtr.Zero);
+        foreach (var parent in parents)
+        {
+            Notify(SHCNE_UPDATEDIR, parent);
+        }
+
+        // общий сброс кэша иконок — только когда на диске правда что-то поменялось
+        if (changed)
+        {
+            SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST | SHCNF_FLUSHNOWAIT, IntPtr.Zero, IntPtr.Zero);
+        }
+    }
+
+    private static void Notify(int eventId, string path)
+    {
+        var pointer = Marshal.StringToHGlobalUni(path);
+
+        try
+        {
+            SHChangeNotify(eventId, SHCNF_PATHW | SHCNF_FLUSHNOWAIT, pointer, IntPtr.Zero);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(pointer);
+        }
     }
 
     private const int SHCNE_UPDATEDIR = 0x00001000;
+    private const int SHCNE_UPDATEITEM = 0x00002000;
     private const int SHCNE_ASSOCCHANGED = 0x08000000;
     private const uint SHCNF_IDLIST = 0x0000;
     private const uint SHCNF_PATHW = 0x0005;
+    private const uint SHCNF_FLUSHNOWAIT = 0x3000;
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern void SHChangeNotify(int eventId, uint flags, IntPtr item1, IntPtr item2);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "DeleteFileW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DeleteFile(string path);
 }

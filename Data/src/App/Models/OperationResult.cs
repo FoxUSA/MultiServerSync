@@ -793,7 +793,7 @@ public sealed class OperationResult : ObservableObject
         }
     }
 
-    // ── сессия «Ваш ПК»: каждый ответ — своей строкой журнала ─────────────────
+    // ── сессия «PowerShell»: каждый ответ — своей строкой журнала ─────────────────
 
     /// <summary>Строка сессии, если это строка одного ответа в неё. Стоп в такой строке останавливает сессию.</summary>
     public OperationResult? SessionOf { get; init; }

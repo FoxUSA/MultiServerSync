@@ -50,7 +50,7 @@ public static class ServerMenu
     /// <param name="isCurrent">Какие строки подсветить — у копирования и команды отмеченных бывает несколько.</param>
     /// <param name="locks">Замки в строках; нет — список без замков («Проводник», окно обзора).</param>
     /// <param name="alignRight">Правый край списка — вровень с правым краем кнопки.</param>
-    /// <param name="muted">Все строки приглушены — «Ваш ПК» на «Команде»: сейчас работа не с серверами.</param>
+    /// <param name="muted">Все строки приглушены — «PowerShell» на «Команде»: сейчас работа не с серверами.</param>
     public static void Show(FrameworkElement anchor, Func<ServerEntry, bool> isCurrent, Action<ServerEntry> pick,
         Locks? locks = null, bool alignRight = false, bool muted = false)
     {

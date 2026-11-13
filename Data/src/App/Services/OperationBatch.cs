@@ -180,7 +180,7 @@ public sealed class OperationBatch : ObservableObject
             : null;
 
     /// <summary>
-    /// Сессия «Ваш ПК» ждёт ввода: прогон формально идёт, но ответ отработал — для срока «Хранить вывод»
+    /// Сессия «PowerShell» ждёт ввода: прогон формально идёт, но ответ отработал — для срока «Хранить вывод»
     /// это то же, что конец запуска: отсчёт идёт, а ответ, отправленный после нуля, начинает журнал заново.
     /// </summary>
     private volatile bool _sessionIdle;
@@ -819,7 +819,7 @@ public sealed class OperationBatch : ObservableObject
     }
 
     /// <summary>
-    /// Ответ в сессию «Ваш ПК» — новой строкой, как новый запуск: в выводе ответ и всё, что пришло после него.
+    /// Ответ в сессию «PowerShell» — новой строкой, как новый запуск: в выводе ответ и всё, что пришло после него.
     /// Только из потока окна.
     /// </summary>
     public OperationResult AddSessionTurn(OperationResult session, IReadOnlyList<string> lines)
@@ -835,7 +835,7 @@ public sealed class OperationBatch : ObservableObject
                 Results.Remove(old);
             }
 
-            AppLog.Debug($"Ваш ПК: срок «Хранить вывод» вышел — из журнала убрано строк: {gone.Count}.");
+            AppLog.Debug($"PowerShell: срок «Хранить вывод» вышел — из журнала убрано строк: {gone.Count}.");
         }
 
         _sessionIdle = false;

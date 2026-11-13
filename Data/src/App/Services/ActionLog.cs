@@ -15,8 +15,8 @@ public static class ActionLog
 
     public static readonly ServerEntry Program = new() { Id = "local:program", Name = "Программа", Host = string.Empty };
 
-    /// <summary>«Ваш ПК» на «Команде»: команды идут на этот компьютер, а не на серверы.</summary>
-    public static readonly ServerEntry LocalPc = new() { Id = ServerEntry.LocalPcId, Name = "Ваш ПК", Host = string.Empty };
+    /// <summary>«PowerShell» на «Команде»: команды идут на этот компьютер, а не на серверы.</summary>
+    public static readonly ServerEntry LocalPc = new() { Id = ServerEntry.LocalPcId, Name = "PowerShell", Host = string.Empty };
 
     /// <summary>Условный участник по его Id — для строк терминала, прочитанных после перезапуска.</summary>
     public static ServerEntry? Pseudo(string id) => id switch

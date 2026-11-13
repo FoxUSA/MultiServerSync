@@ -7,7 +7,7 @@ using MultiServerSync.Models;
 namespace MultiServerSync.Services;
 
 /// <summary>
-/// Команда «Ваш ПК»: выполняется на этом компьютере через PowerShell в настоящей консоли Windows (ConPTY),
+/// Команда «PowerShell»: выполняется на этом компьютере через PowerShell в настоящей консоли Windows (ConPTY),
 /// а не на сервере. Программы видят терминал: `ssh` спрашивает пароль, `diskpart` ведёт диалог. Вывод, ответ
 /// на вопрос, таймаут и стоп — те же, что у команды на сервере, чтобы терминал и журнал не различали их.
 /// В «Режиме админа» тот же PowerShell запускает помощник с правами администратора (<see cref="AdminShell"/>).
@@ -48,13 +48,13 @@ public static class LocalShell
                 }
                 catch (Exception ex)
                 {
-                    AppLog.Debug("Ваш ПК: консоль PowerShell не запустилась — " + ex.Message);
+                    AppLog.Debug("PowerShell: консоль PowerShell не запустилась — " + ex.Message);
                     throw;
                 }
 
                 using var process = started;
                 Running[process.Pid] = process;
-                AppLog.Debug($"Ваш ПК: PowerShell в консоли, процесс {process.Pid}, {script.Length} символов команды.");
+                AppLog.Debug($"PowerShell: PowerShell в консоли, процесс {process.Pid}, {script.Length} символов команды.");
 
                 try
                 {
@@ -87,7 +87,7 @@ public static class LocalShell
                     process.CloseConsole(() => clean.LastData);
                     var drained = outReader.Wait(TimeSpan.FromSeconds(20));
 
-                    AppLog.Debug($"Ваш ПК: процесс {process.Pid} закончился, код {process.ExitCode?.ToString() ?? "неизвестен"}"
+                    AppLog.Debug($"PowerShell: процесс {process.Pid} закончился, код {process.ExitCode?.ToString() ?? "неизвестен"}"
                         + (timedOut ? ", не дождались — снят по таймауту" : string.Empty)
                         + (ct.IsCancellationRequested ? ", остановлен" : string.Empty)
                         + (drained ? string.Empty : ", вывод не дочитан за 20 с")
@@ -227,7 +227,7 @@ public static class LocalShell
     /// </summary>
     public static bool Stop(int pid, string signal)
     {
-        AppLog.Debug($"Ваш ПК: стоп {(signal == "INT" ? "Ctrl+C" : signal)} процессу {pid}{(AdminShell.Owns(pid) ? " (через помощника администратора)" : string.Empty)}.");
+        AppLog.Debug($"PowerShell: стоп {(signal == "INT" ? "Ctrl+C" : signal)} процессу {pid}{(AdminShell.Owns(pid) ? " (через помощника администратора)" : string.Empty)}.");
 
         // процесс администратора отсюда не тронуть — им распоряжается помощник
         if (AdminShell.Owns(pid))

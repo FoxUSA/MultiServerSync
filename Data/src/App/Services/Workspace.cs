@@ -2314,21 +2314,21 @@ public sealed class Workspace : ObservableObject
     /// <summary>Куда пойдёт копирование этой вкладки — отмеченные из выбранного набора.</summary>
     public IReadOnlyList<ServerEntry> CopyTargets => Picked(InActiveSet(CopyServers));
 
-    /// <summary>Где выполнится команда этой вкладки — отмеченные из выбранного набора, а в режиме «Ваш ПК» — этот компьютер.</summary>
+    /// <summary>Где выполнится команда этой вкладки — отмеченные из выбранного набора, а в режиме «PowerShell» — этот компьютер.</summary>
     public IReadOnlyList<ServerEntry> CommandTargets => _localPc ? [ActionLog.LocalPc] : Picked(InActiveSet(CommandServers));
 
-    // ── «Ваш ПК»: вкладки команд этого компьютера — свой ряд ярлыков на «Команде» ──
+    // ── «PowerShell»: вкладки команд этого компьютера — свой ряд ярлыков на «Команде» ──
 
     private bool _localPc;
 
     /// <summary>
-    /// Вкладка режима «Ваш ПК»: её команды идут на этот компьютер (PowerShell), серверы приглушены.
+    /// Вкладка режима «PowerShell»: её команды идут на этот компьютер (PowerShell), серверы приглушены.
     /// Такие вкладки — свой ряд ярлыков на «Команде»: у каждой свои окна команд, история и всё остальное.
     /// </summary>
     public bool LocalPc => _localPc;
 
     /// <summary>
-    /// Открытая сессия «Ваш ПК»: команда идёт и принимает ввод (`ssh`, `diskpart`…). Пока она есть, верхнее
+    /// Открытая сессия «PowerShell»: команда идёт и принимает ввод (`ssh`, `diskpart`…). Пока она есть, верхнее
     /// окно «Команды» перевёрнуто окном ответа — набранное уходит в неё, а не запускает новую команду.
     /// </summary>
     public OperationResult? Session =>
@@ -2363,7 +2363,7 @@ public sealed class Workspace : ObservableObject
     {
         if (Session is not { Input: { } input } session)
         {
-            AppLog.Debug($"Ваш ПК [{Title}]: ответ не отправлен — сессии нет (идёт: {CommandBatch.IsRunning}).");
+            AppLog.Debug($"PowerShell [{Title}]: ответ не отправлен — сессии нет (идёт: {CommandBatch.IsRunning}).");
             return "Сессия уже закончилась — ответить некому.";
         }
 
@@ -2389,14 +2389,14 @@ public sealed class Workspace : ObservableObject
         session.IsWaitingInput = false;
         session.Message = "сессия открыта · ответов: " + CommandBatch.AllRows.Count(r => ReferenceEquals(r.SessionOf, session));
 
-        AppLog.Debug($"Ваш ПК [{Title}]: ответ в сессию, строк {lines.Length}: "
+        AppLog.Debug($"PowerShell [{Title}]: ответ в сессию, строк {lines.Length}: "
             + (secret ? "********" : Preview(string.Join(" ⏎ ", lines))));
 
         foreach (var line in lines)
         {
             if (!input.Send(line))
             {
-                AppLog.Debug($"Ваш ПК [{Title}]: ввод не принят — консоль уже закрыта.");
+                AppLog.Debug($"PowerShell [{Title}]: ввод не принят — консоль уже закрыта.");
                 return "Сессия уже не принимает ввод.";
             }
         }
@@ -2434,7 +2434,7 @@ public sealed class Workspace : ObservableObject
         }
 
         turn.Status = status;
-        AppLog.Debug($"Ваш ПК [{Title}]: строка ответа закрыта за {turn.Duration.TotalSeconds:0.0} с, вывода {turn.Output.Length} символов.");
+        AppLog.Debug($"PowerShell [{Title}]: строка ответа закрыта за {turn.Duration.TotalSeconds:0.0} с, вывода {turn.Output.Length} символов.");
     }
 
     /// <summary>Какой набор галочек сейчас правится — чтобы «отмечено 0 из 6» не путало разделы.</summary>
@@ -4429,7 +4429,7 @@ public sealed class Workspace : ObservableObject
                     }
                 }
 
-                // вывод — и в общую строку сервера, и в строку команды. В сессии «Ваш ПК» после ответа —
+                // вывод — и в общую строку сервера, и в строку команды. В сессии «PowerShell» после ответа —
                 // в строку этого ответа
                 void Write(string line)
                 {
@@ -4499,7 +4499,7 @@ public sealed class Workspace : ObservableObject
                                 CommandBatch.SetSessionIdle(waiting);
                             }
 
-                            // сессия «Ваш ПК» после первого ответа: ждёт строка последнего ответа, а не запуск
+                            // сессия «PowerShell» после первого ответа: ждёт строка последнего ответа, а не запуск
                             if (result.Turn is { } turn)
                             {
                                 turn.IsWaitingInput = waiting;
@@ -4507,7 +4507,7 @@ public sealed class Workspace : ObservableObject
 
                                 if (waiting)
                                 {
-                                    AppLog.Debug($"Ваш ПК [{Title}]: ждёт ответа — «{turn.TailText.Trim()}».");
+                                    AppLog.Debug($"PowerShell [{Title}]: ждёт ответа — «{turn.TailText.Trim()}».");
 
                                     // сессия снова ждёт ввода — ответ отработал, как закончившаяся команда: «авто» берёт его вывод
                                     Application.Current.Dispatcher.BeginInvoke(() => AppState.Current.NotifyTurnFinished(turn));
@@ -4518,7 +4518,7 @@ public sealed class Workspace : ObservableObject
 
                             if (waiting && onPc)
                             {
-                                AppLog.Debug($"Ваш ПК [{Title}]: ждёт ответа — «{result.TailText.Trim()}».");
+                                AppLog.Debug($"PowerShell [{Title}]: ждёт ответа — «{result.TailText.Trim()}».");
                             }
 
                             result.IsWaitingInput = waiting;
@@ -4549,8 +4549,8 @@ public sealed class Workspace : ObservableObject
                                     // закрылась — строка последнего ответа закончена
                                     result.Input = input;
                                     AppLog.Debug(input is null
-                                        ? $"Ваш ПК [{Title}]: ввод закрыт — сессия кончилась."
-                                        : $"Ваш ПК [{Title}]: ввод открыт — окно ответа доступно.");
+                                        ? $"PowerShell [{Title}]: ввод закрыт — сессия кончилась."
+                                        : $"PowerShell [{Title}]: ввод открыт — окно ответа доступно.");
 
                                     if (input is null)
                                     {
@@ -5753,7 +5753,7 @@ public sealed class Workspace : ObservableObject
             var pinned = _lockedIds?.Contains(check.Server.Id) == true;
             check.IsLocked = pinned;
 
-            // «Ваш ПК»: команды идут не на серверы — приглушены все, щелчок по любому вернёт к серверам
+            // «PowerShell»: команды идут не на серверы — приглушены все, щелчок по любому вернёт к серверам
             check.IsMuted = (_lockedIds is not null && !pinned) || _localPc;
         }
 
@@ -5768,7 +5768,7 @@ public sealed class Workspace : ObservableObject
     {
         if (_lockedIds is null)
         {
-            // «Ваш ПК» приглушает и пришедшие серверы
+            // «PowerShell» приглушает и пришедшие серверы
             if (_localPc)
             {
                 ApplyLock();

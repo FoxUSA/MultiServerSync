@@ -411,7 +411,7 @@ public partial class ResultsView : UserControl
             ResultsGrid.ItemsSource = _rows;
         }
 
-        // ответ в сессию «Ваш ПК» — новая строка: таблица переходит на неё, и её вывод сразу перед глазами.
+        // ответ в сессию «PowerShell» — новая строка: таблица переходит на неё, и её вывод сразу перед глазами.
         // Только если смотрели на ту же сессию: чужой выбор не сбивается
         if (_rows.Where(r => r.SessionOf is not null && !_seenTurns.Contains(r)).ToList() is { Count: > 0 } fresh)
         {
@@ -767,7 +767,7 @@ public partial class ResultsView : UserControl
     public void CopyCurrentAfter(OperationBatch batch, string finished)
     {
         // строки разовых действий и прошлых запусков — не в счёт: автокопия про запуск, что закончился
-        // строка ответа в сессию «Ваш ПК» — часть запуска самой сессии
+        // строка ответа в сессию «PowerShell» — часть запуска самой сессии
         bool Usable(OperationResult row) => !row.IsAction
             && (batch.LastRun.Count == 0 || batch.LastRun.Any(r => r.RunId == (row.SessionOf ?? row.Parent ?? row).RunId));
 
@@ -786,10 +786,10 @@ public partial class ResultsView : UserControl
         CopyResult(result, finished, batch);
     }
 
-    /// <summary>«Авто» для ответа в сессию «Ваш ПК»: только этот ответ и его вывод.</summary>
+    /// <summary>«Авто» для ответа в сессию «PowerShell»: только этот ответ и его вывод.</summary>
     public void CopyTurn(OperationResult turn)
     {
-        AppLog.Debug($"Ваш ПК: «авто» — вывод ответа в буфер, {turn.Output.Length} символов.");
+        AppLog.Debug($"PowerShell: «авто» — вывод ответа в буфер, {turn.Output.Length} символов.");
         CopyResult(turn, "Ответ пришёл", turn.Batch, turnOnly: true);
     }
 
@@ -823,7 +823,7 @@ public partial class ResultsView : UserControl
 
         var auto = finished is not null;
 
-        // сессия «Ваш ПК»: каждый ответ — своей строкой; автокопия по её окончании берёт всю сессию —
+        // сессия «PowerShell»: каждый ответ — своей строкой; автокопия по её окончании берёт всю сессию —
         // запуск и все ответы с их выводом. Кнопка на строке ответа — только этот ответ
         var session = result.SessionOf ?? result;
         var turns = batch?.AllRows.Where(r => ReferenceEquals(r.SessionOf, session)).ToList() ?? [];

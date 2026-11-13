@@ -1587,19 +1587,10 @@
             </StackPanel>
           </ScrollViewer>
 
-          <!--  низ карточки: умный режим и наборы серверов. Наборы закреплены внизу:
+          <!--  низ карточки: умный режим, наборы серверов, в самом низу под чертой — PowerShell. Закреплены внизу:
                 смена набора меняет длину списка выше, а сами наборы под мышью не прыгают  -->
           <Border Grid.Row="3" Margin="0,4,0,0">
             <StackPanel>
-                <!--  «Ваш ПК»: вместо умного режима — режим админа. Стоит так, как на деле запущен терминал  -->
-                <ui:ToggleSwitch
-                  x:Name="AdminSwitch"
-                  Click="OnAdminModeClick"
-                  Content="Режим админа"
-                  FontSize="13"
-                  Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                  ToolTipService.ShowDuration="30000"
-                  Visibility="{Binding State.CommandLocalPc, Converter={StaticResource BoolToVis}}" />
                 <ui:ToggleSwitch
                   x:Name="SmartSwitch"
                   Visibility="{Binding State.ShowsSmartMode, Converter={StaticResource BoolToVis}}"
@@ -1628,22 +1619,6 @@
                   Margin="0,0,0,2"
                   Style="{StaticResource PaneHeaderStyle}"
                   Text="НАБОРЫ СЕРВЕРОВ" />
-                  <!--  «Ваш ПК» на «Команде»: свой ряд вкладок, команды — на этот компьютер. Набор или сервер — назад к серверам  -->
-                  <Button
-                    Click="OnPickLocalPc"
-                    Content="Ваш ПК"
-                    ToolTip="Команды — на этом компьютере, в PowerShell. Свои вкладки, история и избранное. Щелчок по серверу или набору вернёт к серверам"
-                    Visibility="{Binding State.ShowsLocalPc, Converter={StaticResource BoolToVis}}">
-                    <Button.Style>
-                      <Style BasedOn="{StaticResource PaneSetButtonStyle}" TargetType="Button">
-                        <Style.Triggers>
-                          <DataTrigger Binding="{Binding State.CommandLocalPc}" Value="True">
-                            <Setter Property="Tag" Value="Active" />
-                          </DataTrigger>
-                        </Style.Triggers>
-                      </Style>
-                    </Button.Style>
-                  </Button>
                   <!--  «Все»: в панели серверы всех наборов разом  -->
                   <Button
                     Click="OnPickAllSets"
@@ -1681,8 +1656,76 @@
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
-
               </StackPanel>
+              </Border>
+
+              <!--  черта: выше серверы и наборы, ниже PowerShell и его режим админа — есть наборы или нет  -->
+              <Border
+                Margin="0,4,0,0"
+                Padding="0,4,0,0"
+                BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
+                BorderThickness="0,1,0,0"
+                Visibility="{Binding State.ShowsLocalPc, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                  <!--  PowerShell на «Команде»: свой ряд вкладок, команды — на этот компьютер. Набор или сервер — назад к серверам.
+                        Подпись от самого края, как у свитчей; выбранный — цветом и жирным, без полоски  -->
+                  <Button
+                    Click="OnPickLocalPc"
+                    Content="PowerShell"
+                    ToolTip="Команды — на этом компьютере. Свои вкладки, история и избранное. Щелчок по серверу или набору вернёт к серверам">
+                    <Button.Style>
+                      <Style BasedOn="{StaticResource PaneSetButtonStyle}" TargetType="Button">
+                        <Setter Property="Template">
+                          <Setter.Value>
+                            <ControlTemplate TargetType="Button">
+                              <Border
+                                x:Name="Row"
+                                Padding="0,3"
+                                Background="Transparent"
+                                CornerRadius="3">
+                                <TextBlock
+                                  x:Name="Label"
+                                  VerticalAlignment="Center"
+                                  Foreground="{TemplateBinding Foreground}"
+                                  Text="{TemplateBinding Content}"
+                                  TextTrimming="CharacterEllipsis" />
+                              </Border>
+                              <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                  <Setter TargetName="Row" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                                  <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                                </Trigger>
+                                <Trigger Property="Tag" Value="Active">
+                                  <Setter TargetName="Label" Property="FontWeight" Value="SemiBold" />
+                                  <Setter Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                                </Trigger>
+                              </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                          </Setter.Value>
+                        </Setter>
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding State.CommandLocalPc}" Value="True">
+                            <Setter Property="Tag" Value="Active" />
+                          </DataTrigger>
+                          <DataTrigger Binding="{Binding State.ActiveWorkspace.IsPaneLocked}" Value="True">
+                            <Setter Property="Opacity" Value="0.5" />
+                            <Setter Property="IsHitTestVisible" Value="False" />
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </Button.Style>
+                  </Button>
+                  <!--  режим админа — под PowerShell и только пока он выбран. Стоит так, как на деле запущен терминал  -->
+                  <ui:ToggleSwitch
+                    x:Name="AdminSwitch"
+                    Margin="0,2,0,0"
+                    Click="OnAdminModeClick"
+                    Content="Режим админа"
+                    FontSize="13"
+                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                    ToolTipService.ShowDuration="30000"
+                    Visibility="{Binding State.CommandLocalPc, Converter={StaticResource BoolToVis}}" />
+                </StackPanel>
               </Border>
             </StackPanel>
           </Border>

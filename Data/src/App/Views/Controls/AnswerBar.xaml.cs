@@ -69,7 +69,7 @@ public partial class AnswerBar : UserControl
                 return;
             }
 
-            // сессия «Ваш ПК»: ответ — новой строкой журнала, как из окна ответа наверху
+            // сессия «PowerShell»: ответ — новой строкой журнала, как из окна ответа наверху
             if (result.Server.IsLocalPc
                 && AppState.Current.AllWorkspaces.FirstOrDefault(w => ReferenceEquals(w.Session, result.SessionOf ?? result)) is { } tab)
             {
