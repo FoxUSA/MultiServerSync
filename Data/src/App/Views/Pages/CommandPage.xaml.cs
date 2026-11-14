@@ -335,6 +335,7 @@ public partial class CommandPage : Page
     private void ShowFace(bool session)
     {
         SessionFace.Visibility = session ? Visibility.Visible : Visibility.Collapsed;
+        Controls.BusyPulse.SetOn(SessionRing, session);
         KeepSessionCommand.IsChecked = AppState.Current.Settings.SessionKeepCommand;
         StepsScroll.Visibility = session ? Visibility.Collapsed : Visibility.Visible;
 

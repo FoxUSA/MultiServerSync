@@ -139,7 +139,7 @@
           <TextBlock
             VerticalAlignment="Center"
             FontSize="12"
-            Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+            Foreground="#4E9A5B"
             Text="Сессия открыта — набранное уходит в неё, а не запускает новую команду"
             TextTrimming="CharacterEllipsis" />
           <CheckBox
@@ -149,9 +149,10 @@
             HorizontalAlignment="Right"
             VerticalAlignment="Center"
             Click="OnKeepSessionCommand"
-            Content="Сохранять команду"
-            FontSize="12"
-            ToolTip="Отмечено — после отправки набранное остаётся в окне: поправить и отправить снова. Снято — окно очищается" />
+            ToolTip="Отмечено — после отправки набранное остаётся в окне: поправить и отправить снова. Снято — окно очищается">
+            <!--  размер у самого текста: FontSize галочки тема не берёт, и подпись выходила крупнее надписи слева  -->
+            <TextBlock FontSize="12" Text="Сохранять команду" />
+          </CheckBox>
         </Grid>
 
         <ui:TextBox
@@ -169,6 +170,15 @@
           TextChanged="OnSessionTextChanged"
           TextWrapping="NoWrap"
           VerticalScrollBarVisibility="Auto" />
+
+        <!--  сессия открыта — зелёная рамка мигает в такт рамкам ярлыков (BusyPulse), включает её ShowFace  -->
+        <Border
+          x:Name="SessionRing"
+          Grid.Row="1"
+          BorderBrush="#3FB950"
+          BorderThickness="2"
+          CornerRadius="4"
+          IsHitTestVisible="False" />
 
         <!--  значки — как у окна команды, на том же месте: вставить, отправить, остановить, копировать вывод, очистить; под ними избранное  -->
         <StackPanel

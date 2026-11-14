@@ -156,8 +156,8 @@ public sealed class CopyWindow : ObservableObject
 
     public string NameText => _name.Length > 0 ? _name : $"Окно {Number}";
 
-    /// <summary>Как окно зовётся в журнале и выводе: номер и своё название, если оно есть.</summary>
-    public string LogName => _name.Length > 0 ? $"{NumberText} «{_name}»" : NumberText;
+    /// <summary>Как окно зовётся в журнале и выводе: своё название, а номер — только у окна без названия.</summary>
+    public string LogName => _name.Length > 0 ? $"«{_name}»" : NumberText;
 
     /// <summary>Название на разделителе окна: окон больше одного — оно есть всегда.</summary>
     public bool ShowsName => IsMulti;

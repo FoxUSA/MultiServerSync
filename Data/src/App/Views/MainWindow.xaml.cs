@@ -1960,7 +1960,11 @@ public partial class MainWindow : FluentWindow
         return null;
     }
 
-    /// <summary>Плашка о нажатии: отказ — под нажатой кнопкой, всё остальное столбиком посередине окна.</summary>
+    /// <summary>
+    /// Плашка о нажатии: отказ — под нажатой кнопкой, всё остальное столбиком посередине окна.
+    /// Итог операции («прервано», «успешно 2 из 3») — не отказ, даже если пришёл сразу после «Остановить»:
+    /// у итога всегда есть полный лог, у отказа — нет.
+    /// </summary>
     private void ShowToast(LogEntry entry)
     {
         if (entry.ShownInPlace || entry.IsServerLine)
@@ -1969,6 +1973,7 @@ public partial class MainWindow : FluentWindow
         }
 
         if (entry.Level is LogLevel.Warning or LogLevel.Error
+            && entry.Output is null
             && DateTime.UtcNow - _pressedAt < PressedButtonLife
             && _pressedButton is { } button)
         {

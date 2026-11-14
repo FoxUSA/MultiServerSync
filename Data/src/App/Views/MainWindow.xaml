@@ -82,23 +82,7 @@
               <DataTrigger Binding="{Binding Status}" Value="Running">
                 <Setter TargetName="StatusRing" Property="Visibility" Value="Visible" />
                 <Setter TargetName="Ring" Property="Visibility" Value="Collapsed" />
-                <DataTrigger.EnterActions>
-                  <BeginStoryboard x:Name="BusyPulse">
-                    <Storyboard>
-                      <DoubleAnimation
-                        AutoReverse="True"
-                        RepeatBehavior="Forever"
-                        Storyboard.TargetName="StatusRing"
-                        Storyboard.TargetProperty="Opacity"
-                        From="1"
-                        To="0.25"
-                        Duration="0:0:0.7" />
-                    </Storyboard>
-                  </BeginStoryboard>
-                </DataTrigger.EnterActions>
-                <DataTrigger.ExitActions>
-                  <StopStoryboard BeginStoryboardName="BusyPulse" />
-                </DataTrigger.ExitActions>
+                <Setter TargetName="StatusRing" Property="controls:BusyPulse.On" Value="True" />
               </DataTrigger>
               <DataTrigger Binding="{Binding Status}" Value="Failed">
                 <Setter TargetName="StatusRing" Property="Visibility" Value="Visible" />
@@ -579,23 +563,7 @@
               </Trigger>
               <Trigger Property="controls:SectionMark.Status" Value="Running">
                 <Setter TargetName="StatusRing" Property="Visibility" Value="Visible" />
-                <Trigger.EnterActions>
-                  <BeginStoryboard x:Name="SectionBusyPulse">
-                    <Storyboard>
-                      <DoubleAnimation
-                        AutoReverse="True"
-                        RepeatBehavior="Forever"
-                        Storyboard.TargetName="StatusRing"
-                        Storyboard.TargetProperty="Opacity"
-                        From="1"
-                        To="0.25"
-                        Duration="0:0:0.7" />
-                    </Storyboard>
-                  </BeginStoryboard>
-                </Trigger.EnterActions>
-                <Trigger.ExitActions>
-                  <StopStoryboard BeginStoryboardName="SectionBusyPulse" />
-                </Trigger.ExitActions>
+                <Setter TargetName="StatusRing" Property="controls:BusyPulse.On" Value="True" />
               </Trigger>
               <Trigger Property="controls:SectionMark.Status" Value="Failed">
                 <Setter TargetName="StatusRing" Property="Visibility" Value="Visible" />
@@ -1068,22 +1036,7 @@
                   <Style.Triggers>
                     <Trigger Property="controls:SectionMark.Status" Value="Running">
                       <Setter Property="Visibility" Value="Visible" />
-                      <Trigger.EnterActions>
-                        <BeginStoryboard x:Name="ArchiveBusyPulse">
-                          <Storyboard>
-                            <DoubleAnimation
-                              AutoReverse="True"
-                              RepeatBehavior="Forever"
-                              Storyboard.TargetProperty="Opacity"
-                              From="1"
-                              To="0.25"
-                              Duration="0:0:0.7" />
-                          </Storyboard>
-                        </BeginStoryboard>
-                      </Trigger.EnterActions>
-                      <Trigger.ExitActions>
-                        <StopStoryboard BeginStoryboardName="ArchiveBusyPulse" />
-                      </Trigger.ExitActions>
+                      <Setter Property="controls:BusyPulse.On" Value="True" />
                     </Trigger>
                     <Trigger Property="controls:SectionMark.Status" Value="Failed">
                       <Setter Property="Visibility" Value="Visible" />
