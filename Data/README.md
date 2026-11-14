@@ -76,7 +76,7 @@ powershell -ExecutionPolicy Bypass -File .\Data\build.ps1 -Package
 `publish\multiserversync.zip` (полная программа, `UserData` в архиве пустая — чужие пароли
 выкладывать нельзя) и `publish\manifest.json`. Оба файла кладутся
 в `https://byfox.dev/data/multiserversync/`.
-Без параметров версия остаётся текущей, `-Bump` увеличивает последнюю цифру. Нужен .NET SDK 9 или новее.
+Без параметров версия остаётся текущей, `-Bump` увеличивает последнюю цифру. Нужен .NET SDK 10 или новее.
 Внешних зависимостей от папок вне проекта нет: NuGet-пакеты (WPF-UI, SSH.NET)
 раскладываются в `Data` при сборке.
 

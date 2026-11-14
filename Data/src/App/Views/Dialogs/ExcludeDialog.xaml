@@ -30,6 +30,8 @@
             Пунктир фокуса не нужен — сразу после щелчка фокус уходит в поле масок  -->
       <Setter Property="FocusVisualStyle" Value="{x:Null}" />
       <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+      <!--  цвет полоски под открытой вкладкой: по умолчанию акцент, у масок — цвет плашки значка фильтра  -->
+      <Setter Property="Tag" Value="{DynamicResource AccentFillColorDefaultBrush}" />
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="TabItem">
@@ -52,7 +54,7 @@
                 Height="2"
                 Margin="10,0,10,-6"
                 VerticalAlignment="Bottom"
-                Fill="{DynamicResource AccentFillColorDefaultBrush}"
+                Fill="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"
                 RadiusX="1"
                 RadiusY="1"
                 Visibility="Collapsed" />
@@ -140,6 +142,10 @@
           x:Name="ExplorerTab"
           Header="Проводник"
           Style="{StaticResource ExcludeTabStyle}">
+          <!--  зелёный — как у «Эта вкладка»: галочки тоже свои у вкладки  -->
+          <TabItem.Tag>
+            <SolidColorBrush Color="#2E7D3E" />
+          </TabItem.Tag>
           <StackPanel Margin="0,10,0,0">
             <TextBlock
               MinHeight="54"
@@ -166,6 +172,10 @@
           x:Name="OwnTab"
           Header="Эта вкладка"
           Style="{StaticResource ExcludeTabStyle}">
+          <!--  зелёный — как плашка значка фильтра со своими масками вкладки  -->
+          <TabItem.Tag>
+            <SolidColorBrush Color="#2E7D3E" />
+          </TabItem.Tag>
           <StackPanel Margin="0,10,0,0">
             <!--  описания обеих вкладок — одной высоты в три строки: иначе окно прыгало при переключении  -->
             <TextBlock
@@ -218,6 +228,10 @@
           x:Name="GlobalTab"
           Header="Глобально"
           Style="{StaticResource ExcludeTabStyle}">
+          <!--  фиолетовый — как плашка значка фильтра с одними глобальными  -->
+          <TabItem.Tag>
+            <SolidColorBrush Color="#6B4FA8" />
+          </TabItem.Tag>
           <!--  поле выше обычного — на всю высоту вкладки, ровно с «Эту вкладку», где полей два; высоту ставит код  -->
           <DockPanel Margin="0,10,0,0">
             <TextBlock

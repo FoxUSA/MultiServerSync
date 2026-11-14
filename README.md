@@ -51,7 +51,7 @@ Add your servers once. After that: check the ones you need, pick files or type a
 - **Commands and scripts** — several commands in one tab run in turn: the next one after the previous succeeds. A script of any length goes whole through stdin; answer `[Y/n]` from the app, the sudo password is supplied for you. Favourites open in one window from every section, with folders on the left; **History** keeps a tab's commands without repeats, and any of them drags into favourites.
 - **Several windows on one tab** — on Copy and Download each window has its own files, path and options. All windows share one table, each under a header that folds its rows away; **Different servers** gives every window servers of its own. On each server they run in turn, with a journal row per window; if a window fails, the ones below it don't start on that server.
 - **Terminal on the page** — Copy and Download have a command box of their own. It runs on the checked servers without copying, and output, "auto", *.txt and CopyPass work just as on the Command page.
-- **PowerShell** — the Command section also runs PowerShell on this computer (the PowerShell row at the bottom of the left panel), in a real Windows console: `ssh` asks for its password, `diskpart` and `netsh` hold a dialog. While such a session is open, the command box flips into an answer box; every answer is its own journal row, and "auto" copies its output as soon as the prompt is back. Admin mode runs the commands as administrator after one UAC prompt. PowerShell has tabs and favourites of its own.
+- **PowerShell** — the Command section also runs PowerShell on this computer (the PowerShell row at the bottom of the left panel), in a real Windows console: `ssh` asks for its password, `diskpart` and `netsh` hold a dialog. While such a session is open, the command box flips into an answer box; every answer is its own journal row, and "auto" copies its output as soon as the prompt is back. PowerShell is a switch on any Command tab and each tab remembers it; favourites are its own. Admin mode runs the commands as administrator after one UAC prompt; if the app itself was started as administrator, turning it off runs them with ordinary user rights.
 - **Each server's output** — live and separate, highlighted, with a zoom for larger text. Runs started within a few minutes of each other stack up in one journal; tick "Keep log" and the tab keeps them all. The latest run is on top, runs are separated by a line, and each ends with a line: local date, time and how long it took. Actions are written to the journal and the history too, as a row of the server, "Computer" or "App": creating, deleting, tabs, exclusions; the gear next to Journal / History sets what gets written. The journal and the history survive a restart of the program. Commands after copying get a row each — copy, #1, #2 — shown as soon as copying starts, with their own status and output. Every row has its own stop: a waiting command is cancelled together with the ones below it; **Stop** at the top halts the whole tab. Explorer copies run side by side, waiting only when their paths overlap. Copy progress with time left.
 - **Logs where you need them** — with "auto" ticked, the output goes to the clipboard by itself when a run finishes: one server's output, or all servers' when there are several. A long log goes as a *.txt file or with the middle cut out. With CopyPass it also lands in the next input box you click in another app and is sent with Enter. The runs table can move to a window of its own, and the app reopens where you left it.
 - **See what's wrong** — a persistent notice when commands after copying won't run because the tab is empty. Errors in plain words.
@@ -67,11 +67,11 @@ Add your servers once. After that: check the ones you need, pick files or type a
 2. Run `MultiServerSync.exe`
 3. Add your servers — and check where to send
 
-Windows 10 / 11 (x64), requires [.NET 9 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/9.0). Free, open source, no telemetry.
+Windows 10 / 11 (x64), requires [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0). Free, open source, no telemetry.
 
 ## Build from source
 
-Requires the [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0).
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ```powershell
 git clone https://github.com/FoxUSA/MultiServerSync.git

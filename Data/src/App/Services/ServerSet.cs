@@ -116,7 +116,7 @@ public sealed class ServerSet : ObservableObject
     /// Набор отмечен в переключателе слева: его выбрала открытая вкладка, и у неё не стоит «Все».
     /// Это не <see cref="IsActive"/> — тот про набор, который правится на странице «Серверы».
     /// </summary>
-    public bool IsPanePick => ReferenceEquals(this, AppState.Current.PaneSet) && !AppState.Current.PaneAllSets && !AppState.Current.CommandLocalPc;
+    public bool IsPanePick => ReferenceEquals(this, AppState.Current.PaneSet) && !AppState.Current.PaneAllSets;
 
     public void RaiseActive() => RaiseMany(nameof(IsActive), nameof(IsPanePick));
 

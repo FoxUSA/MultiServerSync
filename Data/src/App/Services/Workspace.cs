@@ -2317,15 +2317,29 @@ public sealed class Workspace : ObservableObject
     /// <summary>Где выполнится команда этой вкладки — отмеченные из выбранного набора, а в режиме «PowerShell» — этот компьютер.</summary>
     public IReadOnlyList<ServerEntry> CommandTargets => _localPc ? [ActionLog.LocalPc] : Picked(InActiveSet(CommandServers));
 
-    // ── «PowerShell»: вкладки команд этого компьютера — свой ряд ярлыков на «Команде» ──
+    // ── «PowerShell»: режим вкладки «Команды» — её команды идут на этот компьютер ──
 
     private bool _localPc;
 
     /// <summary>
-    /// Вкладка режима «PowerShell»: её команды идут на этот компьютер (PowerShell), серверы приглушены.
-    /// Такие вкладки — свой ряд ярлыков на «Команде»: у каждой свои окна команд, история и всё остальное.
+    /// Режим «PowerShell» у вкладки: её команды идут на этот компьютер (PowerShell), серверы приглушены, но галочки
+    /// на них остаются. Свой у каждой вкладки и помнится вместе с ней; лента ярлыков общая.
     /// </summary>
     public bool LocalPc => _localPc;
+
+    /// <summary>Свитч «PowerShell»: вкладка переходит на этот компьютер или обратно на серверы.</summary>
+    public void SetLocalPc(bool on)
+    {
+        if (_localPc == on)
+        {
+            return;
+        }
+
+        _localPc = on;
+        ApplyLock();
+        RaiseMany(nameof(LocalPc), nameof(CommandTargets), nameof(CommandTargetsInfo), nameof(Session), nameof(HasSession));
+        RaiseSection();
+    }
 
     /// <summary>
     /// Открытая сессия «PowerShell»: команда идёт и принимает ввод (`ssh`, `diskpart`…). Пока она есть, верхнее
@@ -5753,7 +5767,7 @@ public sealed class Workspace : ObservableObject
             var pinned = _lockedIds?.Contains(check.Server.Id) == true;
             check.IsLocked = pinned;
 
-            // «PowerShell»: команды идут не на серверы — приглушены все, щелчок по любому вернёт к серверам
+            // «PowerShell»: команды идут не на серверы — приглушены все, выбрать их можно, только выключив режим
             check.IsMuted = (_lockedIds is not null && !pinned) || _localPc;
         }
 

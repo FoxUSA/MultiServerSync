@@ -115,14 +115,9 @@ public partial class LogPanel : UserControl
 
     private void OnCopyOutput(object sender, RoutedEventArgs e)
     {
-        try
+        if (ClipboardText.Copy(_shownText))
         {
-            Clipboard.SetText(_shownText);
             AppLog.Echo("Лог записи скопирован в буфер обмена.");
-        }
-        catch (Exception ex)
-        {
-            AppLog.Hint("Не удалось скопировать лог: " + ex.Message, LogLevel.Error);
         }
     }
 
@@ -266,14 +261,9 @@ public partial class LogPanel : UserControl
 
     private void OnCopy(object sender, RoutedEventArgs e)
     {
-        try
+        if (ClipboardText.Copy(AppLog.ExportText()))
         {
-            Clipboard.SetText(AppLog.ExportText());
             AppLog.Echo("История скопирована в буфер обмена.");
-        }
-        catch (Exception ex)
-        {
-            AppLog.Hint("Не удалось скопировать историю: " + ex.Message, LogLevel.Error);
         }
     }
 

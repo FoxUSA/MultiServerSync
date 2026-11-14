@@ -1,4 +1,4 @@
-using System.Collections.Specialized;
+﻿using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
@@ -406,7 +406,7 @@ public partial class MiniTerminal : UserControl
 
         try
         {
-            text = Clipboard.ContainsText() ? Clipboard.GetText() : string.Empty;
+            text = ClipboardText.ReadText();
         }
         catch (Exception ex)
         {

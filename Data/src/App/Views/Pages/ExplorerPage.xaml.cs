@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -1053,9 +1053,9 @@ public partial class ExplorerPage : Page
         // своего буфера нет — может, файлы скопировали в проводнике Windows
         try
         {
-            if (Clipboard.ContainsFileDropList())
+            if (ClipboardText.HasFiles)
             {
-                var files = Clipboard.GetFileDropList().Cast<string>().ToList();
+                var files = ClipboardText.ReadFiles().Cast<string>().ToList();
                 await PasteWindowsFilesAsync(pane, files, target, move: false);
             }
         }

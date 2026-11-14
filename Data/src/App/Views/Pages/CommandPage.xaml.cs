@@ -1,4 +1,4 @@
-using System.Collections.Specialized;
+﻿using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
@@ -413,7 +413,7 @@ public partial class CommandPage : Page
 
         try
         {
-            text = Clipboard.ContainsText() ? Clipboard.GetText() : string.Empty;
+            text = ClipboardText.ReadText();
         }
         catch (Exception ex)
         {
@@ -538,7 +538,7 @@ public partial class CommandPage : Page
 
         try
         {
-            text = Clipboard.ContainsText() ? Clipboard.GetText() : string.Empty;
+            text = ClipboardText.ReadText();
         }
         catch (Exception ex)
         {
@@ -760,8 +760,7 @@ public partial class CommandPage : Page
     /// </summary>
     private async Task RunEverywhereAsync(Workspace workspace)
     {
-        // «PowerShell» и серверы — разные ряды вкладок: «везде» — это все вкладки открытого ряда
-        var all = AppState.Current.CommandTabs.Where(t => !t.IsPersonal && t.LocalPc == workspace.LocalPc).ToList();
+        var all = AppState.Current.CommandTabs.Where(t => !t.IsPersonal).ToList();
 
         // широкое действие: команды уходят со всех вкладок сразу — сначала спросить
         if (!ConfirmDialog.Ask(

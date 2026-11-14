@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -16,7 +16,8 @@ namespace MultiServerSync.Services;
 /// «Режим админа» у «PowerShell»: команды идут в PowerShell с правами администратора. Права даёт помощник —
 /// та же программа, запущенная через окно UAC один раз при включении. Он живёт, пока режим включён, и
 /// выполняет команды по просьбе программы через именованный канал: вывод, ответы на вопросы и стоп
-/// ходят по нему же. Программа запущена от администратора — режим включён всегда, помощник не нужен.
+/// ходят по нему же. Программа запущена от администратора — наоборот: режим включён сам, а выключение
+/// запускает помощника с правами пользователя (токен Проводника), и команды идут через него.
 /// </summary>
 public static class AdminShell
 {
@@ -38,8 +39,11 @@ public static class AdminShell
     /// <summary>Помощник на связи.</summary>
     public static bool Connected => _connected;
 
-    /// <summary>Терминал «PowerShell» работает от администратора — так или иначе.</summary>
-    public static bool IsOn => ProcessElevated || _connected;
+    /// <summary>
+    /// Терминал «PowerShell» работает от администратора: программа обычная — пока жив помощник администратора,
+    /// программа от администратора — пока не запущен помощник с правами пользователя.
+    /// </summary>
+    public static bool IsOn => ProcessElevated ? !_connected : _connected;
 
     /// <summary>Команды от администратора ещё идут — выключать режим нельзя.</summary>
     public static bool Busy => !Jobs.IsEmpty;
@@ -47,27 +51,49 @@ public static class AdminShell
     /// <summary>Режим включился или выключился (в том числе сам: помощник закрылся). Приходит в потоке окна.</summary>
     public static event Action? Changed;
 
-    /// <summary>Включить: окно UAC и помощник. Возвращает причину отказа или null.</summary>
+    /// <summary>
+    /// Запустить помощника с другими правами, чем у программы: обычная программа — окно UAC и помощник
+    /// администратора (режим включается), программа от администратора — помощник пользователя (режим
+    /// выключается). Возвращает причину отказа или null.
+    /// </summary>
     public static async Task<string?> StartAsync()
     {
-        if (IsOn)
+        if (_connected)
         {
             return null;
         }
 
+        var failed = ProcessElevated ? "Права не понизились: " : "Режим админа не включился: ";
+        var exe = Environment.ProcessPath ?? "MultiServerSync.App.exe";
         var name = "mss-admin-" + Guid.NewGuid().ToString("N");
-        var pipe = new NamedPipeServerStream(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        NamedPipeServerStream pipe;
         Process? helper;
 
         try
         {
-            helper = Process.Start(new ProcessStartInfo(Environment.ProcessPath ?? "MultiServerSync.App.exe")
-            {
-                UseShellExecute = true,
-                Verb = "runas",
-                Arguments = $"{HelperArg} {name} {Environment.ProcessId}",
-                WindowStyle = ProcessWindowStyle.Hidden,
-            });
+            pipe = ProcessElevated
+                ? UserPipe(name)
+                : new NamedPipeServerStream(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+        }
+        catch (Exception ex)
+        {
+            AppLog.Debug("Помощник PowerShell: канал не создан — " + ex.Message);
+            return failed + ex.Message;
+        }
+
+        try
+        {
+            var arguments = $"{HelperArg} {name} {Environment.ProcessId}";
+
+            helper = ProcessElevated
+                ? Process.GetProcessById(UserLaunch.Start(exe, arguments))
+                : Process.Start(new ProcessStartInfo(exe)
+                {
+                    UseShellExecute = true,
+                    Verb = "runas",
+                    Arguments = arguments,
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                });
         }
         catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
@@ -78,8 +104,8 @@ public static class AdminShell
         catch (Exception ex)
         {
             pipe.Dispose();
-            AppLog.Debug("Режим админа: помощник не запустился — " + ex.Message);
-            return "Режим админа не включился: " + ex.Message;
+            AppLog.Debug("Помощник PowerShell не запустился — " + ex.Message);
+            return failed + ex.Message;
         }
 
         try
@@ -90,9 +116,12 @@ public static class AdminShell
             var reader = new StreamReader(pipe, Utf8, false);
             var hello = await reader.ReadLineAsync(wait.Token);
 
-            if (hello != "HELLO 1")
+            // помощник обычной программы должен быть администратором, помощник программы от администратора — нет
+            if (hello != (ProcessElevated ? "HELLO 0" : "HELLO 1"))
             {
-                throw new InvalidOperationException("помощник запустился без прав администратора");
+                throw new InvalidOperationException(ProcessElevated
+                    ? "помощник всё равно запустился от администратора — похоже, в Windows выключен UAC"
+                    : "помощник запустился без прав администратора");
             }
 
             _pipe = pipe;
@@ -115,16 +144,36 @@ public static class AdminShell
                 // уже закрылся
             }
 
-            AppLog.Debug("Режим админа: помощник не вышел на связь — " + (ex is OperationCanceledException ? "не ответил за 30 с" : ex.Message));
-            return "Режим админа не включился: " + (ex is OperationCanceledException ? "помощник не ответил" : ex.Message) + ".";
+            AppLog.Debug("Помощник PowerShell не вышел на связь — " + (ex is OperationCanceledException ? "не ответил за 30 с" : ex.Message));
+            return failed + (ex is OperationCanceledException ? "помощник не ответил" : ex.Message) + ".";
         }
 
-        AppLog.Debug($"Режим админа включён: помощник на связи, процесс {helper?.Id.ToString() ?? "?"}.");
+        AppLog.Debug(ProcessElevated
+            ? $"Режим админа выключен: помощник с правами пользователя на связи, процесс {helper?.Id.ToString() ?? "?"}."
+            : $"Режим админа включён: помощник на связи, процесс {helper?.Id.ToString() ?? "?"}.");
         Raise();
         return null;
     }
 
-    /// <summary>Выключить: помощник закрывается вместе с тем, что он ещё выполняет.</summary>
+    /// <summary>
+    /// Канал для помощника с правами пользователя: у канала программы от администратора по умолчанию писать
+    /// может только администратор — пользователю рабочего стола запись даётся явно.
+    /// </summary>
+    private static NamedPipeServerStream UserPipe(string name)
+    {
+        var user = UserLaunch.DesktopUser() ?? throw new InvalidOperationException("не найден Проводник Windows — не у кого взять права пользователя");
+        var security = new PipeSecurity();
+        security.AddAccessRule(new PipeAccessRule(user, PipeAccessRights.ReadWrite, System.Security.AccessControl.AccessControlType.Allow));
+
+        if (WindowsIdentity.GetCurrent().User is { } self)
+        {
+            security.AddAccessRule(new PipeAccessRule(self, PipeAccessRights.FullControl, System.Security.AccessControl.AccessControlType.Allow));
+        }
+
+        return NamedPipeServerStreamAcl.Create(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 0, 0, security);
+    }
+
+    /// <summary>Закрыть помощника вместе с тем, что он ещё выполняет: команды снова идут из самой программы.</summary>
     public static void Stop()
     {
         if (!_connected)
@@ -144,7 +193,7 @@ public static class AdminShell
         }
 
         _connected = false;
-        AppLog.Debug($"Режим админа выключен: связь с помощником закрыта, команд оборвано: {Jobs.Count}.");
+        AppLog.Debug($"Помощник PowerShell закрыт ({(ProcessElevated ? "права пользователя" : "права администратора")}), команд оборвано: {Jobs.Count}.");
 
         try
         {
@@ -420,9 +469,14 @@ public static class AdminShell
                 using var parent = Process.GetProcessById(parentPid);
                 parent.WaitForExit();
             }
-            catch (Exception)
+            catch (ArgumentException)
             {
                 // её уже нет
+            }
+            catch (Exception)
+            {
+                // программу от администратора помощнику с правами пользователя может быть не видно — хватит обрыва канала
+                return;
             }
 
             try

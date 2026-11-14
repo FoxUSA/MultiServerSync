@@ -481,7 +481,7 @@ public partial class MainWindow : FluentWindow
 
         if (State.ShowsWorkspaceTabs && !_archiveMode)
         {
-            var archived = State.Tabs.Where(t => t.IsArchived && !t.IsPersonal && t.LocalPc == _pcMode).ToList();
+            var archived = State.Tabs.Where(t => t.IsArchived && !t.IsPersonal).ToList();
 
             status = archived.Any(t => t.Status is WorkspaceStatus.Failed or WorkspaceStatus.Partial) ? WorkspaceStatus.Failed
                 : archived.Any(t => t.Status == WorkspaceStatus.Warning) ? WorkspaceStatus.Warning
@@ -830,8 +830,12 @@ public partial class MainWindow : FluentWindow
     {
         if (sender is FrameworkElement { DataContext: ServerSet set })
         {
-            // «PowerShell»: набор — это снова серверы, и выбранный набор ложится на серверную вкладку
-            State.SwitchLocalPc(false);
+            // «PowerShell»: серверы и наборы не выбираются, пока режим не выключен свитчем
+            if (RefusedInPc())
+            {
+                return;
+            }
+
             State.PickPaneSet(set);
         }
     }
@@ -853,7 +857,8 @@ public partial class MainWindow : FluentWindow
     }
 
     /// <summary>«PowerShell» под наборами: «Команда» переходит на свои вкладки этого компьютера.</summary>
-    private void OnPickLocalPc(object sender, RoutedEventArgs e) => State.SwitchLocalPc(true);
+    /// <summary>Щелчок по подписи «PowerShell» — то же, что свитч справа: включает и выключает режим.</summary>
+    private void OnPickLocalPc(object sender, RoutedEventArgs e) => State.SwitchLocalPc(!State.CommandLocalPc);
 
     private void OnSmartModeChanged(object sender, RoutedEventArgs e)
     {
@@ -871,13 +876,30 @@ public partial class MainWindow : FluentWindow
     {
         AdminSwitch.IsChecked = AdminShell.IsOn;
         AdminSwitch.ToolTip = AdminShell.ProcessElevated
-            ? "Программа запущена от администратора — команды «PowerShell» и так идут с его правами. Выключить — перезапустить программу обычным способом"
+            ? AdminShell.IsOn
+                ? "Программа запущена от администратора — команды «PowerShell» идут с его правами. Выключение понизит их до прав пользователя"
+                : "Команды «PowerShell» выполняются от пользователя, хотя программа запущена от администратора. Включение вернёт права администратора"
             : AdminShell.IsOn
                 ? "Команды «PowerShell» выполняются от администратора. Выключение вернёт права пользователя"
                 : "Команды «PowerShell» выполняются от пользователя. Включение спросит права администратора в окне Windows";
     }
 
-    /// <summary>Режим админа: включение — окно UAC и помощник с правами администратора, выключение — помощник закрывается.</summary>
+    /// <summary>Подпись «Режим админа» — как щелчок по свитчу.</summary>
+    private void OnAdminLabelClick(object sender, RoutedEventArgs e)
+    {
+        if (!AdminSwitch.IsEnabled)
+        {
+            return;
+        }
+
+        AdminSwitch.IsChecked = AdminSwitch.IsChecked != true;
+        OnAdminModeClick(AdminSwitch, e);
+    }
+
+    /// <summary>
+    /// Режим админа. Права меняет помощник: у обычной программы он с правами администратора (окно UAC), у программы
+    /// от администратора — с правами пользователя. Запуск помощника меняет режим, закрытие возвращает как было.
+    /// </summary>
     private async void OnAdminModeClick(object sender, RoutedEventArgs e)
     {
         var want = AdminSwitch.IsChecked == true;
@@ -890,20 +912,18 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        if (!want)
+        if (AdminShell.Connected)
         {
-            if (AdminShell.ProcessElevated)
+            if (AdminShell.Busy)
             {
-                AppLog.Hint("Программа запущена от администратора — выключить режим можно, только перезапустив её обычным способом.", LogLevel.Warning);
-            }
-            else if (AdminShell.Busy)
-            {
-                AppLog.Hint("Команда от администратора ещё выполняется — дождитесь конца или остановите её.", LogLevel.Warning);
+                AppLog.Hint("Команда PowerShell ещё выполняется — дождитесь конца или остановите её, потом меняйте режим.", LogLevel.Warning);
             }
             else
             {
                 AdminShell.Stop();
-                AppLog.Hint("Режим админа выключен: команды «PowerShell» — от пользователя.");
+                AppLog.Hint(want
+                    ? "Режим админа включён: команды «PowerShell» снова выполняются от администратора."
+                    : "Режим админа выключен: команды «PowerShell» — от пользователя.");
             }
 
             ShowAdminSwitch();
@@ -921,14 +941,19 @@ public partial class MainWindow : FluentWindow
         }
         else
         {
-            AppLog.Hint("Режим админа включён: команды «PowerShell» выполняются от администратора.", LogLevel.Success);
+            AppLog.Hint(want
+                ? "Режим админа включён: команды «PowerShell» выполняются от администратора."
+                : "Режим админа выключен: права понижены, команды «PowerShell» выполняются от пользователя.", LogLevel.Success);
         }
     }
 
     /// <summary>«Все» в переключателе наборов: в панели открытой вкладки серверы всех наборов.</summary>
     private void OnPickAllSets(object sender, RoutedEventArgs e)
     {
-        State.SwitchLocalPc(false);
+        if (RefusedInPc())
+        {
+            return;
+        }
 
         if (!State.PaneAllSets)
         {
@@ -948,12 +973,11 @@ public partial class MainWindow : FluentWindow
     {
         _paneServerToEdit = null;
 
-        // «PowerShell»: щелчок по серверу возвращает к серверам — на серверную вкладку, и сервер там отмечается.
-        // Строки в панели уже от другой вкладки: щелчок до галочки не идёт
-        if (e.ClickCount == 1 && sender is FrameworkElement { DataContext: Models.ServerCheck picked } && State.CommandLocalPc)
+        // «PowerShell»: галочки не меняются — сначала выключить режим свитчем. Двойной щелчок (правка сервера) — можно
+        if (e.ClickCount == 1 && sender is FrameworkElement { DataContext: Models.ServerCheck } && State.CommandLocalPc)
         {
             e.Handled = true;
-            BackToServers(picked.Server);
+            RefusedInPc();
             return;
         }
 
@@ -990,17 +1014,28 @@ public partial class MainWindow : FluentWindow
             ServerEditDialog.EditExisting(this, server, State.Section, State.ShowsWorkspaceTabs ? State.ActiveWorkspace : null)));
     }
 
-    /// <summary>Из «PowerShell» — к серверам: сервер, по которому щёлкнули, отмечается, если ещё не отмечен.</summary>
-    private void BackToServers(Models.ServerEntry server)
+    /// <summary>«Отметить все» в «PowerShell» не нажимается — галочки ждут выключения режима.</summary>
+    private void OnToggleAllPress(object sender, MouseButtonEventArgs e)
     {
-        State.SwitchLocalPc(false);
-
-        var tab = State.ActiveWorkspace;
-
-        if (!tab.LocalPc && !tab.SelectedServers.Any(s => s.Id == server.Id))
+        if (RefusedInPc())
         {
-            tab.PickTargetServer(server);
+            e.Handled = true;
         }
+    }
+
+    /// <summary>
+    /// Вкладка в режиме «PowerShell»: серверы, наборы и «Все» не выбираются — плашка просит выключить режим.
+    /// Сам щелчок режим больше не выключает.
+    /// </summary>
+    private bool RefusedInPc()
+    {
+        if (!State.CommandLocalPc)
+        {
+            return false;
+        }
+
+        AppLog.Hint("Включён режим PowerShell — чтобы выбрать сервер, выключите его свитчем у «PowerShell».", LogLevel.Warning);
+        return true;
     }
 
     /// <summary>Замок в строке целевого сервера: закрепить вкладку за ним или снять замок.</summary>
@@ -1308,7 +1343,7 @@ public partial class MainWindow : FluentWindow
             ExplorerServerName.Text = "PowerShell";
             ExplorerServerUser.Text = string.Empty;
             ExplorerServerAddress.Text = AdminShell.IsOn ? "админ" : string.Empty;
-            ExplorerServerTag.ToolTip = "Команды вкладки выполняются на этом компьютере. Щелчок — список серверов: выбор сервера вернёт к серверам";
+            ExplorerServerTag.ToolTip = "Команды вкладки выполняются на этом компьютере. Чтобы выбрать сервер, выключите режим свитчем у «PowerShell»";
             ExplorerServerLock.Visibility = Visibility.Collapsed;
             ExplorerServerTag.Visibility = Visibility.Visible;
             return;
@@ -1391,13 +1426,13 @@ public partial class MainWindow : FluentWindow
         }
 
         // замки — те же, что в строках панели слева; отметки читаются заново: замок отмечает сервер.
-        // «PowerShell» — все серверы приглушены, выбор любого возвращает к серверам
+        // «PowerShell» — все серверы приглушены, выбор любого просит выключить режим
         var onPc = State.Section == AppSection.Command && tab.LocalPc;
 
         Controls.ServerMenu.Show(
             ExplorerServerTag,
             s => !onPc && tab.SelectedServers.Contains(s),
-            onPc ? BackToServers : tab.PickTargetServer,
+            onPc ? _ => RefusedInPc() : tab.PickTargetServer,
             onPc ? null : Controls.ServerMenu.Locks.For(tab),
             alignRight: true,
             muted: onPc);
@@ -1518,9 +1553,6 @@ public partial class MainWindow : FluentWindow
     /// <summary>Лента показывает архив, а не основные вкладки.</summary>
     private bool _archiveMode;
 
-    /// <summary>«Команда» в режиме «PowerShell»: на ленте только вкладки этого компьютера.</summary>
-    private bool _pcMode;
-
     /// <summary>На ленте «Команд» одна личная вкладка — на неё перешли с «Копирования». Null — лента обычная, личных на ней нет.</summary>
     private Workspace? _personalShown;
 
@@ -1542,7 +1574,7 @@ public partial class MainWindow : FluentWindow
                 Filter = item => item is Workspace workspace
                     && (_personalShown is { } only
                         ? ReferenceEquals(workspace, only)
-                        : !workspace.IsPersonal && workspace.IsArchived == _archiveMode && workspace.LocalPc == _pcMode),
+                        : !workspace.IsPersonal && workspace.IsArchived == _archiveMode),
                 IsLiveFiltering = true,
             };
             view.LiveFilteringProperties.Add(nameof(Workspace.IsArchived));
@@ -1551,7 +1583,6 @@ public partial class MainWindow : FluentWindow
         }
 
         _archiveMode = State.ShowsWorkspaceTabs && State.ActiveWorkspace.IsArchived;
-        _pcMode = State.CommandLocalPc;
         _personalShown = State.PersonalShown;
         view.Refresh();
 
@@ -1608,12 +1639,10 @@ public partial class MainWindow : FluentWindow
     {
         var archive = State.ShowsWorkspaceTabs && State.ActiveWorkspace.IsArchived;
         var personal = State.PersonalShown;
-        var pc = State.CommandLocalPc;
 
-        if (archive != _archiveMode || pc != _pcMode || !ReferenceEquals(personal, _personalShown))
+        if (archive != _archiveMode || !ReferenceEquals(personal, _personalShown))
         {
             _archiveMode = archive;
-            _pcMode = pc;
             _personalShown = personal;
 
             if (_tabViews.TryGetValue(State.Tabs, out var view))
@@ -1656,7 +1685,7 @@ public partial class MainWindow : FluentWindow
         var shown = State.ShowsWorkspaceTabs || sets;
         var mode = sets ? _setArchiveMode : _archiveMode;
         var archived = sets ? State.ServerSets.Count(s => s.IsArchived)
-            : shown ? State.Tabs.Count(t => t.IsArchived && t.LocalPc == _pcMode) : 0;
+            : shown ? State.Tabs.Count(t => t.IsArchived) : 0;
         var what = sets ? "набор" : "вкладку";
 
         TabButtons.Visibility = _personalShown is null ? Visibility.Visible : Visibility.Collapsed;
@@ -1768,8 +1797,7 @@ public partial class MainWindow : FluentWindow
 
         var tabs = State.Tabs;
 
-        // «PowerShell» — свой ряд и свой архив: из него — только в его же вкладки
-        bool Mine(Workspace? t) => t is not null && t.LocalPc == _pcMode && !t.IsPersonal;
+        bool Mine(Workspace? t) => t is not null && !t.IsPersonal;
 
         if (_archiveMode)
         {

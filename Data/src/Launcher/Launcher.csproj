@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net9.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <!--  окно установки обновления — на том же WPF UI, что и программа: Data в этот момент заменяется,  -->
     <!--  поэтому библиотека едет внутри самого лаунчера (single-file), а не берётся из Data  -->

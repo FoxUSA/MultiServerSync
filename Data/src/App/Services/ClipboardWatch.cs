@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -24,7 +24,7 @@ public static class ClipboardWatch
         {
             try
             {
-                return Clipboard.ContainsText();
+                return ClipboardText.HasText;
             }
             catch (Exception)
             {

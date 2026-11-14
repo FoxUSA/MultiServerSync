@@ -272,6 +272,37 @@
       </Setter>
     </Style>
 
+    <!--  подпись строки внизу панели («PowerShell», «Режим админа»): от самого края, без отступа; под мышью — фон
+          и белый текст, как у наборов. Щелчок — то же, что свитч справа  -->
+    <Style
+      x:Key="PaneEdgeLabelStyle"
+      BasedOn="{StaticResource PaneSetButtonStyle}"
+      TargetType="Button">
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border
+              x:Name="Row"
+              Padding="0,3"
+              Background="Transparent"
+              CornerRadius="3">
+              <TextBlock
+                VerticalAlignment="Center"
+                Foreground="{TemplateBinding Foreground}"
+                Text="{TemplateBinding Content}"
+                TextTrimming="CharacterEllipsis" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Row" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <!--  замок в конце строки целевого сервера: под мышью — залитый фон и белый значок  -->
     <!--  замок на плашке сервера: значок белый всегда, под мышью фон синий  -->
     <Style x:Key="ServerTagLockStyle" TargetType="Button">
@@ -338,7 +369,7 @@
     <!--  под замком вкладки: приглушено и не нажимается — «Отметить все», одиночный выбор, наборы  -->
     <Style x:Key="PaneLockedMuteStyle" TargetType="FrameworkElement">
       <Style.Triggers>
-        <DataTrigger Binding="{Binding State.ActiveWorkspace.IsPaneLocked}" Value="True">
+        <DataTrigger Binding="{Binding State.PaneTab.IsPaneLocked}" Value="True">
           <Setter Property="Opacity" Value="0.5" />
           <Setter Property="IsHitTestVisible" Value="False" />
         </DataTrigger>
@@ -741,11 +772,38 @@
           IsHitTestVisible="False"
           Symbol="LockClosed24"
           Visibility="Collapsed" />
+
+        <!--  вкладка «Команды» в режиме PowerShell — «PS» белым на красной плашке цвета свитча в правом верхнем углу.
+              Видна и у выбранной; прячется только под мышью — там крестик; при замке — левее него  -->
+        <Border
+          x:Name="PcMark"
+          Grid.RowSpan="2"
+          Margin="0,4,4,0"
+          Padding="3,0,3,1"
+          HorizontalAlignment="Right"
+          VerticalAlignment="Top"
+          Background="#E5483B"
+          CornerRadius="3"
+          IsHitTestVisible="False"
+          Visibility="Collapsed">
+          <TextBlock
+            FontSize="9"
+            FontWeight="SemiBold"
+            Foreground="White"
+            Text="PS" />
+        </Border>
       </Grid>
 
       <DataTemplate.Triggers>
         <DataTrigger Binding="{Binding IsPaneLocked}" Value="True">
           <Setter TargetName="LockMark" Property="Visibility" Value="Visible" />
+          <Setter TargetName="PcMark" Property="Margin" Value="0,4,22,0" />
+        </DataTrigger>
+        <DataTrigger Binding="{Binding LocalPc}" Value="True">
+          <Setter TargetName="PcMark" Property="Visibility" Value="Visible" />
+        </DataTrigger>
+        <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+          <Setter TargetName="PcMark" Property="Visibility" Value="Collapsed" />
         </DataTrigger>
         <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
           <Setter TargetName="LockMark" Property="Visibility" Value="Collapsed" />
@@ -1349,11 +1407,12 @@
                 Padding="0,0,0,2"
                 BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
                 BorderThickness="0,0,0,1"
+                PreviewMouseLeftButtonDown="OnToggleAllPress"
                 Style="{StaticResource PaneLockedMuteStyle}"
                 Visibility="{Binding State.ShowsToggleAllServers, Converter={StaticResource BoolToVis}}">
                 <CheckBox
                   Content="Отметить все"
-                  IsChecked="{Binding State.ActiveWorkspace.PaneAllChecked, Mode=TwoWay}"
+                  IsChecked="{Binding State.PaneTab.PaneAllChecked, Mode=TwoWay}"
                   Style="{StaticResource PaneCheckStyle}"
                   Tag="Hover"
                   ToolTip="Отметить или снять все серверы в списке этой вкладки. Если отмечена часть — отмечает все" />
@@ -1428,7 +1487,7 @@
               </ItemsControl>
 
               <!--  серверы переставляются мышью: порядок общий, его же показывают «Серверы»  -->
-              <ItemsControl x:Name="PaneServerList" ItemsSource="{Binding State.ActiveWorkspace.Servers}">
+              <ItemsControl x:Name="PaneServerList" ItemsSource="{Binding State.PaneTab.Servers}">
                 <ItemsControl.ItemTemplate>
                     <!--  между серверами черта: где кончается один и начинается другой; по 2 над и под ней  -->
                     <DataTemplate>
@@ -1457,7 +1516,7 @@
                           Click="OnPaneLockClick"
                           DockPanel.Dock="Right"
                           Style="{StaticResource PaneLockButtonStyle}"
-                          ToolTip="{Binding DataContext.State.ActiveWorkspace.LockTip, RelativeSource={RelativeSource AncestorType=Window}}"
+                          ToolTip="{Binding DataContext.State.PaneTab.LockTip, RelativeSource={RelativeSource AncestorType=Window}}"
                           Visibility="Hidden">
                           <ui:SymbolIcon
                             x:Name="LockIcon"
@@ -1511,11 +1570,11 @@
                         <MultiDataTrigger>
                           <MultiDataTrigger.Conditions>
                             <Condition Binding="{Binding IsMouseOver, ElementName=Item}" Value="True" />
-                            <Condition Binding="{Binding DataContext.State.ActiveWorkspace.IsPaneLocked, RelativeSource={RelativeSource AncestorType=Window}}" Value="False" />
+                            <Condition Binding="{Binding DataContext.State.PaneTab.IsPaneLocked, RelativeSource={RelativeSource AncestorType=Window}}" Value="False" />
                           </MultiDataTrigger.Conditions>
                           <Setter TargetName="Lock" Property="Visibility" Value="Visible" />
                         </MultiDataTrigger>
-                        <DataTrigger Binding="{Binding DataContext.State.ActiveWorkspace.IsPaneLocked, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                        <DataTrigger Binding="{Binding DataContext.State.PaneTab.IsPaneLocked, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
                           <Setter TargetName="Check" Property="IsHitTestVisible" Value="False" />
                         </DataTrigger>
                         <DataTrigger Binding="{Binding IsLocked}" Value="True">
@@ -1535,12 +1594,16 @@
                         <DataTrigger Binding="{Binding IsMuted}" Value="True">
                           <Setter TargetName="Item" Property="Opacity" Value="0.5" />
                         </DataTrigger>
+                        <!--  «PowerShell»: галочки серверной вкладки стоят как были, только приглушены  -->
+                        <DataTrigger Binding="{Binding DataContext.State.CommandLocalPc, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                          <Setter TargetName="Item" Property="Opacity" Value="0.5" />
+                        </DataTrigger>
                         <!--  под мышью — прямоугольник той же ширины и с теми же углами, что у отмеченного, вместе с замком.
                               По высоте и по тексту ничего не сдвигается: сбоку отступ возвращает то, что забрало поле  -->
                         <MultiDataTrigger>
                           <MultiDataTrigger.Conditions>
                             <Condition Binding="{Binding IsMouseOver, ElementName=Item}" Value="True" />
-                            <Condition Binding="{Binding DataContext.State.ActiveWorkspace.IsPaneLocked, RelativeSource={RelativeSource AncestorType=Window}}" Value="False" />
+                            <Condition Binding="{Binding DataContext.State.PaneTab.IsPaneLocked, RelativeSource={RelativeSource AncestorType=Window}}" Value="False" />
                           </MultiDataTrigger.Conditions>
                           <Setter TargetName="Pick" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
                           <Setter TargetName="Pick" Property="Margin" Value="-4,0,-4,0" />
@@ -1563,7 +1626,7 @@
                             <Condition Binding="{Binding IsSelected}" Value="True" />
                             <Condition Binding="{Binding DataContext.State.PaneHighlightsPicks, RelativeSource={RelativeSource AncestorType=Window}}" Value="True" />
                             <Condition Binding="{Binding IsMouseOver, ElementName=Item}" Value="True" />
-                            <Condition Binding="{Binding DataContext.State.ActiveWorkspace.IsPaneLocked, RelativeSource={RelativeSource AncestorType=Window}}" Value="False" />
+                            <Condition Binding="{Binding DataContext.State.PaneTab.IsPaneLocked, RelativeSource={RelativeSource AncestorType=Window}}" Value="False" />
                           </MultiDataTrigger.Conditions>
                           <Setter TargetName="Pick" Property="Background" Value="#38E07A1F" />
                         </MultiDataTrigger>
@@ -1583,7 +1646,7 @@
                 Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                 Text="серверов нет — добавьте на вкладке «Серверы»"
                 TextWrapping="Wrap"
-                Visibility="{Binding State.ActiveWorkspace.PaneEmptyHintVisibility}" />
+                Visibility="{Binding State.PaneTab.PaneEmptyHintVisibility}" />
             </StackPanel>
           </ScrollViewer>
 
@@ -1593,12 +1656,22 @@
             <StackPanel>
                 <ui:ToggleSwitch
                   x:Name="SmartSwitch"
-                  Visibility="{Binding State.ShowsSmartMode, Converter={StaticResource BoolToVis}}"
                   Click="OnSmartModeChanged"
                   Content="Умный режим"
                   FontSize="13"
                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                   ToolTipService.ShowDuration="30000">
+                  <!--  в режиме PowerShell умный режим не действует: на месте, но приглушён, как серверы  -->
+                  <ui:ToggleSwitch.Style>
+                    <Style BasedOn="{StaticResource {x:Type ui:ToggleSwitch}}" TargetType="ui:ToggleSwitch">
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding State.CommandLocalPc}" Value="True">
+                          <Setter Property="Opacity" Value="0.5" />
+                          <Setter Property="IsHitTestVisible" Value="False" />
+                        </DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </ui:ToggleSwitch.Style>
                   <ui:ToggleSwitch.ToolTip>
                     <TextBlock MaxWidth="340" TextWrapping="Wrap">
                       Спросит перед запуском, если команду или копирование с этой вкладки
@@ -1627,13 +1700,9 @@
                     <Button.Style>
                       <Style BasedOn="{StaticResource PaneSetButtonStyle}" TargetType="Button">
                         <Style.Triggers>
-                          <MultiDataTrigger>
-                            <MultiDataTrigger.Conditions>
-                              <Condition Binding="{Binding State.PaneAllSets}" Value="True" />
-                              <Condition Binding="{Binding State.CommandLocalPc}" Value="False" />
-                            </MultiDataTrigger.Conditions>
+                          <DataTrigger Binding="{Binding State.PaneAllSets}" Value="True">
                             <Setter Property="Tag" Value="Active" />
-                          </MultiDataTrigger>
+                          </DataTrigger>
                         </Style.Triggers>
                       </Style>
                     </Button.Style>
@@ -1667,46 +1736,35 @@
                 BorderThickness="0,1,0,0"
                 Visibility="{Binding State.ShowsLocalPc, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
+                  <!--  справа от подписи — свитч режима, красный при включении, как «Везде»: команды идут не на серверы  -->
+                  <DockPanel>
+                  <ui:ToggleSwitch
+                    Margin="6,0,0,0"
+                    VerticalAlignment="Center"
+                    DockPanel.Dock="Right"
+                    IsChecked="{Binding State.CommandLocalPc, Mode=TwoWay}"
+                    ToolTip="Включено — команды выполняются в PowerShell на этом компьютере. Выключено — снова на серверах">
+                    <ui:ToggleSwitch.Style>
+                      <Style BasedOn="{StaticResource DangerSwitchStyle}" TargetType="ui:ToggleSwitch">
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding State.ActiveWorkspace.IsPaneLocked}" Value="True">
+                            <Setter Property="Opacity" Value="0.5" />
+                            <Setter Property="IsHitTestVisible" Value="False" />
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </ui:ToggleSwitch.Style>
+                  </ui:ToggleSwitch>
                   <!--  PowerShell на «Команде»: свой ряд вкладок, команды — на этот компьютер. Набор или сервер — назад к серверам.
-                        Подпись от самого края, как у свитчей; выбранный — цветом и жирным, без полоски  -->
+                        Подпись от самого края, как у свитчей; щелчок по ней включает и выключает режим, как свитч справа  -->
                   <Button
                     Click="OnPickLocalPc"
                     Content="PowerShell"
-                    ToolTip="Команды — на этом компьютере. Свои вкладки, история и избранное. Щелчок по серверу или набору вернёт к серверам">
+                    ToolTip="Команды этой вкладки — на этом компьютере, в PowerShell. Режим помнится у вкладки, избранное — своё. Серверы и наборы выбираются после выключения режима">
                     <Button.Style>
-                      <Style BasedOn="{StaticResource PaneSetButtonStyle}" TargetType="Button">
-                        <Setter Property="Template">
-                          <Setter.Value>
-                            <ControlTemplate TargetType="Button">
-                              <Border
-                                x:Name="Row"
-                                Padding="0,3"
-                                Background="Transparent"
-                                CornerRadius="3">
-                                <TextBlock
-                                  x:Name="Label"
-                                  VerticalAlignment="Center"
-                                  Foreground="{TemplateBinding Foreground}"
-                                  Text="{TemplateBinding Content}"
-                                  TextTrimming="CharacterEllipsis" />
-                              </Border>
-                              <ControlTemplate.Triggers>
-                                <Trigger Property="IsMouseOver" Value="True">
-                                  <Setter TargetName="Row" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
-                                  <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
-                                </Trigger>
-                                <Trigger Property="Tag" Value="Active">
-                                  <Setter TargetName="Label" Property="FontWeight" Value="SemiBold" />
-                                  <Setter Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
-                                </Trigger>
-                              </ControlTemplate.Triggers>
-                            </ControlTemplate>
-                          </Setter.Value>
-                        </Setter>
+                      <!--  включённый режим подпись не перекрашивает: его показывает свитч справа  -->
+                      <Style BasedOn="{StaticResource PaneEdgeLabelStyle}" TargetType="Button">
                         <Style.Triggers>
-                          <DataTrigger Binding="{Binding State.CommandLocalPc}" Value="True">
-                            <Setter Property="Tag" Value="Active" />
-                          </DataTrigger>
                           <DataTrigger Binding="{Binding State.ActiveWorkspace.IsPaneLocked}" Value="True">
                             <Setter Property="Opacity" Value="0.5" />
                             <Setter Property="IsHitTestVisible" Value="False" />
@@ -1715,16 +1773,24 @@
                       </Style>
                     </Button.Style>
                   </Button>
-                  <!--  режим админа — под PowerShell и только пока он выбран. Стоит так, как на деле запущен терминал  -->
-                  <ui:ToggleSwitch
-                    x:Name="AdminSwitch"
-                    Margin="0,2,0,0"
-                    Click="OnAdminModeClick"
-                    Content="Режим админа"
-                    FontSize="13"
-                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                    ToolTipService.ShowDuration="30000"
-                    Visibility="{Binding State.CommandLocalPc, Converter={StaticResource BoolToVis}}" />
+                  </DockPanel>
+                  <!--  режим админа — под PowerShell, виден всегда, включён режим вкладки или нет. Стоит так, как на деле
+                        запущен терминал. Как строка выше: подпись слева от края, свитч справа  -->
+                  <DockPanel Margin="0,2,0,0">
+                    <ui:ToggleSwitch
+                      x:Name="AdminSwitch"
+                      Margin="6,0,0,0"
+                      VerticalAlignment="Center"
+                      Click="OnAdminModeClick"
+                      DockPanel.Dock="Right"
+                      ToolTipService.ShowDuration="30000" />
+                    <Button
+                      Click="OnAdminLabelClick"
+                      Content="Режим админа"
+                      Style="{StaticResource PaneEdgeLabelStyle}"
+                      ToolTip="{Binding ToolTip, ElementName=AdminSwitch}"
+                      ToolTipService.ShowDuration="30000" />
+                  </DockPanel>
                 </StackPanel>
               </Border>
             </StackPanel>

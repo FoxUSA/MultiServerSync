@@ -350,12 +350,12 @@ public static class CopyPass
         {
             try
             {
-                if (Clipboard.ContainsFileDropList())
+                if (ClipboardText.HasFiles)
                 {
-                    return ClipboardText.IsOurLogFile(Clipboard.GetFileDropList());
+                    return ClipboardText.IsOurLogFile(ClipboardText.ReadFiles(1));
                 }
 
-                return ClipboardText.IsTerminalOutput(Clipboard.ContainsText() ? Clipboard.GetText() : null);
+                return ClipboardText.IsTerminalOutput(ClipboardText.ReadText(1));
             }
             catch (Exception)
             {

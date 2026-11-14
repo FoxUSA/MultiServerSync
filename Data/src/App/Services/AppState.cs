@@ -237,9 +237,13 @@ public sealed class AppState : ObservableObject
     private bool _legacyAllSingleSelectCopy;
 
     /// <summary>Вкладка, чья панель сейчас на экране. Пока вкладки не загружены — нет.</summary>
+    /// <remarks>«PowerShell» — режим самой вкладки: её галочки, набор и вид стоят как были, только приглушены.</remarks>
     private Workspace? PaneOwner =>
         _section == AppSection.Servers ? ServersDesk
         : Tabs.Count > 0 ? ActiveWorkspace : null;
+
+    /// <summary>Вкладка, чьи серверы и галочки в панели слева.</summary>
+    public Workspace? PaneTab => PaneOwner;
 
     private Workspace? _serversDesk;
 
@@ -314,7 +318,7 @@ public sealed class AppState : ObservableObject
         }
 
         PaneOwner?.RaiseSection();
-        RaiseMany(nameof(PaneSet), nameof(PaneAllSets), nameof(PaneSetTitle), nameof(PaneShowIp), nameof(PaneShowUser), nameof(CommandLocalPc), nameof(ShowsSmartMode));
+        RaiseMany(nameof(PaneTab), nameof(PaneSet),nameof(PaneAllSets), nameof(PaneSetTitle), nameof(PaneShowIp), nameof(PaneShowUser), nameof(CommandLocalPc));
         RaiseTerminalChecks();
         RaiseSingleSelect();
     }
@@ -368,22 +372,17 @@ public sealed class AppState : ObservableObject
     /// <summary>«PowerShell» под «Наборы серверов» — только на «Команде».</summary>
     public bool ShowsLocalPc => _section == AppSection.Command;
 
-    /// <summary>Название основной вкладки ряда «PowerShell».</summary>
-    public const string LocalPcTitle = "PowerShell";
-
-    /// <summary>Открытая вкладка другого ряда «Команды»: переключение режима возвращает на неё.</summary>
-    private Workspace? _commandOtherMode;
-
-    /// <summary>«Команда» в режиме «PowerShell»: открыта вкладка этого компьютера, на ленте — только такие.</summary>
-    public bool CommandLocalPc => _section == AppSection.Command && ActiveWorkspace.LocalPc;
-
-    /// <summary>«Умный режим» — про серверы; у «PowerShell» на его месте «Режим админа».</summary>
-    public bool ShowsSmartMode => !CommandLocalPc;
+    /// <summary>«Команда»: открытая вкладка в режиме «PowerShell» — её команды идут на этот компьютер.</summary>
+    /// <remarks>Запись — свитч рядом с «PowerShell»: включает режим у открытой вкладки или возвращает её к серверам.</remarks>
+    public bool CommandLocalPc
+    {
+        get => _section == AppSection.Command && ActiveWorkspace.LocalPc;
+        set => SwitchLocalPc(value);
+    }
 
     /// <summary>
-    /// Переключение «Команды» между серверами и «PowerShell». У каждого режима свои вкладки — и с ними своя
-    /// память: окна команд, история, место в избранном. Открывается вкладка, на которой режим оставили;
-    /// вкладок «PowerShell» ещё нет — заводится первая.
+    /// Режим «PowerShell» у открытой вкладки «Команды»: включается и выключается на ней самой и помнится за ней.
+    /// Пока команда вкладки идёт, режим не меняется — иначе её вывод и ответы ушли бы не туда.
     /// </summary>
     public void SwitchLocalPc(bool on)
     {
@@ -392,21 +391,23 @@ public sealed class AppState : ObservableObject
             return;
         }
 
-        var target = _commandOtherMode is { IsPersonal: false } other && other.LocalPc == on && CommandTabs.Contains(other)
-            ? other
-            : CommandTabs.FirstOrDefault(t => t.LocalPc == on && !t.IsPersonal && !t.IsArchived)
-                ?? CommandTabs.FirstOrDefault(t => t.LocalPc == on && !t.IsPersonal);
+        var tab = ActiveWorkspace;
 
-        if (target is null)
+        if (tab.CommandBatch.IsRunning)
         {
-            target = on ? AddWorkspace(LocalPcTitle, localPc: true) : CommandTabs[0];
+            AppLog.Hint("Команда вкладки ещё выполняется — дождитесь конца или остановите её, потом меняйте режим.", LogLevel.Warning);
+
+            // свитч уже перещёлкнулся — вернуть его, когда привязка закончит запись
+            System.Windows.Application.Current?.Dispatcher.BeginInvoke(new Action(() => Raise(nameof(CommandLocalPc))));
+            return;
         }
 
-        ActiveWorkspace = target;
-        RaiseMany(nameof(CommandLocalPc), nameof(ShowsSmartMode));
+        tab.SetLocalPc(on);
+        RaisePane();
+        SaveWorkspaces();
         AppLog.Hint(on
-            ? "PowerShell: команды выполняются на этом компьютере, вкладки и избранное — свои. Щелчок по серверу или набору вернёт к серверам."
-            : "Команды снова выполняются на серверах.");
+            ? $"Вкладка «{tab.Title}»: команды выполняются в PowerShell на этом компьютере. Серверы выбираются после выключения режима."
+            : $"Вкладка «{tab.Title}»: команды снова выполняются на серверах.");
     }
 
     private void RaiseSingleSelect() => RaiseMany(
@@ -918,12 +919,6 @@ public sealed class AppState : ObservableObject
             switch (section)
             {
                 case AppSection.Command:
-                    // перешли в другой ряд («PowerShell» / серверы) — прежняя вкладка запоминается за своим рядом
-                    if (current is { IsPersonal: false } before && !value.IsPersonal && before.LocalPc != value.LocalPc)
-                    {
-                        _commandOtherMode = before;
-                    }
-
                     _activeCommand = value;
 
                     // выбрал в «Командах» другую вкладку сам — она и запоминается
@@ -1041,7 +1036,7 @@ public sealed class AppState : ObservableObject
                     now.ClearStatus();
                 }
 
-                Raise(nameof(ActiveWorkspace));
+                RaiseMany(nameof(ActiveWorkspace), nameof(PaneTab));
                 RaiseDim();
                 RaiseChainCopy();
                 ActiveWorkspaceChanged?.Invoke(now);
@@ -1081,7 +1076,7 @@ public sealed class AppState : ObservableObject
     }
 
     /// <summary>Первая вкладка открытого раздела.</summary>
-    public Workspace MainWorkspace => Tabs.FirstOrDefault(w => w.IsMain && w.LocalPc == CommandLocalPc) ?? Tabs.FirstOrDefault(w => w.IsMain) ?? Tabs[0];
+    public Workspace MainWorkspace => Tabs.FirstOrDefault(w => w.IsMain) ?? Tabs[0];
 
     /// <summary>Отмеченные серверы текущей вкладки.</summary>
     public IReadOnlyList<ServerEntry> SelectedServers => ActiveWorkspace.SelectedServers;
@@ -1296,20 +1291,18 @@ public sealed class AppState : ObservableObject
     /// Новая вкладка в открытом разделе — копирования или команды. <paramref name="archived"/> —
     /// добавили, глядя в архив: ярлык сразу там, а не в основной ленте.
     /// </summary>
-    /// <param name="localPc">Вкладка «PowerShell»; null — того же ряда, что открытая.</param>
-    public Workspace AddWorkspace(string? title = null, bool archived = false, bool? localPc = null)
+    public Workspace AddWorkspace(string? title = null, bool archived = false)
     {
         var tabs = Tabs;
         var source = tabs.Count > 0 ? ActiveWorkspace : null;
-        var pc = localPc ?? (source?.LocalPc == true && !source.IsPersonal);
 
-        // первая вкладка «PowerShell» — основная своего ряда: не закрывается и не переименовывается
-        var pcMain = pc && !tabs.Any(t => t.LocalPc);
+        // режим «PowerShell» новая вкладка берёт у открытой, как и прочие условия
+        var pc = source?.LocalPc == true && !source.IsPersonal;
 
         var workspace = new Workspace(
             Guid.NewGuid().ToString("N"),
-            pcMain ? LocalPcTitle : string.IsNullOrWhiteSpace(title) ? NextTitle(tabs) : title.Trim(),
-            isMain: tabs.Count == 0 || pcMain);
+            string.IsNullOrWhiteSpace(title) ? NextTitle(tabs) : title.Trim(),
+            isMain: tabs.Count == 0);
 
         workspace.SyncServers(Servers);
 
@@ -1625,10 +1618,9 @@ public sealed class AppState : ObservableObject
     /// архива), нет её — справа. Закрыли последнюю в архиве — основная вкладка раздела.
     /// Личных на лентах нет, они не в счёт.
     /// </summary>
-    private static Workspace NeighborInStrip(IList<Workspace> tabs, int index, bool archived, bool localPc)
+    private static Workspace NeighborInStrip(IList<Workspace> tabs, int index, bool archived)
     {
-        // «PowerShell» — свой ряд: сосед из него же; закрыли последнюю — назад к серверам
-        bool Same(Workspace t) => t.IsArchived == archived && !t.IsPersonal && t.LocalPc == localPc;
+        bool Same(Workspace t) => t.IsArchived == archived && !t.IsPersonal;
 
         for (var i = Math.Min(index, tabs.Count) - 1; i >= 0; i--)
         {
@@ -1720,7 +1712,7 @@ public sealed class AppState : ObservableObject
             // Закрыли личную, на которую перешли, — вид кончился, раздел на прежней вкладке
             ActiveWorkspace = wasJumped
                 ? CommandBeforeJump
-                : NeighborInStrip(tabs, index, workspace.IsArchived, workspace.LocalPc);
+                : NeighborInStrip(tabs, index, workspace.IsArchived);
         }
 
         SaveWorkspaces();
@@ -1925,8 +1917,8 @@ public sealed class AppState : ObservableObject
 
         // сначала открыть соседнюю в той же ленте, потом перенести ярлык: лента не остаётся без выбранного
         if (wasOpen
-            && (tabs.Take(index).LastOrDefault(t => t.IsArchived == workspace.IsArchived && !t.IsPersonal && t.LocalPc == workspace.LocalPc)
-                ?? tabs.Skip(index + 1).FirstOrDefault(t => t.IsArchived == workspace.IsArchived && !t.IsPersonal && t.LocalPc == workspace.LocalPc)) is { } next)
+            && (tabs.Take(index).LastOrDefault(t => t.IsArchived == workspace.IsArchived && !t.IsPersonal)
+                ?? tabs.Skip(index + 1).FirstOrDefault(t => t.IsArchived == workspace.IsArchived && !t.IsPersonal)) is { } next)
         {
             ActiveWorkspace = next;
         }
@@ -2017,7 +2009,6 @@ public sealed class AppState : ObservableObject
             ActiveId = (_active ?? Workspaces[0]).Id,
             Workspaces = Workspaces.Select(w => w.ToState()).ToList(),
             ActiveCommandId = (_activeCommand ?? CommandTabs[0]).Id,
-            OtherCommandId = _commandOtherMode is { } otherMode && CommandTabs.Contains(otherMode) ? otherMode.Id : null,
             CommandTabs =CommandTabs.Select(w => w.ToState()).ToList(),
             ActiveDownloadId = (_activeDownload ?? DownloadTabs[0]).Id,
             DownloadTabs = DownloadTabs.Select(w => w.ToState()).ToList(),
@@ -2267,17 +2258,13 @@ public sealed class AppState : ObservableObject
                 });
             }
 
-            // у ряда «PowerShell» своя основная вкладка — первая из его вкладок
-            var pcMain = commandStates.FindIndex(s => s.LocalPc);
-
             for (var i = 0; i < commandStates.Count; i++)
             {
                 var state = commandStates[i];
                 var tab = new Workspace(
                     string.IsNullOrWhiteSpace(state.Id) ? Guid.NewGuid().ToString("N") : state.Id,
-                    i == pcMain && i > 0 ? LocalPcTitle
-                        : string.IsNullOrWhiteSpace(state.Title) ? (i == 0 ? "Основная" : $"Вкладка {i + 1}") : state.Title,
-                    isMain: i == 0 || i == pcMain);
+                    string.IsNullOrWhiteSpace(state.Title) ? (i == 0 ? "Основная" : $"Вкладка {i + 1}") : state.Title,
+                    isMain: i == 0);
 
                 tab.SyncServers(Servers);
                 tab.SelectCommandServers(state.CommandServerIds ?? new List<string>());
@@ -2289,7 +2276,6 @@ public sealed class AppState : ObservableObject
             }
 
             _activeCommand = CommandTabs.FirstOrDefault(w => w.Id == file?.ActiveCommandId) ?? CommandTabs[0];
-            _commandOtherMode = CommandTabs.FirstOrDefault(w => w.Id == file?.OtherCommandId);
 
             // вкладки скачивания. Файл без них — из версии, где раздела не было: одна пустая основная
             var downloadStates = file?.DownloadTabs ?? new List<WorkspaceState>();
@@ -2458,9 +2444,13 @@ public sealed class AppState : ObservableObject
         MatchByHash = true,
     };
 
+    /// <summary>
+    /// «Вкладка N»: N — следующий за числом ярлыков в основной ленте. Личные вкладки копирования и архив не в счёт —
+    /// их на ленте не видно, и номер выходил больше, чем вкладок. Занятое имя (хоть в архиве) пропускается.
+    /// </summary>
     private static string NextTitle(IList<Workspace> tabs)
     {
-        for (var n = tabs.Count + 1; ; n++)
+        for (var n = tabs.Count(w => !w.IsPersonal && !w.IsArchived) + 1; ; n++)
         {
             var title = $"Вкладка {n}";
 
