@@ -1185,6 +1185,12 @@ public sealed class Workspace : ObservableObject
     /// <returns>Галочка изменилась.</returns>
     public bool SetCopyPass(bool value) => SetTerminalCheck(ref _copyPass, value);
 
+    /// <summary>
+    /// CopyPass на один раз (правый щелчок): снимается, как только автокопия взвела вставку. Не сохраняется —
+    /// после перезапуска её нет.
+    /// </summary>
+    public bool CopyPassOnce { get; set; }
+
     private bool SetTerminalCheck(ref bool field, bool value)
     {
         if (field == value)
@@ -2094,12 +2100,62 @@ public sealed class Workspace : ObservableObject
         get => _afterCopyEnabled;
         set
         {
-            if (Set(ref _afterCopyEnabled, value))
+            // свитч тронули руками — разовый режим забыт
+            var reset = _afterCopyOnce;
+            _afterCopyOnce = false;
+
+            if (Set(ref _afterCopyEnabled, value) || reset)
             {
                 RaiseChain();
                 Save();
             }
         }
+    }
+
+    private bool _afterCopyOnce;
+
+    /// <summary>
+    /// Свитч включён на одно копирование (ПКМ) — в нём «×1»; не сохраняется. Тогда после копирования
+    /// идёт команда из окна мини-терминала, а не личная вкладка, и вывод её — в самом мини-терминале.
+    /// </summary>
+    public bool AfterCopyOnce => _afterCopyOnce;
+
+    /// <summary>Строки личных команд встают в таблицу под копированием: свитч включён не на один раз.</summary>
+    public bool ShowsChain => _afterCopyEnabled && !_afterCopyOnce;
+
+    /// <summary>Откуда команды после копирования: на один раз — окно мини-терминала, иначе личная вкладка.</summary>
+    private Workspace? ChainSource => _afterCopyOnce ? this : Personal;
+
+    /// <summary>
+    /// Прогон команд после копирования — для общего с копированием отчёта в буфер («+ команды»):
+    /// личная вкладка, а на один раз — мини-терминал этой же вкладки. Null — команд после копирования нет.
+    /// </summary>
+    public OperationBatch? ReportChain => ShowsChain && Personal is { } personal
+        ? personal.CommandBatch
+        : _afterCopyOnce && _afterCopyEnabled ? CommandBatch : null;
+
+    /// <summary>ПКМ по свитчу: включить на одно копирование, повторный — выключить.</summary>
+    public void ToggleAfterCopyOnce()
+    {
+        var on = !_afterCopyOnce;
+        AfterCopyEnabled = on;
+        _afterCopyOnce = on;
+        RaiseChain();
+    }
+
+    /// <summary>Разовая команда после копирования пошла — свитч гаснет.</summary>
+    private void UseAfterCopyOnce()
+    {
+        if (!_afterCopyOnce)
+        {
+            return;
+        }
+
+        _afterCopyOnce = false;
+        _afterCopyEnabled = false;
+        RaiseChain();
+        Save();
+        ActionLog.Info($"Команда после копирования выполнена один раз, свитч выключен: «{Title}»", null, AppSection.Files, this);
     }
 
     /// <summary>Это вкладка раздела «Копирование» — у неё на ярлыке свитч личных команд.</summary>
@@ -2127,6 +2183,7 @@ public sealed class Workspace : ObservableObject
     {
         _afterCopyTabId = tabId;
         _afterCopyEnabled = enabled;
+        _afterCopyOnce = false;
         RaiseChain();
         Save();
     }
@@ -2135,6 +2192,7 @@ public sealed class Workspace : ObservableObject
     {
         _afterCopyTabId = string.Empty;
         _afterCopyEnabled = false;
+        _afterCopyOnce = false;
         RaiseChain();
         Save();
     }
@@ -2142,7 +2200,7 @@ public sealed class Workspace : ObservableObject
     public void RaiseChain()
     {
         RaiseMany(
-            nameof(AfterCopyEnabled), nameof(Personal), nameof(HasPersonal), nameof(IsCopyTab),
+            nameof(AfterCopyEnabled), nameof(AfterCopyOnce), nameof(ShowsChain), nameof(Personal), nameof(HasPersonal), nameof(IsCopyTab),
             nameof(Notices), nameof(HasNotices), nameof(PersonalButtonText));
 
         // галочка «+ команды» в терминале видна, только пока свитч включён. Current ещё нет,
@@ -2159,13 +2217,13 @@ public sealed class Workspace : ObservableObject
     {
         get
         {
-            if (!_afterCopyEnabled || Personal is not { } personal)
+            if (!_afterCopyEnabled || ChainSource is not { } source)
             {
                 return [];
             }
 
-            return personal.RunnableSteps(null, onlyThis: false).Count == 0
-                ? ["Вкладка команд пустая — после копирования выполнять нечего."]
+            return source.RunnableSteps(null, onlyThis: false).Count == 0
+                ? [_afterCopyOnce ? "Окно команды пустое — после копирования выполнять нечего." : "Вкладка команд пустая — после копирования выполнять нечего."]
                 : [];
         }
     }
@@ -2951,6 +3009,9 @@ public sealed class Workspace : ObservableObject
     /// <summary>Свитч включён, а руками отмечено уже залитое. Меняется вместе с <see cref="UnsentOn"/>.</summary>
     public bool UnsentSentTicked => TickRows.Any(r => r.Memory.Before is not null && r.IsSelected && !r.Memory.Marked);
 
+    /// <summary>Свитч включён, а отмечать нечего: незалитых нет. Меняется вместе с <see cref="UnsentOn"/>.</summary>
+    public bool UnsentNone => UnsentHeld && !TickRows.Any(r => r.Memory.Before is not null && r.Memory.Marked);
+
     /// <summary>Свитч зелёный: галочки стоят так, как их поставил свитч. Тронули руками — краснеет, прежние галочки при этом помнятся.</summary>
     public bool UnsentOn
     {
@@ -3117,7 +3178,7 @@ public sealed class Workspace : ObservableObject
     }
 
     /// <summary>
-    /// Для свитча «Отметить незалитые»: файл строки не новее её даты при прошлой удачной заливке на этот сервер —
+    /// Для свитча «Отмечать незалитые»: файл строки не новее её даты при прошлой удачной заливке на этот сервер —
     /// там он уже проверен. Строкам без такой памяти (сервер новый, память старой версии) не доверяем.
     /// </summary>
     private static Func<string, bool>? SettledOn(UploadJob job, ServerEntry server)
@@ -3306,19 +3367,26 @@ public sealed class Workspace : ObservableObject
 
         await UploadJobsAsync(jobs, targets, prepare: ChainPlan());
 
-        // с галочкой «+ команды» автокопия ждёт личные команды: отчёт один, копирование и команды
-        var together = _afterCopyEnabled && Personal is not null && AppState.Current.Settings.CopyWithChain;
+        // с галочкой «+ команды» автокопия ждёт команды после копирования — и личные, и разовую
+        // из мини-терминала: отчёт один, копирование и команды. Иначе второй затирал бы в буфере первый
+        var together = ReportChain is not null && AppState.Current.Settings.CopyWithChain;
 
         if (notify && !together)
         {
             AppState.Current.NotifyFinished(CopyBatch);
         }
 
-        await RunChainAsync(notifyCommands: !together);
+        var ran = await RunChainAsync(notifyCommands: !together);
 
+        // отчёт — пока разовый режим ещё стоит: по нему автокопия находит вывод мини-терминала
         if (notify && together)
         {
             AppState.Current.NotifyFinished(CopyBatch);
+        }
+
+        if (ran)
+        {
+            UseAfterCopyOnce();
         }
 
         return true;
@@ -4101,13 +4169,13 @@ public sealed class Workspace : ObservableObject
     /// <summary>Проверка умного режима для личных команд — если они выполнятся после копирования.</summary>
     private RunHistory.SmartCheck? ChainCheck(IReadOnlyList<ServerEntry> targets)
     {
-        if (!_afterCopyEnabled || Personal is not { } personal)
+        if (!_afterCopyEnabled || ChainSource is not { } source)
         {
             return null;
         }
 
-        var steps = personal.RunnableSteps(null, onlyThis: false);
-        return steps.Count == 0 || targets.Count == 0 ? null : RunHistory.CheckCommands(personal, personal.Numbered(steps), targets);
+        var steps = source.RunnableSteps(null, onlyThis: false);
+        return steps.Count == 0 || targets.Count == 0 ? null : RunHistory.CheckCommands(source, source.Numbered(steps), targets);
     }
 
     /// <summary>
@@ -4117,7 +4185,8 @@ public sealed class Workspace : ObservableObject
     /// </summary>
     private Action<OperationResult>? ChainPlan()
     {
-        if (!_afterCopyEnabled || Personal is not { } personal || personal.CommandBatch.IsRunning)
+        // разовая команда мини-терминала выводит своё у себя — в таблицу копирования строки не ставятся
+        if (!ShowsChain || Personal is not { } personal || personal.CommandBatch.IsRunning)
         {
             return null;
         }
@@ -4139,24 +4208,26 @@ public sealed class Workspace : ObservableObject
     /// Команды, остановленные заранее в строке терминала, не пойдут — ни они, ни нижние.
     /// </summary>
     /// <param name="notifyCommands">Сообщить об окончании команд отдельно (иначе — вместе с копированием).</param>
-    private async Task RunChainAsync(bool notifyCommands)
+    private async Task<bool> RunChainAsync(bool notifyCommands)
     {
-        if (!_afterCopyEnabled || Personal is not { } personal)
+        if (!_afterCopyEnabled || ChainSource is not { } personal)
         {
-            return;
+            return false;
         }
 
         if (personal.CommandBatch.IsRunning)
         {
-            ChainSkipped("на личной вкладке команды ещё выполняются");
-            return;
+            ChainSkipped(_afterCopyOnce ? "в окне команды ещё идёт прошлая команда" : "на личной вкладке команды ещё выполняются");
+            return false;
         }
 
         // свитч включён не просто так: чего не хватает, говорим прямо там, где идёт вывод копирования
         if (personal.RunnableSteps(null, onlyThis: false).Count == 0)
         {
-            ChainSkipped($"в личной вкладке команд нет ни одной команды — впишите её (или выключите свитч на ярлыке «{Title}»)");
-            return;
+            ChainSkipped(_afterCopyOnce
+                ? "окно команды пустое — впишите команду"
+                : $"в личной вкладке команд нет ни одной команды — впишите её (или выключите свитч на ярлыке «{Title}»)");
+            return false;
         }
 
         // только последний запуск: таблица копирования могла накопить и прошлые
@@ -4186,7 +4257,7 @@ public sealed class Workspace : ObservableObject
                 step.Clear();
             }
 
-            return;
+            return true;
         }
 
         if (CopyBatch.RunSuccess == 0 || targets.Count == 0)
@@ -4198,7 +4269,7 @@ public sealed class Workspace : ObservableObject
                 step.Clear();
             }
 
-            return;
+            return false;
         }
 
         if (failed.Count > 0)
@@ -4223,6 +4294,8 @@ public sealed class Workspace : ObservableObject
         {
             copy.SkipPlanned();
         }
+
+        return true;
     }
 
     /// <summary>
@@ -4300,7 +4373,8 @@ public sealed class Workspace : ObservableObject
         bool onlyThis = false,
         bool approved = false,
         IReadOnlyList<ServerEntry>? servers = null,
-        Action<OperationResult>? prepare = null)
+        Action<OperationResult>? prepare = null,
+        string? workDir = null)
     {
         if (CommandBatch.IsRunning)
         {
@@ -4485,6 +4559,11 @@ public sealed class Workspace : ObservableObject
                         var onPc = server.IsLocalPc;
                         Write(onPc ? (AdminShell.IsOn ? "── команда, PowerShell от администратора ──" : "── команда, PowerShell на этом компьютере ──") :step.UseSudo ? "── команда, через sudo ──" : "── команда ──");
 
+                        if (!onPc && workDir is { Length: > 0 })
+                        {
+                            Write("папка: " + workDir);
+                        }
+
                         foreach (var line in step.Text.Replace("\r\n", "\n").Split('\n'))
                         {
                             Write("$ " + line);
@@ -4575,7 +4654,10 @@ public sealed class Workspace : ObservableObject
                                 },
                                 OnWaiting, OnTail)
                             : await SshService.RunScriptAsync(
-                                server, settings, step.Text, step.UseSudo, Write, ct, OnJob, input => result.Input = input, OnWaiting, OnTail);
+                                server, settings,
+                                // терминал «Проводника» — в папке правой панели, как терминал, открытый в ней
+                                workDir is { Length: > 0 } ? $"cd -- {SshService.ShellQuote(workDir)} || exit 1\n{step.Text}" : step.Text,
+                                step.UseSudo, Write, ct, OnJob, input => result.Input = input, OnWaiting, OnTail);
 
                         // оборвали нашей же кнопкой — это не ошибка, а выполненная просьба.
                         // Проверяется до всего прочего: после kill сервер может и не успеть
@@ -4828,6 +4910,253 @@ public sealed class Workspace : ObservableObject
         return true;
     }
 
+    /// <summary>Отметка прогресса GNU tar (--checkpoint-action=echo): по ней движется полоса, в журнал не идёт.</summary>
+    private const string ArchiveTick = "MSS-TAR-TICK";
+
+    /// <summary>Установщики пакетов, которые знает «Архивировать», — в порядке проверки.</summary>
+    private const string PackageManagers = "apt-get dnf yum zypper apk pacman opkg";
+
+    /// <summary>
+    /// «Архивировать» в «Проводнике»: отмеченное в папке <paramref name="folder"/> — в .tar.gz рядом, в той же папке.
+    /// Нет tar или gzip — ставит их установщиком пакетов сервера (через sudo, если вошли не root). Все шаги,
+    /// особенно установка, — в журнал вкладки строкой команды.
+    /// </summary>
+    /// <returns>Архив создан.</returns>
+    public async Task<bool> RunArchiveAsync(ServerEntry server, string folder, IReadOnlyList<string> names)
+    {
+        if (names.Count == 0)
+        {
+            AppLog.Hint("Отметьте, что архивировать.", LogLevel.Warning);
+            return false;
+        }
+
+        var settings = AppState.Current.Settings;
+
+        // одно — по его имени, несколько — по имени папки
+        var baseName = names.Count == 1
+            ? names[0]
+            : folder.TrimEnd('/').Split('/').LastOrDefault(s => s.Length > 0) ?? "архив";
+        var quoted = string.Join(" ", names.Select(SshService.ShellQuote));
+        var created = false;
+
+        SetScope();
+        AppState.Current.RequestTerminal();
+        ShowResults(CommandBatch);
+
+        await CommandBatch.RunAsync(
+            Operation("Архивировать"),
+            [server],
+            async (target, result, ct) =>
+            {
+                result.Append(BlockParams);
+                result.Append("Папка: " + folder);
+                result.Append("Архивировать: " + string.Join(", ", names));
+                result.Message = "подключение…";
+
+                // 1. есть ли чем архивировать и чем ставить
+                var probe = await SshService.RunCommandAsync(target, settings,
+                    "miss=''; command -v tar >/dev/null 2>&1 || miss=tar; "
+                    + "command -v gzip >/dev/null 2>&1 || miss=\"$miss gzip\"; "
+                    + "echo \"MISS:$miss\"; echo \"UID:$(id -u)\"; "
+                    + "for m in " + PackageManagers + "; do command -v $m >/dev/null 2>&1 && { echo \"PM:$m\"; break; }; done",
+                    ct);
+
+                if (probe.Interruption is { } lost)
+                {
+                    Fail(result, lost);
+                    return;
+                }
+
+                string Field(string key) => probe.StdOut.Split('\n')
+                    .Select(l => l.Trim()).FirstOrDefault(l => l.StartsWith(key + ":", StringComparison.Ordinal))?[(key.Length + 1)..].Trim() ?? string.Empty;
+
+                var missing = Field("MISS");
+                var root = Field("UID") == "0";
+                var manager = Field("PM");
+
+                // 2. нет архиватора — поставить
+                if (missing.Length > 0)
+                {
+                    result.Append($"── установка: на сервере нет {missing} ──");
+
+                    if (manager.Length == 0)
+                    {
+                        Fail(result, $"нет {missing}, и установщика пакетов не нашлось — поставьте вручную");
+                        return;
+                    }
+
+                    var install = InstallScript(manager, missing);
+                    result.Append((root ? "$ " : "$ sudo ") + install.Replace('\n', ' '));
+                    result.Message = $"ставлю {missing}…";
+
+                    var setup = await SshService.RunScriptAsync(target, settings, install, sudo: !root, live: null, ct,
+                        limit: TimeSpan.FromMinutes(15));
+
+                    AppendOutput(result, setup);
+
+                    if (setup.Interruption is { } why)
+                    {
+                        Fail(result, "установка не прошла: " + why);
+                        return;
+                    }
+
+                    if (setup.ExitCode is int code && code != 0)
+                    {
+                        Fail(result, $"не удалось поставить {missing}" + (root ? string.Empty : " — нужен sudo"));
+                        return;
+                    }
+
+                    result.Append($"Поставлено: {missing} ({manager})");
+                    ActionLog.Success($"На сервер поставлен архиватор: {missing}", target, AppSection.Explorer, this,
+                        [$"установщик: {manager}", "для «Архивировать»"]);
+                }
+
+                // 3. архив рядом, имя не занимает чужое
+                var script =
+                    "cd -- " + SshService.ShellQuote(folder) + " || exit 3\n"
+                    + "base=" + SshService.ShellQuote(baseName) + "; out=\"$base.tar.gz\"; i=2\n"
+                    + "while [ -e \"$out\" ]; do out=\"$base ($i).tar.gz\"; i=$((i+1)); done\n"
+                    + "echo \"OUT:$out\"\n"
+                    // объём заранее — для полосы; GNU tar отмечается каждые ~1% прочитанного (запись tar — 10 КБ),
+                    // у прочих (BusyBox) полосы нет, только «архивирую…»
+                    + "kb=$(du -sk -- " + quoted + " 2>/dev/null | awk '{s+=$1} END {print s+0}')\n"
+                    + "echo \"TOTAL:$kb\"\n"
+                    + "if tar --version 2>/dev/null | grep -q GNU; then\n"
+                    + "  n=$((kb / 1000)); [ \"$n\" -lt 100 ] && n=100\n"
+                    + "  echo \"STEP:$n\"\n"
+                    + "  tar --checkpoint=\"$n\" --checkpoint-action=echo=" + ArchiveTick + " -czf \"$out\" -- " + quoted + "\n"
+                    + "else\n"
+                    + "  tar -czf \"$out\" -- " + quoted + "\n"
+                    + "fi\n"
+                    + "rc=$?\n"
+                    + "[ -f \"$out\" ] && echo \"SIZE:$(wc -c < \"$out\" | tr -d ' ')\"\n"
+                    + "exit $rc";
+
+                result.Append("── команда ──");
+                result.Append("$ cd " + SshService.ShellQuote(folder) + " && tar -czf " + SshService.ShellQuote(baseName + ".tar.gz") + " -- " + quoted);
+                result.Message = "архивирую…";
+
+                // полоса: всего — из TOTAL (КБ), каждая отметка tar — STEP записей по 10 КБ
+                long totalBytes = 0, stepBytes = 0, ticks = 0;
+
+                void Live(string line)
+                {
+                    if (line.StartsWith("TOTAL:", StringComparison.Ordinal) && long.TryParse(line[6..].Trim(), out var kb))
+                    {
+                        totalBytes = kb * 1024;
+                    }
+                    else if (line.StartsWith("STEP:", StringComparison.Ordinal) && long.TryParse(line[5..].Trim(), out var step))
+                    {
+                        stepBytes = step * 10240;
+                    }
+                    else if (line.Contains(ArchiveTick, StringComparison.Ordinal) && totalBytes > 0 && stepBytes > 0)
+                    {
+                        result.SetTransfer(Interlocked.Increment(ref ticks) * stepBytes, totalBytes);
+                    }
+                }
+
+                // сотни гигабайт жмутся часами — общий срок команды тут не годится
+                var run = await SshService.RunScriptAsync(target, settings, script, sudo: false, live: Live, ct,
+                    limit: TimeSpan.FromHours(24));
+
+                result.SetTransfer(0, 0);
+
+                var lines = run.StdOut.Split('\n').Select(l => l.TrimEnd('\r')).ToList();
+                var name = lines.FirstOrDefault(l => l.StartsWith("OUT:", StringComparison.Ordinal))?[4..] ?? baseName + ".tar.gz";
+                var size = long.TryParse(lines.FirstOrDefault(l => l.StartsWith("SIZE:", StringComparison.Ordinal))?[5..], out var bytes) ? bytes : -1;
+
+                result.Append("── вывод ──");
+                static bool Service(string l) =>
+                    l.Length == 0 || l.Contains(ArchiveTick, StringComparison.Ordinal)
+                    || l.StartsWith("OUT:", StringComparison.Ordinal) || l.StartsWith("SIZE:", StringComparison.Ordinal)
+                    || l.StartsWith("TOTAL:", StringComparison.Ordinal) || l.StartsWith("STEP:", StringComparison.Ordinal);
+
+                foreach (var line in lines.Where(l => !Service(l)))
+                {
+                    result.Append(line);
+                }
+
+                // отметки прогресса tar пишет в поток ошибок — в журнал они не идут
+                var errors = run.StdErr.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => !Service(l)).ToList();
+
+                if (errors.Count > 0)
+                {
+                    result.Append(string.Join("\n", errors));
+                }
+
+                if (run.Interruption is { } stop)
+                {
+                    Fail(result, stop);
+                    return;
+                }
+
+                var path = folder.TrimEnd('/') + "/" + name;
+
+                // GNU tar: 1 — архив есть, но часть файлов менялась, пока их читали
+                var changed = run.ExitCode == 1 && size > 0;
+
+                if (run.ExitCode is int rc && rc != 0 && !changed)
+                {
+                    Fail(result, errors.FirstOrDefault(l => l.Trim().Length > 0)?.Trim() ?? "архив не создан");
+                    return;
+                }
+
+                result.Append("── итог ──");
+
+                if (changed)
+                {
+                    result.Append("Архив создан, но часть файлов менялась во время архивации — в архиве их состояние на момент чтения.");
+                }
+
+                result.Append($"Архив: {path}" + (size >= 0 ? $" · {TransferItem.Format(size)}" : string.Empty));
+                result.Message = (missing.Length > 0 ? $"поставлен {missing}, " : string.Empty)
+                    + name + (size >= 0 ? " · " + TransferItem.Format(size) : string.Empty);
+                result.Status = OperationStatus.Success;
+                created = true;
+            },
+            settings.MaxParallel,
+            concurrent: true);
+
+        if (!CommandBatch.IsRunning)
+        {
+            AppState.Current.NotifyFinished(CommandBatch);
+        }
+
+        return created;
+
+        static void Fail(OperationResult result, string why)
+        {
+            result.Append("— " + why + " —");
+            result.Message = why;
+            result.Status = OperationStatus.Failed;
+        }
+
+        static void AppendOutput(OperationResult result, CommandOutcome outcome)
+        {
+            if (!string.IsNullOrWhiteSpace(outcome.StdOut))
+            {
+                result.Append(outcome.StdOut.TrimEnd());
+            }
+
+            if (!string.IsNullOrWhiteSpace(outcome.StdErr))
+            {
+                result.Append(outcome.StdErr.TrimEnd());
+            }
+        }
+    }
+
+    /// <summary>Установка пакетов без вопросов. У apt сначала без update — списки обычно свежие.</summary>
+    private static string InstallScript(string manager, string packages) => manager switch
+    {
+        "apt-get" => $"export DEBIAN_FRONTEND=noninteractive\napt-get install -y {packages} || {{ apt-get update && apt-get install -y {packages}; }}",
+        "dnf" => $"dnf install -y {packages}",
+        "yum" => $"yum install -y {packages}",
+        "zypper" => $"zypper --non-interactive install {packages}",
+        "apk" => $"apk add {packages}",
+        "pacman" => $"pacman -S --noconfirm {packages}",
+        _ => $"opkg update && opkg install {packages}",
+    };
+
     // ── статус на ярлыке вкладки ───────────────────────────────────────────────
 
     // Шаги копирования словами. Коротко: на плашке ярлыка помещается около двадцати знаков.
@@ -4871,7 +5200,7 @@ public sealed class Workspace : ObservableObject
         Id = Id,
         Title = Title,
         AfterCopyTabId = _afterCopyTabId,
-        AfterCopyEnabled = _afterCopyEnabled,
+        AfterCopyEnabled = _afterCopyEnabled && !_afterCopyOnce,
         OwnerCopyTabId = OwnerCopyTabId,
         CopyWindowName = CopyWindows[0].Name,
         CopyWindowCollapsed = CopyWindows[0].IsCollapsed,
@@ -5330,8 +5659,14 @@ public sealed class Workspace : ObservableObject
     {
         SetScope();
         var batch = ActionBatch;
-        batch.AddAction(where, level, summary, lines);
+        var row = batch.AddAction(where, level, summary, lines);
         ShowResults(batch);
+
+        // создание, удаление, переименование — всё, что легло в журнал: с «авто» вкладки его вывод уходит в буфер
+        if (AutoCopy)
+        {
+            AppState.Current.NotifyActionAdded(this, row);
+        }
     }
 
     /// <summary>Терминал внизу окна показывает ту операцию, которую запустили последней.</summary>
@@ -5657,7 +5992,7 @@ public sealed class Workspace : ObservableObject
     public string LockTip => LockGuardsContent
         ? "Закрепить вкладку за этим сервером: менять можно будет только галочки у строк"
         : IsExplorerTab
-            ? "Закрепить вкладку за этим сервером и открытыми папками обеих панелей: внутрь них можно, выше — только сняв замок"
+            ? "Закрепить вкладку за сервером и папками панелей: глубже можно, выше — нет"
             : "Закрепить вкладку за этим сервером: сменить его можно будет, только сняв замок";
 
     /// <summary>«Проводник» под замком: папка сервера, выше которой правая панель не поднимается; пусто — папка не закреплена.</summary>

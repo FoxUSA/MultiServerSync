@@ -27,8 +27,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!--  щелчок об окончании операции: MediaPlayer играет только файл с диска, не ресурс  -->
-    <Content Include="Assets\send.mp3">
+    <!--  звук об окончании операции: MediaPlayer играет только файл с диска, не ресурс  -->
+    <Content Include="Assets\yet.mp3">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>

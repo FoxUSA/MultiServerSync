@@ -212,6 +212,9 @@ public enum PaneCommand
     Properties,
     Compare,
     Listing,
+
+    /// <summary>Отмеченное на сервере — в .tar.gz в той же папке.</summary>
+    Archive,
     Run,
     CommandTabHere,
     SendToCopy,
@@ -282,6 +285,9 @@ public partial class FilePane : UserControl
     public FilePane()
     {
         InitializeComponent();
+
+        // щелчок по пустому месту адреса — и уже погашенный внутри (ScrollViewer частей пути гасил его сам)
+        CrumbBar.AddHandler(MouseLeftButtonDownEvent, new MouseButtonEventHandler(OnCrumbBarClick), handledEventsToo: true);
 
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
         _refreshTimer.Tick += async (_, _) => await QuietRefreshAsync();
@@ -481,7 +487,6 @@ public partial class FilePane : UserControl
     public void ShowBrowse()
     {
         _browsing = true;
-        NewFolderButton.Visibility = Visibility.Visible;
         EditButton.Visibility = Visibility.Collapsed;
         DeleteButton.Visibility = Visibility.Collapsed;
     }
@@ -2025,6 +2030,18 @@ public partial class FilePane : UserControl
 
     private void OnCrumbBarClick(object sender, MouseButtonEventArgs e)
     {
+        // часть пути и кнопки в строке адреса — свои щелчки: переход, копировать, вписать
+        for (var node = e.OriginalSource as DependencyObject; node is not null && !ReferenceEquals(node, CrumbBar);
+             node = node is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node))
+        {
+            // и разделитель «›» между частями: промах мимо части — не повод открывать ввод
+            if (node is System.Windows.Controls.Primitives.ButtonBase or System.Windows.Controls.Primitives.TextBoxBase
+                || node is FrameworkElement { Parent: var parent } && ReferenceEquals(parent, Crumbs))
+            {
+                return;
+            }
+        }
+
         e.Handled = true;
 
         // путь уже вписывают — щелчок ставит курсор в поле, а не выделяет всё заново
@@ -2063,8 +2080,6 @@ public partial class FilePane : UserControl
         PathGoButton.Visibility = Visibility.Hidden;
         CrumbScroll.Visibility = Visibility.Visible;
     }
-
-    private void OnEditPath(object sender, RoutedEventArgs e) => BeginPathEdit();
 
     private void OnCopyPath(object sender, RoutedEventArgs e)
     {
@@ -2181,10 +2196,57 @@ public partial class FilePane : UserControl
             .Select(i => i.FullPath)
             .ToList();
 
+        var exact = hits.Count == 1 && string.Equals(hits[0].TrimEnd('/', '\\'), text.TrimEnd('/', '\\'), StringComparison.OrdinalIgnoreCase);
+
+        if (exact)
+        {
+            hits.Clear();
+        }
+
+        // последней — папка уровнем выше вписанной: /home/cr/www/site/ → /home/cr/www/
+        if (UpOf(text) is { } up && !hits.Contains(up, StringComparer.OrdinalIgnoreCase))
+        {
+            hits.Add(up);
+        }
+
         SuggestList.ItemsSource = hits;
         SuggestList.SelectedIndex = -1;
-        SuggestPopup.IsOpen = hits.Count > 0 && !(hits.Count == 1 && string.Equals(hits[0], text, StringComparison.OrdinalIgnoreCase));
+        SuggestPopup.IsOpen = hits.Count > 0;
     }
+
+    /// <summary>Папка уровнем выше вписанного пути, с разделителем на конце; у корня — null.</summary>
+    private static string? UpOf(string text)
+    {
+        var trimmed = text.TrimEnd('/', '\\');
+        var cut = Math.Max(trimmed.LastIndexOf('/'), trimmed.LastIndexOf('\\'));
+        return cut < 0 ? null : trimmed[..(cut + 1)];
+    }
+
+    /// <summary>Окно, за сдвигом которого следят подсказки: список висит отдельно и за окном не едет.</summary>
+    private Window? _suggestOwner;
+
+    private void OnSuggestOpened(object? sender, EventArgs e)
+    {
+        _suggestOwner = Window.GetWindow(this);
+
+        if (_suggestOwner is not null)
+        {
+            _suggestOwner.LocationChanged += CloseSuggest;
+            _suggestOwner.Deactivated += CloseSuggest;
+        }
+    }
+
+    private void OnSuggestClosed(object? sender, EventArgs e)
+    {
+        if (_suggestOwner is not null)
+        {
+            _suggestOwner.LocationChanged -= CloseSuggest;
+            _suggestOwner.Deactivated -= CloseSuggest;
+            _suggestOwner = null;
+        }
+    }
+
+    private void CloseSuggest(object? sender, EventArgs e) => SuggestPopup.IsOpen = false;
 
     private async void OnSuggestPicked(object sender, MouseButtonEventArgs e)
     {
@@ -3121,6 +3183,12 @@ public partial class FilePane : UserControl
         if (remote)
         {
             Add(Wpf.Ui.Controls.SymbolRegular.List24, "Листинг", string.Empty, () => Ask(PaneCommand.Listing));
+
+            // .tar.gz отмеченного — в этой же папке; нет tar/gzip — поставит
+            if (picked.Count > 0)
+            {
+                Add(Wpf.Ui.Controls.SymbolRegular.Archive24, "Архивировать", string.Empty, () => Ask(PaneCommand.Archive));
+            }
         }
 
         // сервер и другие разделы

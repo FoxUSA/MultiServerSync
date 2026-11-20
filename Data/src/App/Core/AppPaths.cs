@@ -4,7 +4,7 @@ namespace MultiServerSync.Core;
 
 /// <summary>
 /// Раскладка на диске:
-///   &lt;корень&gt;\MultiServerSync.exe  — лаунчер
+///   &lt;корень&gt;\Multi Server Sync.exe — лаунчер (в старых установках — MultiServerSync.exe, так и остаётся)
 ///   &lt;корень&gt;\Data\                — программа, библиотеки, иконки и manifest.json (при обновлении затирается целиком)
 ///   &lt;корень&gt;\UserData\            — всё пользовательское: серверы, вкладки, настройки, логи
 ///   &lt;корень&gt;\Update\              — только во время обновления: скачанный архив и подготовленная замена
@@ -12,7 +12,13 @@ namespace MultiServerSync.Core;
 public static class AppPaths
 {
     /// <summary>Имя лаунчера в корне. Обновление кладёт на его место файл из архива.</summary>
-    public const string LauncherName = "MultiServerSync.exe";
+    public const string LauncherName = "Multi Server Sync.exe";
+
+    /// <summary>
+    /// Прежнее имя лаунчера. Установки старых версий его не меняют: на него смотрят ярлыки, а старый
+    /// лаунчер при обновлении ищет замену себе только под этим именем.
+    /// </summary>
+    public const string OldLauncherName = "MultiServerSync.exe";
 
     /// <summary>Имя основной программы внутри Data. По нему проверяется, что архив годный.</summary>
     public const string AppExeName = "MultiServerSync.App.exe";
@@ -41,8 +47,16 @@ public static class AppPaths
 
     public static string LogsDir { get; }
 
-    /// <summary>Лаунчер в корне: он же применяет подготовленное обновление.</summary>
-    public static string LauncherFile => Path.Combine(RootDir, LauncherName);
+    /// <summary>Лаунчер в корне: он же применяет подготовленное обновление. Новое имя, а нет его — прежнее.</summary>
+    public static string LauncherFile
+    {
+        get
+        {
+            var current = Path.Combine(RootDir, LauncherName);
+            var old = Path.Combine(RootDir, OldLauncherName);
+            return !File.Exists(current) && File.Exists(old) ? old : current;
+        }
+    }
 
     /// <summary>Рабочая папка обновления. Лежит в корне: Data при обновлении заменяется целиком.</summary>
     public static string UpdateDir => Path.Combine(RootDir, "Update");

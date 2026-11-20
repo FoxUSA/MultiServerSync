@@ -4,7 +4,7 @@
     Скрипт лежит внутри Data — там же, куда кладётся собранная программа.
 
     Результат:
-      <корень>\MultiServerSync.exe  — лаунчер, единственный файл в корне
+      <корень>\Multi Server Sync.exe — лаунчер, единственный файл в корне (прежнее имя MultiServerSync.exe убирается)
       <корень>\Data\               — программа, библиотеки, иконки, исходники и manifest.json с версией
       <корень>\UserData\           — настройки пользователя (сборкой не трогается)
 
@@ -130,7 +130,13 @@ Get-ChildItem $dataDir -Force |
 Write-Host "Копирование программы в Data..."
 Copy-Item (Join-Path $appOut '*') $dataDir -Recurse -Force
 
-Copy-Item (Join-Path $launcherOut 'MultiServerSync.exe') $root -Force
+# лаунчер в корне — под именем с пробелами; dotnet даёт его по имени сборки, а single-file переименовывать можно
+$launcherFile = 'Multi Server Sync.exe'
+Copy-Item (Join-Path $launcherOut 'MultiServerSync.exe') (Join-Path $root $launcherFile) -Force
+
+# прежнее имя в корне лишнее: два лаунчера рядом путают
+$oldLauncher = Join-Path $root 'MultiServerSync.exe'
+if (Test-Path $oldLauncher) { Remove-Item $oldLauncher -Force }
 
 # ── манифест ─────────────────────────────────────────────────────────────────
 
@@ -180,12 +186,12 @@ if ($Package) {
 
     if (Test-Path $packageStage) { Remove-Item $packageStage -Recurse -Force }
 
-    $stageRoot = Join-Path $packageStage 'MultiServerSync'
+    $stageRoot = Join-Path $packageStage 'Multi Server Sync'
     $stageData = Join-Path $stageRoot 'Data'
     New-Item -ItemType Directory -Force $stageData | Out-Null
 
     Copy-Item (Join-Path $dataDir '*') $stageData -Recurse -Force
-    Copy-Item (Join-Path $root 'MultiServerSync.exe') $stageRoot -Force
+    Copy-Item (Join-Path $root $launcherFile) $stageRoot -Force
 
     # сборочный мусор исходников в архив не едет
     Get-ChildItem -Recurse -Directory (Join-Path $stageData 'src') -Include bin, obj -ErrorAction SilentlyContinue |
@@ -251,6 +257,6 @@ if ($strays.Count -gt 0) {
 
 Write-Host ""
 Write-Host "Готово. Версия $Version" -ForegroundColor Green
-Write-Host "  Запуск:    $(Join-Path $root 'MultiServerSync.exe')"
+Write-Host "  Запуск:    $(Join-Path $root $launcherFile)"
 Write-Host "  Программа: $dataDir"
 Write-Host "  Настройки: $userDataDir"

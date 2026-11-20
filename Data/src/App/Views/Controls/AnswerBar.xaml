@@ -51,7 +51,7 @@
         Click="OnSendAnswer"
         Content="Ответить"
         FontSize="11"
-        ToolTip="Отправить строку команде этого сервера (Enter). Пустая строка — просто Enter, ответ по умолчанию" />
+        ToolTip="Отправить строку этому серверу (Enter). Пусто — просто Enter" />
 
       <ui:Button
         Grid.Column="2"
@@ -60,7 +60,7 @@
         Click="OnSendAnswerAll"
         Content="Всем серверам"
         FontSize="11"
-        ToolTip="Отправить ту же строку командам всех серверов, где они ещё идут (Ctrl+Enter)" />
+        ToolTip="Отправить всем серверам, где команда ещё идёт (Ctrl+Enter)" />
     </Grid>
   </Border>
 </UserControl>

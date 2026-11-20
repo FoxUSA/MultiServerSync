@@ -72,7 +72,7 @@
               Margin="0,24,0,0"
               Background="{DynamicResource ControlFillColorDefaultBrush}"
               Cursor="Hand"
-              ToolTip="Щелчок — свернуть или развернуть строки окна и фокус на нём (по названию и адресу — только фокус). Двойной щелчок по адресу — «Обзор» этого окна">
+              ToolTip="Щелчок — свернуть строки окна и перейти в него. Двойной по адресу — «Обзор»">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />

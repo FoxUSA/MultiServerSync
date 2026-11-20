@@ -17,6 +17,8 @@
       TargetType="ui:CardControl">
       <Setter Property="Margin" Value="0,0,0,4" />
       <Setter Property="VerticalAlignment" Value="Stretch" />
+      <!--  скругление как у карточек окна: своё у CardControl едва заметно  -->
+      <Setter Property="CornerRadius" Value="8" />
     </Style>
 
     <Style x:Key="GroupTitleStyle" TargetType="TextBlock">
@@ -41,6 +43,7 @@
         <ColumnDefinition Width="*" />
       </Grid.ColumnDefinitions>
       <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
         <RowDefinition Height="Auto" />
         <RowDefinition Height="Auto" />
         <RowDefinition Height="Auto" />
@@ -97,7 +100,7 @@
         <ui:CardControl.Header>
           <StackPanel>
             <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="Обновление программы" />
-            <TextBlock Style="{StaticResource CardNoteStyle}" Text="Проверяется при каждом запуске. Заменяются Data и MultiServerSync.exe, UserData не трогается" />
+            <TextBlock Style="{StaticResource CardNoteStyle}" Text="Проверяется при каждом запуске. Заменяются Data и лаунчер, UserData не трогается" />
           </StackPanel>
         </ui:CardControl.Header>
         <ui:Button
@@ -108,7 +111,7 @@
       </ui:CardControl>
 
       <ui:CardControl
-        Grid.Row="4"
+        Grid.Row="9"
         Grid.Column="0"
         Icon="{ui:SymbolIcon Globe24}"
         Style="{StaticResource SettingCardStyle}">
@@ -126,7 +129,7 @@
       </ui:CardControl>
 
       <ui:CardControl
-        Grid.Row="5"
+        Grid.Row="4"
         Grid.Column="0"
         Icon="{ui:SymbolIcon DarkTheme24}"
         Style="{StaticResource SettingCardStyle}">
@@ -143,6 +146,30 @@
           <ComboBoxItem Content="Тёмная" Tag="Dark" />
           <ComboBoxItem Content="Светлая" Tag="Light" />
           <ComboBoxItem Content="Как в системе" Tag="System" />
+        </ComboBox>
+      </ui:CardControl>
+
+      <!--  выбор громкости сразу проигрывает звук — слышно, что выбрал  -->
+      <ui:CardControl
+        Grid.Row="5"
+        Grid.Column="0"
+        Icon="{ui:SymbolIcon Speaker224}"
+        Style="{StaticResource SettingCardStyle}">
+        <ui:CardControl.Header>
+          <StackPanel>
+            <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="Звук окончания команды" />
+            <TextBlock Style="{StaticResource CardNoteStyle}" Text="Звучит, когда закончилась команда или копирование, но не чаще раза в 3 секунды. 0% — без звука" />
+          </StackPanel>
+        </ui:CardControl.Header>
+        <ComboBox
+          x:Name="SoundBox"
+          Width="200"
+          SelectionChanged="OnSoundChanged">
+          <ComboBoxItem Content="0%" Tag="0" />
+          <ComboBoxItem Content="25%" Tag="25" />
+          <ComboBoxItem Content="50%" Tag="50" />
+          <ComboBoxItem Content="75%" Tag="75" />
+          <ComboBoxItem Content="100%" Tag="100" />
         </ComboBox>
       </ui:CardControl>
 
@@ -224,7 +251,7 @@
         Grid.Row="6"
         Grid.Column="0"
         Style="{StaticResource GroupTitleStyle}"
-        Text="Расположение файлов" />
+        Text="Расположение" />
       <TextBlock
         Grid.Row="6"
         Grid.Column="2"
@@ -270,7 +297,7 @@
       <!--  пароли в servers.json всегда зашифрованы; выбирается только чем. Карточка на два ряда: поле и кнопка столбиком  -->
       <ui:CardControl
         Grid.Row="7"
-        Grid.RowSpan="2"
+        Grid.RowSpan="3"
         Grid.Column="2"
         Icon="{ui:SymbolIcon LockClosed24}"
         Style="{StaticResource SettingCardStyle}">

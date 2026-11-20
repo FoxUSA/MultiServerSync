@@ -65,7 +65,7 @@
         BorderBrush="#80E07A1F"
         BorderThickness="1"
         CornerRadius="4"
-        ToolTip="Кнопки ряда, сводка и параметры — для этого окна. Другое окно — щелчок по его номеру"
+        ToolTip="Кнопки, сводка и параметры — этого окна. Другое — щелчок по номеру"
         Visibility="{Binding IsMultiWindow, Converter={StaticResource BoolToVis}}">
         <TextBlock
           HorizontalAlignment="Center"
@@ -80,7 +80,7 @@
         Content="Открыть"
         Icon="{ui:SymbolIcon FolderOpen24}"
         Style="{StaticResource ToolButtonStyle}"
-        ToolTip="Открывает проводник. Выделяйте что угодно — файлы, папки, вперемешку, хоть Ctrl+A — и нажимайте «Добавить»" />
+        ToolTip="Выбрать файлы и папки в проводнике и нажать «Добавить»" />
       <!--  заданы исключения — значок на зелёной плашке: видно, что не всё из списка поедет.
             Плашка выходит влево на свой отступ, чтобы значок стоял там же, где у соседних кнопок  -->
       <ui:Button
@@ -100,7 +100,7 @@
         Content="Очистить"
         Icon="{ui:SymbolIcon Delete24}"
         Style="{StaticResource ToolButtonStyle}"
-        ToolTip="Убрать отмеченные строки, а если отметок нет — все. Файлы не трогаются" />
+        ToolTip="Убрать отмеченные строки, без отметок — все. Файлы не трогаются" />
       <ui:Button
         Click="OnRefreshItems"
         Content="Обновить"
@@ -113,7 +113,7 @@
         Click="OnSeparateServers"
         Content="{Binding SeparateServersCaption}"
         Icon="{ui:SymbolIcon Server24}"
-        ToolTip="Свои целевые серверы у каждого окна: номер окна в панели слева показывает и меняет его серверы"
+        ToolTip="У каждого окна свои серверы: номер окна слева показывает и меняет их"
         Visibility="{Binding IsMultiWindow, Converter={StaticResource BoolToVis}}">
         <!--  только появилась — оранжевая, пока человек не уйдёт с вкладки; цвета плашки сервера (ServerTagStyle)  -->
         <ui:Button.Style>
@@ -421,6 +421,7 @@
                 MinHeight="0"
                 Padding="10,0,10,0"
                 controls:LockMute.IsOn="{Binding IsPaneLocked}"
+                controls:SelectAllOnClick.IsOn="True"
                 VerticalContentAlignment="Center"
                 DropDownOpened="OnPathDropDownOpened"
                 FontSize="12"
@@ -429,7 +430,7 @@
                 IsEnabled="{Binding IsNotPaneLocked}"
                 ItemsSource="{Binding Source={x:Static services:AppState.Current}, Path=Settings.RemotePathHistory}"
                 Text="{Binding RemotePath, UpdateSourceTrigger=PropertyChanged}"
-                ToolTip="Путь одинаков для всех отмеченных серверов этого окна. История общая для всех окон и вкладок, крестик убирает строку.">
+                ToolTip="Путь для всех серверов окна. История общая, крестик убирает строку">
                 <ComboBox.ItemTemplate>
                   <DataTemplate>
                     <Grid>
@@ -552,7 +553,7 @@
         Content="Выполнить"
         Icon="{ui:SymbolIcon ArrowUpload24}"
         IsEnabled="{Binding CopyBatch.IsIdle}"
-        ToolTip="Файлы всех окон этой вкладки на её отмеченные серверы, окна сверху вниз. Со свитчем «Везде» — на всех вкладках сразу, после вопроса" />
+        ToolTip="Файлы всех окон вкладки на её серверы. Со свитчем «Везде» — со всех вкладок" />
 
       <ui:Button
         x:Name="CompareButton"
@@ -560,7 +561,7 @@
         Content="Сравнить"
         Icon="{ui:SymbolIcon BranchCompare24}"
         IsEnabled="{Binding CopyBatch.IsIdle}"
-        ToolTip="Сверяет файлы вкладки с сервером по правилам из параметров и ничего не копирует. В статусе — сошлось или нет, что именно отличается — в выводе" />
+        ToolTip="Сверить вкладку с сервером, ничего не копируя. Разница — в выводе" />
 
       <ui:ToggleSwitch
         x:Name="EverywhereSwitch"
@@ -569,7 +570,7 @@
         Content="Везде"
         IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=Everywhere, Mode=TwoWay}"
         Style="{StaticResource DangerSwitchStyle}"
-        ToolTip="Включено — «Выполнить» копирует сразу на всех вкладках, каждая со своими файлами, путём и серверами, после вопроса. «Сравнить» тоже идёт на всех. Итог по каждой — на её ярлыке" />
+        ToolTip="«Выполнить» и «Сравнить» — сразу на всех вкладках, после вопроса" />
     </StackPanel>
 
         <!--  параметры — общий блок для «Копирования», «Скачивания» и «Проводника»  -->

@@ -138,7 +138,7 @@
       <ComboBox
         x:Name="JumpBox"
         DisplayMemberPath="Label"
-        ToolTip="Промежуточный сервер (jump host, как ProxyJump у ssh): подключение к этому серверу идёт через него" />
+        ToolTip="Jump host (ProxyJump): подключение идёт через этот сервер" />
 
       <!--  запомненный ключ сервера: забыть или принять новый, если сервер переустановили  -->
       <Grid

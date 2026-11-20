@@ -79,7 +79,7 @@ public partial class RemoteBrowserWindow : FluentWindow
         if (pickMany)
         {
             Title = "Что скачать с сервера";
-            ChooseButton.ToolTip = "Отмеченные галочками файлы и папки, а если ничего не отмечено — открытая папка";
+            ChooseButton.ToolTip = "Отмеченное, а без отметок — открытая папка";
         }
         else
         {

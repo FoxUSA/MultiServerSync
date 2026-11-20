@@ -85,7 +85,7 @@
                     x:Name="Paste"
                     Click="OnPaste"
                     Style="{StaticResource EditorIconStyle}"
-                    ToolTip="Вставить из буфера — заменяет всё окно, чтобы вставка не приклеилась к прошлой команде">
+                    ToolTip="Вставить из буфера, заменив всё окно">
                     <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="ClipboardPaste24" />
                   </Button>
                   <!--  на одном месте запуск и остановка: пока команда идёт, ▶ становится ■  -->
@@ -136,7 +136,7 @@
                     x:Name="Book"
                     Click="OnPickSnippet"
                     Style="{StaticResource EditorIconStyle}"
-                    ToolTip="Избранное: команда по щелчку встаёт в окно, там же — добавить эту команду в избранное.">
+                    ToolTip="Избранное: щелчок вставляет команду, там же — добавить эту">
                     <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Heart24" />
                   </Button>
                 </StackPanel>
@@ -174,7 +174,7 @@
                   Content="sudo"
                   FontSize="12"
                   IsChecked="{Binding UseSudo, Mode=TwoWay}"
-                  ToolTip="Это окно выполняется как sudo -S -p '' bash -s, пароль сервера подаётся на stdin" />
+                  ToolTip="Выполняется через sudo, пароль сервера подаётся сам" />
                 <ui:Button
                   x:Name="GoPersonal"
                   Height="24"
@@ -184,17 +184,41 @@
                   Content="{Binding DataContext.PersonalButtonText, RelativeSource={RelativeSource AncestorType=UserControl}}"
                   FontSize="12"
                   Icon="{ui:SymbolIcon ArrowRight24}"
-                  ToolTip="Личная вкладка в разделе «Команды»: выполняется после копирования, когда включён свитч справа" />
+                  MouseRightButtonUp="OnAfterCopySwitchRightClick"
+                  ToolTip="Личная вкладка «Команд»: идёт после копирования, если включён свитч справа. ПКМ — один раз выполнить команду из этого окна (×1)" />
                 <!--  свитч «после копирования»: включён — красным, как «Везде». Первое включение создаёт
                       личную вкладку и ведёт в неё  -->
-                <ui:ToggleSwitch
-                  x:Name="AfterCopySwitch"
-                  Margin="8,0,0,0"
-                  VerticalAlignment="Center"
-                  Click="OnAfterCopySwitch"
-                  IsChecked="{Binding DataContext.AfterCopyEnabled, RelativeSource={RelativeSource AncestorType=UserControl}, Mode=TwoWay}"
-                  Style="{StaticResource DangerSwitchStyle}"
-                  ToolTip="Команды после копирования: выполнить личные команды этой вкладки на серверах, где копирование прошло" />
+                <!--  ПКМ — на одно копирование: «×1» на пустой половине дорожки  -->
+                <Grid Margin="8,0,0,0" VerticalAlignment="Center">
+                  <ui:ToggleSwitch
+                    x:Name="AfterCopySwitch"
+                    VerticalAlignment="Center"
+                    Click="OnAfterCopySwitch"
+                    IsChecked="{Binding DataContext.AfterCopyEnabled, RelativeSource={RelativeSource AncestorType=UserControl}, Mode=TwoWay}"
+                    MouseRightButtonUp="OnAfterCopySwitchRightClick"
+                    Style="{StaticResource DangerSwitchStyle}"
+                    ToolTip="Выполнить личные команды вкладки на серверах, где копирование прошло. ПКМ — один раз выполнить команду из этого окна (×1)" />
+                  <TextBlock
+                    Margin="6,0,0,0"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Center"
+                    FontSize="10"
+                    FontWeight="Bold"
+                    Foreground="White"
+                    IsHitTestVisible="False"
+                    Text="×1">
+                    <TextBlock.Style>
+                      <Style BasedOn="{StaticResource {x:Type TextBlock}}" TargetType="TextBlock">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding DataContext.AfterCopyOnce, RelativeSource={RelativeSource AncestorType=UserControl}}" Value="True">
+                            <Setter Property="Visibility" Value="Visible" />
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </TextBlock.Style>
+                  </TextBlock>
+                </Grid>
               </StackPanel>
             </Grid>
 

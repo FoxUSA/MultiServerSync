@@ -64,7 +64,7 @@
 ## Как начать
 
 1. Распаковать [архив](https://byfox.dev/data/multiserversync/multiserversync.zip)
-2. Запустить `MultiServerSync.exe`
+2. Запустить `Multi Server Sync.exe`
 3. Добавить серверы — и отметить, куда отправлять
 
 Windows 10 / 11 (x64), нужен [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0). Бесплатно, открытый код, без телеметрии.
@@ -79,7 +79,7 @@ cd MultiServerSync
 powershell -ExecutionPolicy Bypass -File .\Data\build.ps1
 ```
 
-Лаунчер `MultiServerSync.exe` появится в корне репозитория, программа — в `Data`, настройки — в `UserData`. Исходники: `Data/src/App` (программа, WPF + [WPF UI](https://github.com/lepoco/wpfui), [SSH.NET](https://github.com/sshnet/SSH.NET), [AvalonEdit](https://github.com/icsharpcode/AvalonEdit)) и `Data/src/Launcher`. Заметки для разработчика: [Data/README.md](Data/README.md).
+Лаунчер `Multi Server Sync.exe` появится в корне репозитория, программа — в `Data`, настройки — в `UserData`. Исходники: `Data/src/App` (программа, WPF + [WPF UI](https://github.com/lepoco/wpfui), [SSH.NET](https://github.com/sshnet/SSH.NET), [AvalonEdit](https://github.com/icsharpcode/AvalonEdit)) и `Data/src/Launcher`. Заметки для разработчика: [Data/README.md](Data/README.md).
 
 ## Лицензия
 

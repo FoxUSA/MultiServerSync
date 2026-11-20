@@ -115,7 +115,7 @@
             Content="Не очищать"
             FontSize="11"
             IsChecked="{Binding KeepLog, Mode=TwoWay}"
-            ToolTip="Своя у каждой вкладки. Отмечено — таблица журнала хранит все запуски, пока галочку не снять. Снято — запуск позже срока «Хранить вывод» после окончания прошлого начинает журнал заново." />
+            ToolTip="Хранить все запуски. Снято — запуск после срока начинает журнал заново" />
         </StackPanel>
 
       <Grid
@@ -146,37 +146,66 @@
       </Grid>
       </DockPanel>
 
-      <!--  «Проводник»: окно вывода переворачивается окном команды. Значок — у левого края окна вывода  -->
-      <ui:Button
-        x:Name="FlipButton"
+      <!--  «Проводник»: окно вывода переворачивается окном команды — в домашней папке или в папке правой панели.
+            Значки — у левого края окна вывода  -->
+      <StackPanel
         Grid.Column="2"
-        Padding="9,2"
         HorizontalAlignment="Left"
         VerticalAlignment="Center"
-        Click="OnFlip"
-        ToolTip="Перевернуть окно вывода окном команды для сервера правой панели"
+        Orientation="Horizontal"
         Visibility="{Binding Source={x:Static services:AppState.Current}, Path=CommandFlipVisibility}">
-        <!--  включено — белый значок на тускло-зелёной плашке; плашка есть всегда, кнопка не меняет размер  -->
-        <StackPanel Orientation="Horizontal">
-          <Border
-            x:Name="FlipBadge"
-            Padding="2"
-            VerticalAlignment="Center"
-            Background="Transparent"
-            CornerRadius="3">
-            <ui:SymbolIcon
-              x:Name="FlipGlyph"
-              FontSize="15"
-              Symbol="WindowConsole20" />
-          </Border>
-          <TextBlock
-            x:Name="FlipText"
-            Margin="6,0,0,0"
-            VerticalAlignment="Center"
-            FontSize="11"
-            Text="Открыть терминал" />
-        </StackPanel>
-      </ui:Button>
+        <ui:Button
+          x:Name="FlipButton"
+          Padding="9,2"
+          VerticalAlignment="Center"
+          Click="OnFlip">
+          <!--  включено — белый значок на тускло-зелёной плашке; плашка есть всегда, кнопка не меняет размер  -->
+          <StackPanel Orientation="Horizontal">
+            <Border
+              x:Name="FlipBadge"
+              Padding="2"
+              VerticalAlignment="Center"
+              Background="Transparent"
+              CornerRadius="3">
+              <ui:SymbolIcon
+                x:Name="FlipGlyph"
+                FontSize="15"
+                Symbol="WindowConsole20" />
+            </Border>
+            <TextBlock
+              x:Name="FlipText"
+              Margin="6,0,0,0"
+              VerticalAlignment="Center"
+              FontSize="11"
+              Text="Открыть терминал" />
+          </StackPanel>
+        </ui:Button>
+        <ui:Button
+          x:Name="FolderFlipButton"
+          Margin="4,0,0,0"
+          Padding="9,2"
+          VerticalAlignment="Center"
+          Click="OnFlip">
+          <StackPanel Orientation="Horizontal">
+            <Border
+              x:Name="FolderFlipBadge"
+              Padding="2"
+              VerticalAlignment="Center"
+              Background="Transparent"
+              CornerRadius="3">
+              <ui:SymbolIcon
+                x:Name="FolderFlipGlyph"
+                FontSize="15"
+                Symbol="FolderOpen20" />
+            </Border>
+            <TextBlock
+              Margin="6,0,0,0"
+              VerticalAlignment="Center"
+              FontSize="11"
+              Text="В папке" />
+          </StackPanel>
+        </ui:Button>
+      </StackPanel>
 
       <StackPanel
         Grid.Column="2"
@@ -216,7 +245,7 @@
           Content="авто"
           FontSize="11"
           IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=AutoCopyCurrent, Mode=TwoWay}"
-          ToolTip="Операция закончилась — вывод всех её серверов сам копируется в буфер обмена. У каждой вкладки своя, новая вкладка начинает без неё" />
+          ToolTip="По окончании вывод сам копируется в буфер" />
         <CheckBox
           MinWidth="0"
           MinHeight="0"
@@ -226,7 +255,7 @@
           Content="+ команды"
           FontSize="11"
           IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=CopyWithChain, Mode=TwoWay}"
-          ToolTip="Копировать вместе с выводом личных команд вкладки: в буфере один отчёт — сначала копирование, потом команды. Автокопия тогда ждёт, пока команды закончатся"
+          ToolTip="Вместе с выводом личных команд вкладки, одним отчётом"
           Visibility="{Binding Source={x:Static services:AppState.Current}, Path=ChainCopyVisibility}" />
         <ui:Button
           Margin="0,0,4,0"
@@ -247,18 +276,21 @@
           FontSize="11"
           IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=LogAsFile, Mode=TwoWay}"
           IsEnabled="{Binding Source={x:Static services:AppState.Current}, Path=CopyPassAvailable}"
-          ToolTip="Автокопия длиннее 1000 строк уходит в буфер файлом с полным логом — в чат он вставится вложением. Снята — лог обрезается: начало и конец остаются, середина вырезается. У каждой вкладки своя"
+          ToolTip="Лог длиннее 1000 строк — в буфер файлом. Без галочки середина обрезается"
           ToolTipService.ShowOnDisabled="True" />
         <CheckBox
           MinWidth="0"
           MinHeight="0"
           VerticalAlignment="Center"
+          x:Name="CopyPassBox"
           Content="CopyPass"
+          Loaded="OnCopyPassLoaded"
           FontSize="11"
           IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=CopyPass, Mode=TwoWay}"
           IsEnabled="{Binding Source={x:Static services:AppState.Current}, Path=CopyPassAvailable}"
+          MouseRightButtonUp="OnCopyPassRightClick"
           Visibility="{Binding Source={x:Static services:AppState.Current}, Path=CopyPassVisibility}"
-          ToolTip="Лог, скопированный программой, сам вставится в первое поле ввода, куда вы перейдёте в другой программе, и уйдёт нажатием Enter. Один раз на копию; если в буфере уже другое — ничего не делает. Терминалы и поля паролей пропускает. Работает вместе с «авто», у каждой вкладки своя"
+          ToolTip="Автокопия сама вставляется в поле ввода другой программы и отправляется Enter. Терминалы и пароли пропускает. ПКМ — на один раз (×1)"
           ToolTipService.ShowOnDisabled="True" />
       </StackPanel>
     </Grid>
@@ -289,6 +321,8 @@
           BorderThickness="0"
           ColumnHeaderStyle="{StaticResource AppColumnHeaderStyle}"
           ColumnHeaderHeight="{StaticResource IconButtonSize}"
+          PreviewKeyDown="OnGridTouched"
+          PreviewMouseDown="OnGridTouched"
           RowHeight="24"
           SelectionChanged="OnResultPicked"
           SelectionMode="Single"
@@ -391,7 +425,7 @@
                   <Button
                     Click="OnRowStop"
                     Style="{StaticResource RowStopStyle}"
-                    ToolTip="Остановить только эту строку: идущая — оборвётся (команде — Ctrl+C), ждущая очереди — не начнётся"
+                    ToolTip="Остановить эту строку: идущая — Ctrl+C, ждущая — не начнётся"
                     Visibility="{Binding CanStop, Converter={StaticResource BoolToVis}}" />
                 </DataTemplate>
               </DataGridTemplateColumn.CellTemplate>
@@ -515,7 +549,7 @@
                     Content="Сохранять вывод"
                     FontSize="11"
                     IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=OutputWhole, Mode=TwoWay}"
-                    ToolTip="Отмечено — в окне весь вывод выбранного сервера подряд, по всем строкам журнала: например, вся сессия «PowerShell» со всеми ответами. Снято — только выбранная строка" />
+                    ToolTip="Весь вывод сервера по всем строкам журнала. Снято — только выбранная строка" />
 
                   <TextBlock
                     x:Name="OutputTitle"

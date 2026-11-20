@@ -184,6 +184,9 @@ public partial class MainWindow : FluentWindow
         };
         AppState.Current.OperationFinished += FinishSound.OnFinished;
 
+        // создание, удаление и прочие действия в журнале — с «авто» вкладки тоже в буфер
+        AppState.Current.ActionAdded += (tab, row) => Terminal.CopyAction(tab, row);
+
         Loaded += (_, _) =>
         {
             TabStrip.SelectedItem = State.ActiveWorkspace;
@@ -1343,7 +1346,7 @@ public partial class MainWindow : FluentWindow
             ExplorerServerName.Text = "PowerShell";
             ExplorerServerUser.Text = string.Empty;
             ExplorerServerAddress.Text = AdminShell.IsOn ? "админ" : string.Empty;
-            ExplorerServerTag.ToolTip = "Команды вкладки выполняются на этом компьютере. Чтобы выбрать сервер, выключите режим свитчем у «PowerShell»";
+            ExplorerServerTag.ToolTip = "Команды идут на этом ПК. Сервер — после выключения свитча «PowerShell»";
             ExplorerServerLock.Visibility = Visibility.Collapsed;
             ExplorerServerTag.Visibility = Visibility.Visible;
             return;

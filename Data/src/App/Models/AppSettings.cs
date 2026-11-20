@@ -226,6 +226,9 @@ public sealed class AppSettings
     /// </summary>
     public bool RepeatGuard { get; set; } = true;
 
+    /// <summary>Громкость звука окончания команды в процентах: 0 (без звука), 25, 50, 75, 100.</summary>
+    public int FinishSoundVolume { get; set; } = 50;
+
     /// <summary>
     /// Умный режим: перед запуском спросить, если сервер непривычный для этой команды
     /// или вкладки копирования. Выключен, пока не включат переключателем в панели слева.
@@ -339,6 +342,9 @@ public sealed class AppSettings
 
     /// <summary>В «Проводнике» окно вывода было перевёрнуто окном команды.</summary>
     public bool ExplorerCommandOpen { get; set; }
+
+    /// <summary>Окно команды «Проводника» открыто кнопкой «В папке»: команды идут в папке правой панели.</summary>
+    public bool ExplorerCommandInFolder { get; set; }
 
     public double OutputWidth { get; set; } = 900;
 

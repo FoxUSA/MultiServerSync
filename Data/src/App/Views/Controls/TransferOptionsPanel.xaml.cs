@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -108,7 +108,7 @@ public partial class TransferOptionsPanel : UserControl
     }
 
     /// <summary>
-    /// Выключен — «Отметить незалитые». Включён — «Отмечены незалитые» и зелёный.
+    /// Выключен — «Отмечать незалитые». Включён — «Отмечены незалитые» и зелёный.
     /// Галочки после включения правили руками — свитч и подпись тускло-красные, а если отметили уже залитое —
     /// подпись «Отмечены залитые».
     /// </summary>
@@ -122,14 +122,17 @@ public partial class TransferOptionsPanel : UserControl
         var held = DataContext is Workspace { UnsentHeld: true };
         var stale = held && DataContext is Workspace { UnsentOn: false };
         var sentTicked = stale && DataContext is Workspace { UnsentSentTicked: true };
+        var none = held && !stale && DataContext is Workspace { UnsentNone: true };
         var download = Direction == TransferDirection.Download;
         var what = sentTicked
             ? (download ? "скачанные" : "залитые")
             : (download ? "нескачанные" : "незалитые");
 
         UnsentSwitch.IsChecked = held;
-        UnsentSwitch.Style = (Style)Resources[stale ? "UnsentStaleSwitchStyle" : "UnsentSwitchStyle"];
-        UnsentText.Text = (held ? "Отмечены " : "Отметить ") + what;
+        UnsentSwitch.Style = (Style)Resources[stale ? "UnsentStaleSwitchStyle" : none ? "UnsentNoneSwitchStyle" : "UnsentSwitchStyle"];
+        UnsentText.Text = none
+            ? (download ? "Нескачанных нет" : "Незалитых нет")
+            : (held ? "Отмечены " : "Отмечать ") + what;
 
         if (stale)
         {
@@ -189,7 +192,7 @@ public partial class TransferOptionsPanel : UserControl
                 ExcludeButton.Visibility = Visibility.Collapsed;
                 ReplaceOption.Visibility = Visibility.Collapsed;
                 UnsentBlock.Visibility = Visibility.Visible;
-                UnsentBlock.ToolTip = "Пока свитч включён, отмечены только нескачанные. Красный — галочки поменяли руками.";
+                UnsentBlock.ToolTip = "Отмечены только нескачанные. Красный — галочки меняли руками";
                 break;
 
             case TransferDirection.Both:
@@ -225,7 +228,7 @@ public partial class TransferOptionsPanel : UserControl
                 ExcludeButton.Visibility = Visibility.Collapsed;
                 ReplaceOption.Visibility = Visibility.Collapsed;
                 UnsentBlock.Visibility = Visibility.Visible;
-                UnsentBlock.ToolTip = "Пока свитч включён, отмечены только незалитые, с учётом фильтров. Красный — галочки поменяли руками.";
+                UnsentBlock.ToolTip = "Отмечены только незалитые, с учётом фильтров. Красный — галочки меняли руками";
                 break;
         }
 

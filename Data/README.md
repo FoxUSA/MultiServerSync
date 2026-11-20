@@ -9,8 +9,8 @@
 ## Раскладка на диске
 
 ```
-MultiServerSync\
-├─ MultiServerSync.exe     ← единственный файл в корне: лаунчер
+Multi Server Sync\
+├─ Multi Server Sync.exe   ← единственный файл в корне: лаунчер
 ├─ Data\                   ← ВСЁ программное
 │  ├─ MultiServerSync.App.exe + библиотеки
 │  ├─ manifest.json        ← версия программы, её показывает шапка окна

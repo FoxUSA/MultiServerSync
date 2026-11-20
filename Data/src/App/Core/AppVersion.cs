@@ -9,7 +9,7 @@ namespace MultiServerSync.Core;
 /// </summary>
 public static class AppVersion
 {
-    public const string ProductName = "MultiServerSync";
+    public const string ProductName = "Multi Server Sync";
 
     static AppVersion()
     {

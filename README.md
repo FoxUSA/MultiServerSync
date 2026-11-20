@@ -64,7 +64,7 @@ Add your servers once. After that: check the ones you need, pick files or type a
 ## Get started
 
 1. Unpack the [archive](https://byfox.dev/data/multiserversync/multiserversync.zip)
-2. Run `MultiServerSync.exe`
+2. Run `Multi Server Sync.exe`
 3. Add your servers — and check where to send
 
 Windows 10 / 11 (x64), requires [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0). Free, open source, no telemetry.
@@ -79,7 +79,7 @@ cd MultiServerSync
 powershell -ExecutionPolicy Bypass -File .\Data\build.ps1
 ```
 
-The launcher `MultiServerSync.exe` appears in the repository root, the program in `Data`, your settings in `UserData`. Sources: `Data/src/App` (the program, WPF + [WPF UI](https://github.com/lepoco/wpfui), [SSH.NET](https://github.com/sshnet/SSH.NET), [AvalonEdit](https://github.com/icsharpcode/AvalonEdit)) and `Data/src/Launcher`. Developer notes (in Russian): [Data/README.md](Data/README.md).
+The launcher `Multi Server Sync.exe` appears in the repository root, the program in `Data`, your settings in `UserData`. Sources: `Data/src/App` (the program, WPF + [WPF UI](https://github.com/lepoco/wpfui), [SSH.NET](https://github.com/sshnet/SSH.NET), [AvalonEdit](https://github.com/icsharpcode/AvalonEdit)) and `Data/src/Launcher`. Developer notes (in Russian): [Data/README.md](Data/README.md).
 
 ## License
 

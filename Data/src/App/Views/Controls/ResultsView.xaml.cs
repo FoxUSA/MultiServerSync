@@ -78,7 +78,33 @@ public partial class ResultsView : UserControl
 
     private bool CommandShown => _commandOpen && AppState.Current.Section == AppSection.Explorer;
 
-    private void OnFlip(object sender, RoutedEventArgs e) => Flip(!_commandOpen);
+    /// <summary>
+    /// «Открыть терминал» — команды в домашней папке, «В папке» — в папке правой панели. Нажали включённую —
+    /// терминал закрывается; другую при открытом — меняется только папка, без переворота.
+    /// </summary>
+    private void OnFlip(object sender, RoutedEventArgs e)
+    {
+        var settings = AppState.Current.Settings;
+        var inFolder = ReferenceEquals(sender, FolderFlipButton);
+
+        if (_commandOpen && settings.ExplorerCommandInFolder == inFolder)
+        {
+            Flip(false);
+            return;
+        }
+
+        settings.ExplorerCommandInFolder = inFolder;
+
+        if (_commandOpen)
+        {
+            ApplyFlipButton();
+            CommandFace.FocusFirst();
+        }
+        else
+        {
+            Flip(true);
+        }
+    }
 
     /// <summary>Переворот как у страницы: окно сжимается к середине и разворачивается другой стороной.</summary>
     private void Flip(bool command)
@@ -129,23 +155,37 @@ public partial class ResultsView : UserControl
         OutputFace.Visibility = command ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    /// <summary>Открыто окно команды — белый значок на тускло-зелёной плашке.</summary>
+    /// <summary>Открыто окно команды — у его кнопки белый значок на тускло-зелёной плашке.</summary>
     private void ApplyFlipButton()
     {
-        if (_commandOpen)
+        var inFolder = AppState.Current.Settings.ExplorerCommandInFolder;
+        var home = _commandOpen && !inFolder;
+        var folder = _commandOpen && inFolder;
+
+        static void Badge(Border badge, IconElement glyph, bool on)
         {
-            FlipBadge.Background = new SolidColorBrush(Color.FromRgb(0x2E, 0x7D, 0x3E));
-            FlipGlyph.Foreground = Brushes.White;
-            FlipText.Text = "Закрыть терминал";
-            FlipButton.ToolTip = "Вернуть окно вывода";
+            if (on)
+            {
+                badge.Background = new SolidColorBrush(Color.FromRgb(0x2E, 0x7D, 0x3E));
+                glyph.Foreground = Brushes.White;
+            }
+            else
+            {
+                badge.Background = Brushes.Transparent;
+                glyph.ClearValue(IconElement.ForegroundProperty);
+            }
         }
-        else
-        {
-            FlipBadge.Background = Brushes.Transparent;
-            FlipGlyph.ClearValue(IconElement.ForegroundProperty);
-            FlipText.Text = "Открыть терминал";
-            FlipButton.ToolTip = "Перевернуть окно вывода окном команды для сервера правой панели";
-        }
+
+        Badge(FlipBadge, FlipGlyph, home);
+        Badge(FolderFlipBadge, FolderFlipGlyph, folder);
+
+        FlipText.Text = home ? "Закрыть терминал" : "Открыть терминал";
+        FlipButton.ToolTip = home
+            ? "Вернуть окно вывода"
+            : "Окно команды для сервера правой панели, команды — в домашней папке";
+        FolderFlipButton.ToolTip = folder
+            ? "Вернуть окно вывода"
+            : "Окно команды для сервера правой панели, команды — в открытой в ней папке";
     }
 
     /// <summary>Стоп в строке — только она; строка команды цепочки останавливает свой сервер в цепочке.</summary>
@@ -215,6 +255,9 @@ public partial class ResultsView : UserControl
             _companion = null;
         }
 
+        // другой прогон — ручной выбор в прошлом не держит
+        _pickedByHand = false;
+
         ShowRows();
         ApplyTitles(e.NewValue as OperationBatch);
 
@@ -241,7 +284,7 @@ public partial class ResultsView : UserControl
                 {
                     if (ResultsGrid.SelectedItem is null && ReferenceEquals(DataContext, batch) && _rows.Count > 0)
                     {
-                        ResultsGrid.SelectedItem = _rows[0];
+                        ResultsGrid.SelectedItem = FreshRow();
                     }
                 }));
             }
@@ -433,7 +476,64 @@ public partial class ResultsView : UserControl
             ResultsGrid.SelectedItem = picked;
         }
 
+        WatchStatus();
         FitServerColumn();
+    }
+
+    /// <summary>Строки, за статусом которых следит таблица: пошла строка — выбор переходит на неё.</summary>
+    private readonly HashSet<OperationResult> _statusWatched = [];
+
+    private void WatchStatus()
+    {
+        foreach (var gone in _statusWatched.Where(r => !_rows.Contains(r)).ToList())
+        {
+            gone.PropertyChanged -= OnRowProperty;
+            _statusWatched.Remove(gone);
+        }
+
+        foreach (var row in _rows.Where(_statusWatched.Add))
+        {
+            row.PropertyChanged += OnRowProperty;
+        }
+    }
+
+    private void OnRowProperty(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(OperationResult.Status) && sender is OperationResult { Status: OperationStatus.Running } row)
+        {
+            Dispatcher.BeginInvoke(new Action(() => FollowRunning(row)));
+        }
+    }
+
+    /// <summary>
+    /// Выбор идёт за работой: пошла строка — она выбирается, справа её вывод. Не сбивает, если выбрана
+    /// другая идущая строка (параллельные запуски не скачут) или выбор сделан руками — до следующего запуска.
+    /// </summary>
+    private void FollowRunning(OperationResult row)
+    {
+        if (_pickedByHand
+            || row.Status != OperationStatus.Running
+            || !_rows.Contains(row)
+            || ReferenceEquals(ResultsGrid.SelectedItem, row)
+            || ResultsGrid.SelectedItem is OperationResult { Status: OperationStatus.Running })
+        {
+            return;
+        }
+
+        ResultsGrid.SelectedItem = row;
+        ResultsGrid.ScrollIntoView(row);
+    }
+
+    /// <summary>Строку выбрали руками на законченной — таблица не уводит выбор, пока не начнётся новый запуск.</summary>
+    private bool _pickedByHand;
+
+    /// <summary>Щелчок или клавиша по таблице: следующая смена выбора — от человека, а не от программы.</summary>
+    private bool _touching;
+
+    private void OnGridTouched(object sender, System.Windows.Input.InputEventArgs e)
+    {
+        _touching = true;
+        Dispatcher.BeginInvoke(new Action(() => _touching = false), System.Windows.Threading.DispatcherPriority.Background);
     }
 
     /// <summary>Строки ответов в сессию, которые таблица уже видела, — на новую она переходит один раз.</summary>
@@ -478,7 +578,7 @@ public partial class ResultsView : UserControl
         // верхняя строка — самая свежая
         if (ResultsGrid.SelectedItem is null && _rows.Count > 0)
         {
-            ResultsGrid.SelectedItem = _rows[0];
+            ResultsGrid.SelectedItem = FreshRow();
         }
 
         if (e.Action == NotifyCollectionChangedAction.Add)
@@ -490,6 +590,14 @@ public partial class ResultsView : UserControl
     }
 
     private bool _following;
+
+    /// <summary>
+    /// Какую строку выбрать самой: идущую, а нет таких — верхнюю (свежую). Сверху могут стоять ждущие
+    /// («команды после копирования»), а копирование под ними уже идёт: выбор на ждущей там и оставался —
+    /// больше ничего не начиналось, и FollowRunning молчал.
+    /// </summary>
+    private OperationResult FreshRow() =>
+        _rows.FirstOrDefault(r => r.Status == OperationStatus.Running) ?? _rows[0];
 
     /// <summary>
     /// Свежий запуск встаёт сверху — терминал сам идёт за ним: его первая строка выбирается
@@ -505,6 +613,9 @@ public partial class ResultsView : UserControl
 
         _following = true;
 
+        // новый запуск — ручной выбор прошлого больше не держит
+        _pickedByHand = false;
+
         Dispatcher.BeginInvoke(new Action(() =>
         {
             _following = false;
@@ -515,8 +626,10 @@ public partial class ResultsView : UserControl
                 return;
             }
 
-            ResultsGrid.SelectedItem = _rows[0];
-            ResultsGrid.ScrollIntoView(_rows[0]);
+            var pick = FreshRow();
+
+            ResultsGrid.SelectedItem = pick;
+            ResultsGrid.ScrollIntoView(pick);
         }), System.Windows.Threading.DispatcherPriority.Background);
     }
 
@@ -555,6 +668,12 @@ public partial class ResultsView : UserControl
     private void OnResultPicked(object sender, SelectionChangedEventArgs e)
     {
         OutputWindow.Track(ResultsGrid.SelectedItem as OperationResult);
+
+        // руками выбрали идущую строку — таблица и дальше идёт за работой; законченную — выбор держится
+        if (_touching)
+        {
+            _pickedByHand = ResultsGrid.SelectedItem is OperationResult { Status: not (OperationStatus.Running or OperationStatus.Pending) };
+        }
 
         // прогон помнит свой выбранный сервер — для автокопии, когда терминал смотрит в другое место
         if (Batch is { } batch && ResultsGrid.SelectedItem is OperationResult picked)
@@ -793,6 +912,18 @@ public partial class ResultsView : UserControl
         CopyResult(turn, "Ответ пришёл", turn.Batch, turnOnly: true);
     }
 
+    /// <summary>«Авто» для строки действия (создана папка, удалено, переименовано): её вывод — в буфер.</summary>
+    public void CopyAction(Workspace tab, OperationResult row)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(new Action(() => CopyAction(tab, row)));
+            return;
+        }
+
+        CopyResult(row, row.Message ?? "Действие", row.Batch, tab: tab);
+    }
+
     /// <summary>Вывод только выбранного сервера.</summary>
     private void OnCopyOne(object sender, RoutedEventArgs e) => CopyCurrent();
 
@@ -813,7 +944,7 @@ public partial class ResultsView : UserControl
 
     /// <summary>Вывод одного сервера в буфер — по кнопке или галочкой «после …».</summary>
     /// <param name="turnOnly">Ответ в сессию — только он, а не вся сессия.</param>
-    private static void CopyResult(OperationResult result, string? finished, OperationBatch? batch, bool turnOnly = false)
+    private static void CopyResult(OperationResult result, string? finished, OperationBatch? batch, bool turnOnly = false, Workspace? tab = null)
     {
         if (result.Output.TrimEnd().Length == 0)
         {
@@ -834,7 +965,7 @@ public partial class ResultsView : UserControl
         }
 
         var wholeSession = turns.Count > 0 && ReferenceEquals(result, session);
-        var tab = batch is null ? null : AppState.Current.TabOfBatch(batch);
+        tab ??= batch is null ? null : AppState.Current.TabOfBatch(batch);
         var after = batch is not null && AppState.Current.ChainFor(batch) is { } chain
             ? AppState.AfterRowOf(batch, result, chain)
             : null;
@@ -881,6 +1012,92 @@ public partial class ResultsView : UserControl
                 AppLog.Echo($"Вывод скопирован: {result.Title}.");
             }
         }
+    }
+
+    /// <summary>«×1» в квадратике CopyPass вместо галочки — пока она стоит на один раз.</summary>
+    private System.Windows.Controls.TextBlock? _copyPassOne;
+
+    /// <summary>Значок-галочка шаблона: на разовой он прячется, видна «×1».</summary>
+    private UIElement? _copyPassIcon;
+
+    private bool _copyPassHooked;
+
+    /// <summary>
+    /// В шаблон галочки WPF UI (StrokeBorder → ControlIcon) подкладывается «×1» поверх значка: подпись не
+    /// меняется и строка не раздвигается. Шаблон строится только у видимой галочки — поэтому подкладка
+    /// ставится при каждом показе, пока не встанет.
+    /// </summary>
+    private void OnCopyPassLoaded(object sender, RoutedEventArgs e)
+    {
+        if (!_copyPassHooked)
+        {
+            _copyPassHooked = true;
+            CopyPassBox.IsVisibleChanged += (_, _) => Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, ShowCopyPassOne);
+            AppState.Current.PropertyChanged += (_, args) =>
+            {
+                if (args.PropertyName is nameof(AppState.CopyPassOnceOn) or nameof(AppState.CopyPass) or null or "")
+                {
+                    Dispatcher.BeginInvoke(ShowCopyPassOne);
+                }
+            };
+        }
+
+        ShowCopyPassOne();
+    }
+
+    /// <summary>Подложить «×1» в шаблон, если его ещё нет. Шаблон не построен — false, попробуем при показе.</summary>
+    private bool EnsureCopyPassOne()
+    {
+        if (_copyPassOne is not null)
+        {
+            return true;
+        }
+
+        CopyPassBox.ApplyTemplate();
+
+        if (CopyPassBox.Template?.FindName("StrokeBorder", CopyPassBox) is not Border stroke
+            || stroke.Child is not UIElement icon)
+        {
+            return false;
+        }
+
+        _copyPassOne = new System.Windows.Controls.TextBlock
+        {
+            Text = "×1",
+            FontSize = 10,
+            FontWeight = FontWeights.Bold,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Visibility = Visibility.Collapsed,
+        };
+        _copyPassOne.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "CheckBoxCheckGlyphForeground");
+
+        stroke.Child = null;
+        var grid = new Grid();
+        grid.Children.Add(icon);
+        grid.Children.Add(_copyPassOne);
+        stroke.Child = grid;
+        _copyPassIcon = icon;
+        return true;
+    }
+
+    private void ShowCopyPassOne()
+    {
+        if (!EnsureCopyPassOne() || _copyPassOne is null || _copyPassIcon is null)
+        {
+            return;
+        }
+
+        var once = AppState.Current.CopyPassOnceOn;
+        _copyPassOne.Visibility = once ? Visibility.Visible : Visibility.Collapsed;
+        _copyPassIcon.Opacity = once ? 0 : 1;
+    }
+
+    /// <summary>Правый щелчок по CopyPass — на одну автокопию.</summary>
+    private void OnCopyPassRightClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        AppState.Current.ToggleCopyPassOnce();
     }
 
     private async void OnRetry(object sender, RoutedEventArgs e)

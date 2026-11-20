@@ -124,7 +124,7 @@
             x:Name="UseGlobalSwitch"
             Content="Глобальный фильтр"
             FontSize="13"
-            ToolTip="Глобальные исключения на этой вкладке. Выключено — они здесь не действуют, но сами не стираются">
+            ToolTip="Глобальные исключения на этой вкладке. Выключено — не действуют, но не стираются">
             <ui:ToggleSwitch.Resources>
               <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#6B4FA8" />
               <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#7B5FBA" />
@@ -267,7 +267,7 @@
         Click="OnStandardSet"
         Content="Стандартный набор"
         Icon="{ui:SymbolIcon Sparkle24}"
-        ToolTip="Всё, что на сервер почти никогда не льют: мусор ОС и редакторов, кэш и окружения Python и JavaScript, папки .git и настроек IDE. Добавляет только то, чего ещё нет" />
+        ToolTip="Добавить типовой мусор: файлы ОС и редакторов, кэш Python и node, .git, папки IDE" />
       <ItemsControl x:Name="TemplatesList">
         <ItemsControl.ItemsPanel>
           <ItemsPanelTemplate>

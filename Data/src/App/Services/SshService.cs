@@ -63,7 +63,7 @@ public sealed record UploadOptions(
     /// <summary>
     /// Файл уже лежит на этом сервере проверенным: не менялся после прошлой удачной заливки строки.
     /// Его сумма не спрашивается — сервер не перечитывает тысячи файлов ради одного изменённого.
-    /// Пропавшее и другой размер опись ловит и так. Только при включённом свитче «Отметить незалитые».
+    /// Пропавшее и другой размер опись ловит и так. Только при включённом свитче «Отмечать незалитые».
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public Func<string, bool>? Settled { get; init; }
@@ -429,7 +429,8 @@ public static class SshService
         Action<int, int>? onJob = null,
         Action<CommandInput?>? onInput = null,
         Action<bool>? onWaiting = null,
-        Action<string>? onTail = null)
+        Action<string>? onTail = null,
+        TimeSpan? limit = null)
     {
         return RunStoppable(
             connected =>
@@ -469,7 +470,8 @@ public static class SshService
                 // ждём завершения сами, чтобы после таймаута успеть дочитать уже пришедший вывод
                 cmd.CommandTimeout = Timeout.InfiniteTimeSpan;
 
-                var timeout = TimeSpan.FromSeconds(Math.Max(5, settings.CommandTimeoutSeconds));
+                // limit — свой срок для долгих служебных дел (архив на сотни гигабайт), иначе общий из настроек
+                var timeout = limit ?? TimeSpan.FromSeconds(Math.Max(5, settings.CommandTimeoutSeconds));
                 var stdout = new StringBuilder();
                 var stderr = new StringBuilder();
                 var timedOut = false;
@@ -3095,7 +3097,7 @@ public static class SshService
 
         if (settled > 0)
         {
-            report($"не менялись после прошлой заливки — суммы не нужны: {settled} файл(ов) (свитч «Отметить незалитые»)");
+            report($"не менялись после прошлой заливки — суммы не нужны: {settled} файл(ов) (свитч «Отмечать незалитые»)");
         }
 
         if (candidates.Count == 0)
@@ -3905,11 +3907,20 @@ internal sealed class LinePump(
     private static readonly TimeSpan ShowTailAfter = TimeSpan.FromMilliseconds(300);
     private static readonly TimeSpan WaitingAfter = TimeSpan.FromSeconds(1);
 
+    /// <summary>
+    /// Строка, что после затишья дописалась сама («update-initramfs...», «depmod.......» — точки по одной),
+    /// — это ход работы, а не вопрос: вопрос без ответа не продолжается. Ей «ждёт ответа» — только после долгой тишины.
+    /// </summary>
+    private static readonly TimeSpan ProgressWaitingAfter = TimeSpan.FromSeconds(30);
+
     private readonly Lock _lock = new();
     private readonly StringBuilder _partial = new();
     private DateTime _lastData = DateTime.UtcNow;
     private bool _tailShown;
     private bool _afterCr;
+
+    /// <summary>Незаконченная строка продолжилась после затишья — полоса хода, а не вопрос.</summary>
+    private bool _resumed;
 
     /// <summary>Незаконченная строка висит секунду и больше — похоже на вопрос.</summary>
     public bool Waiting
@@ -3918,7 +3929,8 @@ internal sealed class LinePump(
         {
             lock (_lock)
             {
-                return _partial.Length > 0 && !LooksLikeJob() && DateTime.UtcNow - _lastData >= WaitingAfter;
+                return _partial.Length > 0 && !LooksLikeJob()
+                    && DateTime.UtcNow - _lastData >= (_resumed ? ProgressWaitingAfter : WaitingAfter);
             }
         }
     }
@@ -4018,7 +4030,15 @@ internal sealed class LinePump(
     {
         lock (_lock)
         {
-            _lastData = DateTime.UtcNow;
+            var now = DateTime.UtcNow;
+
+            // незаконченная строка затихала и дописывается дальше — это ход работы
+            if (_partial.Length > 0 && now - _lastData >= ShowTailAfter)
+            {
+                _resumed = true;
+            }
+
+            _lastData = now;
 
             for (var i = 0; i < count; i++)
             {
@@ -4055,6 +4075,7 @@ internal sealed class LinePump(
     {
         var line = _partial.ToString();
         _partial.Clear();
+        _resumed = false;
 
         if (_tailShown)
         {

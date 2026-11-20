@@ -82,7 +82,7 @@ public partial class InstallWindow : FluentWindow
         new("Распаковать во временную папку Update рядом с программой"),
         new("Проверить содержимое архива"),
         new("Закрыть программу"),
-        new("Удалить старые Data и MultiServerSync.exe (UserData не трогается)"),
+        new("Удалить старые Data и лаунчер (UserData не трогается)"),
         new("Поставить новую версию"),
         new("Удалить временную папку Update"),
         new("Запустить программу заново"),

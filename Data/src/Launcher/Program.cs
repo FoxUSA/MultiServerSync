@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -16,9 +16,34 @@ namespace MultiServerSync.Launcher;
 /// </summary>
 internal static class Program
 {
-    private const string Product = "MultiServerSync";
-    private const string LauncherName = "MultiServerSync.exe";
+    private const string Product = "Multi Server Sync";
     private const string AppExeName = "MultiServerSync.App.exe";
+
+    /// <summary>
+    /// Имена лаунчера: сейчас «Multi Server Sync.exe», в старых установках — «MultiServerSync.exe». Сам себя лаунчер
+    /// не переименовывает (на него смотрят ярлыки): подменяет файл под тем именем, под которым запущен.
+    /// </summary>
+    private static readonly string[] LauncherNames = ["Multi Server Sync.exe", "MultiServerSync.exe"];
+
+    /// <summary>Файл, из которого запущен этот лаунчер, — как бы он ни назывался.</summary>
+    private static string SelfPath(string root) =>
+        Environment.ProcessPath is { Length: > 0 } path ? path : Path.Combine(root, LauncherNames[0]);
+
+    /// <summary>Замена лаунчеру в подготовленном обновлении: под его именем, а нет — под любым из известных.</summary>
+    private static string StagedLauncher(string staged, string self)
+    {
+        foreach (var name in LauncherNames.Prepend(Path.GetFileName(self)))
+        {
+            var path = Path.Combine(staged, name);
+
+            if (File.Exists(path))
+            {
+                return path;
+            }
+        }
+
+        return Path.Combine(staged, Path.GetFileName(self));
+    }
 
     [STAThread]
     private static int Main(string[] args)
@@ -31,6 +56,13 @@ internal static class Program
         var (pid, rest) = SplitArgs(args);
         var staged = Path.Combine(root, "Update", "staged");
         string? oldLauncher = null;
+
+        // маркер без подготовленной Data — хвост уже установленного обновления: иначе каждый запуск
+        // показывал бы окно с отказом
+        if (File.Exists(Path.Combine(staged, "update.json")) && !File.Exists(Path.Combine(staged, "Data", AppExeName)))
+        {
+            DeleteDirectory(Path.Combine(root, "Update"));
+        }
 
         // обновление применяется и без ключа: если прошлый раз прервали, оно доедет при обычном запуске
         if (File.Exists(Path.Combine(staged, "update.json")))
@@ -129,7 +161,7 @@ internal static class Program
 
     /// <summary>
     /// Шаги 3–7 общего списка в <see cref="InstallWindow"/>. Старое удаляется не сразу,
-    /// а сперва отодвигается в Data.old и MultiServerSync.exe.old: если новое не встанет,
+    /// а сперва отодвигается в Data.old и &lt;лаунчер&gt;.exe.old: если новое не встанет,
     /// прежняя версия возвращается на место и программа запускается как раньше.
     /// </summary>
     private static bool ApplyUpdate(InstallWindow form, string root, string staged, int pid, out string? oldLauncher)
@@ -139,8 +171,9 @@ internal static class Program
         var dataDir = Path.Combine(root, "Data");
         var newData = Path.Combine(staged, "Data");
         var backup = Path.Combine(root, "Data.old");
-        var self = Path.Combine(root, LauncherName);
-        var newLauncher = Path.Combine(staged, LauncherName);
+        var self = SelfPath(root);
+        var newLauncher = StagedLauncher(staged, self);
+        var selfName = Path.GetFileName(self);
 
         // ── 3. закрыть программу
         form.Step(3);
@@ -163,10 +196,18 @@ internal static class Program
 
         // ── 4. убрать старое
         form.Step(4, "Убираем старую папку Data…");
+
+        // Data.old здесь — только хвост прошлой установки: живая Data на месте (RestoreData в CleanLeftovers)
         DeleteDirectory(backup);
+
+        if (Directory.Exists(backup))
+        {
+            return Fail(form, "не удалось удалить старую папку Data.old — какие-то её файлы заняты");
+        }
 
         if (Directory.Exists(dataDir))
         {
+            // не удаление, а переименование: либо вся папка уехала в Data.old, либо осталась целой
             try
             {
                 ClearReadOnly(new DirectoryInfo(dataDir));
@@ -174,7 +215,7 @@ internal static class Program
             }
             catch (Exception ex)
             {
-                return Fail(form, "не удалось убрать прежнюю папку Data: " + ex.Message);
+                return Fail(form, "папка Data занята другой программой: " + ex.Message);
             }
         }
 
@@ -183,7 +224,7 @@ internal static class Program
 
         if (replaceLauncher)
         {
-            form.Progress("Убираем старый MultiServerSync.exe…");
+            form.Progress($"Убираем старый {selfName}…");
 
             try
             {
@@ -215,12 +256,12 @@ internal static class Program
         {
             Rollback(dataDir, backup, self, oldLauncher);
             oldLauncher = null;
-            return Fail(form, "не удалось поставить новую папку Data: " + ex.Message);
+            return Fail(form, "не удалось поставить новую папку Data: " + ex.Message, dataDir, selfName);
         }
 
         if (replaceLauncher)
         {
-            form.Progress("Ставим новый MultiServerSync.exe…");
+            form.Progress($"Ставим новый {selfName}…");
 
             try
             {
@@ -250,18 +291,26 @@ internal static class Program
         DeleteDirectory(Path.Combine(root, "Update"));
 
         // ── 7. сам запуск — в Main, после закрытия окна
-        form.Step(7, "Запускаем MultiServerSync…");
+        form.Step(7, "Запускаем Multi Server Sync…");
         Thread.Sleep(600);
 
         return true;
     }
 
-    private static bool Fail(InstallWindow form, string reason)
+    /// <summary>
+    /// Отказ. Скачанное остаётся в Update и ставится заново при следующем запуске — после перезагрузки
+    /// занятые файлы освобождаются.
+    /// </summary>
+    private static bool Fail(InstallWindow form, string reason, string? dataDir = null, string? launcher = null)
     {
+        // прежняя Data не вернулась на место — её вернёт RestoreData при следующем запуске
+        var lost = dataDir is not null && !File.Exists(Path.Combine(dataDir, AppExeName));
+
         form.Fail(
             "Обновление не установилось: " + reason + ".\n\n"
-            + "Программа запустится в прежней версии, скачанное обновление осталось "
-            + "в папке Update и установится при следующем запуске.");
+            + (lost
+                ? $"Перезагрузите компьютер и запустите {launcher ?? LauncherNames[0]} — программа восстановится и обновится сама."
+                : "Программа запустится в прежней версии. Перезагрузите компьютер и запустите её снова — обновление установится само."));
         return false;
     }
 
@@ -422,10 +471,21 @@ internal static class Program
         return (pid, rest);
     }
 
-    /// <summary>Убрать хвосты прошлого обновления.</summary>
+    /// <summary>
+    /// Убрать хвосты прошлого обновления. Data.old удаляется, только когда живая Data на месте: если установку
+    /// оборвали между переименованиями (выключили свет, не вышел откат), Data.old — единственная копия программы.
+    /// </summary>
     private static void CleanLeftovers(string root)
     {
-        DeleteDirectory(Path.Combine(root, "Data.old"));
+        var dataDir = Path.Combine(root, "Data");
+        var backup = Path.Combine(root, "Data.old");
+
+        RestoreData(dataDir, backup);
+
+        if (File.Exists(Path.Combine(dataDir, AppExeName)))
+        {
+            DeleteDirectory(backup);
+        }
 
         try
         {
@@ -444,6 +504,31 @@ internal static class Program
         catch
         {
             // корень недоступен — не наша забота
+        }
+    }
+
+    /// <summary>Программы в Data нет, а в Data.old есть — вернуть её на место.</summary>
+    private static void RestoreData(string dataDir, string backup)
+    {
+        if (File.Exists(Path.Combine(dataDir, AppExeName)) || !File.Exists(Path.Combine(backup, AppExeName)))
+        {
+            return;
+        }
+
+        try
+        {
+            // Data без программы (пустая, недоделанная) мешает переименованию; данных пользователя в ней нет — они в UserData
+            if (Directory.Exists(dataDir))
+            {
+                ClearReadOnly(new DirectoryInfo(dataDir));
+                Directory.Delete(dataDir, true);
+            }
+
+            Directory.Move(backup, dataDir);
+        }
+        catch
+        {
+            // не вышло — Data.old остаётся нетронутой, попробуем при следующем запуске
         }
     }
 

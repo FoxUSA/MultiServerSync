@@ -238,7 +238,7 @@ public partial class ExplorerPage : Page
     /// <summary>Чей путь показан справа у вкладки-фильтра: перешли слева в другое окно — правая панель за ним.</summary>
     private CopyWindow? _filterTarget;
 
-    private const string LocalTransferTip = "Отмеченное, а без галочек — строку под курсором, в открытую справа папку сервера (F5). Можно и перетащить мышью";
+    private const string LocalTransferTip = "Отмеченное или строку под курсором — в папку справа (F5). Можно мышью";
 
     /// <summary>Галочки во вкладке-фильтре поменяли руками — в фильтр окна копирования.</summary>
     private void OnFilterTicks(FilePane pane)
@@ -979,6 +979,15 @@ public partial class ExplorerPage : Page
 
             case PaneCommand.Listing when pane.Source is RemoteSource remote && _tab is { } tab:
                 await tab.RunListingAsync([remote.Server], picked.Count > 0 ? picked.Select(p => p.FullPath).ToList() : [pane.CurrentPath]);
+                break;
+
+            // архив ложится в открытую папку — после него она перечитывается
+            case PaneCommand.Archive when pane.Source is RemoteSource remote && _tab is { } tab && picked.Count > 0:
+                if (await tab.RunArchiveAsync(remote.Server, pane.CurrentPath, picked.Select(p => p.Name).ToList()))
+                {
+                    await pane.RefreshAsync();
+                }
+
                 break;
 
             case PaneCommand.Run when pane.Source is RemoteSource remote && focused is { IsDirectory: false }:

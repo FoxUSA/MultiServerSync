@@ -51,7 +51,7 @@
         Content="Сохранить"
         FontSize="11"
         IsEnabled="False"
-        ToolTip="Записать в тот же файл: владелец и права остаются прежними, после записи сверяется SHA-256 (Ctrl+S)">
+        ToolTip="Сохранить в тот же файл с прежними правами, сверить SHA-256 (Ctrl+S)">
         <ui:Button.Icon>
           <ui:SymbolIcon FontSize="17" Symbol="Save24" />
         </ui:Button.Icon>
@@ -91,7 +91,7 @@
         Click="OnWrap"
         Content="Перенос строк"
         FontSize="11"
-        ToolTip="Длинные строки — переносом по ширине окна. В файле они остаются одной строкой" />
+        ToolTip="Переносить длинные строки по ширине окна. Файл не меняется" />
 
       <TextBlock
         x:Name="PathText"

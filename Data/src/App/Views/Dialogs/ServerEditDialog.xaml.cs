@@ -240,7 +240,7 @@ public partial class ServerEditDialog : FluentWindow
         {
             HostKeyText.Text = $"Ключ сервера изменился: запомнен {known?.Fingerprint}, сейчас {fresh.Fingerprint}.";
             HostKeyButton.Content = "Принять новый";
-            HostKeyButton.ToolTip = "Если сервер переустанавливали. Иначе кто-то подменяет сервер — не принимайте.";
+            HostKeyButton.ToolTip = "Только если сервер переустанавливали — иначе это подмена";
         }
         else if (known is not null)
         {

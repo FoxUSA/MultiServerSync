@@ -54,7 +54,7 @@
       ItemsSource="{Binding CommandHistory}"
       SelectionChanged="OnHistoryPicked"
       Style="{StaticResource SlimComboStyle}"
-      ToolTip="Команды, выполненные в этой вкладке, без повторов. У строки — в избранное, скопировать и убрать из истории.">
+      ToolTip="Команды вкладки без повторов: в избранное, копировать, убрать">
       <ComboBox.ItemTemplate>
         <DataTemplate>
           <Grid>
@@ -149,7 +149,7 @@
             HorizontalAlignment="Right"
             VerticalAlignment="Center"
             Click="OnKeepSessionCommand"
-            ToolTip="Отмечено — после отправки набранное остаётся в окне: поправить и отправить снова. Снято — окно очищается">
+            ToolTip="Не очищать окно после отправки">
             <!--  размер у самого текста: FontSize галочки тема не берёт, и подпись выходила крупнее надписи слева  -->
             <TextBlock FontSize="12" Text="Сохранять команду" />
           </CheckBox>
@@ -196,7 +196,7 @@
             <Button
               Click="OnSendSession"
               Style="{StaticResource EditorIconStyle}"
-              ToolTip="Отправить в сессию — построчно, каждая строка с Enter (Enter в окне). Пустое — просто Enter">
+              ToolTip="Отправить в сессию построчно (Enter). Пусто — просто Enter">
               <ui:SymbolIcon
                 FontSize="{StaticResource IconGlyphSize}"
                 Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
@@ -205,7 +205,7 @@
             <Button
               Click="OnInterruptSession"
               Style="{StaticResource EditorIconStyle}"
-              ToolTip="Ctrl+C — прервать то, что сейчас идёт в сессии (например ping). Сама сессия остаётся. То же — Ctrl+C в окне без выделения">
+              ToolTip="Ctrl+C в сессию — прервать то, что идёт. Сессия остаётся">
               <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="HandRight24" />
             </Button>
             <Button
@@ -243,7 +243,7 @@
             <Button
               Click="OnOpenBookSession"
               Style="{StaticResource EditorIconStyle}"
-              ToolTip="Избранное: команда по щелчку встаёт в окно ответа. Там же — добавить в избранное то, что набрано">
+              ToolTip="Избранное: щелчок вставляет команду, там же — добавить набранное">
               <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Heart24" />
             </Button>
           </StackPanel>
@@ -329,7 +329,7 @@
                       x:Name="Paste"
                       Click="OnPasteStep"
                       Style="{StaticResource EditorIconStyle}"
-                      ToolTip="Вставить из буфера — заменяет всё окно, чтобы вставка не приклеилась к прошлой команде">
+                      ToolTip="Вставить из буфера, заменив всё окно">
                       <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="ClipboardPaste24" />
                     </Button>
 
@@ -349,7 +349,7 @@
                       x:Name="RunBelow"
                       Click="OnRunFromStep"
                       Style="{StaticResource EditorIconStyle}"
-                      ToolTip="Выполнить это окно и все ниже — по очереди, каждое после успешного предыдущего (Ctrl+Enter)">
+                      ToolTip="Выполнить это окно и ниже по очереди, пока без ошибок (Ctrl+Enter)">
                       <ui:SymbolIcon
                         FontSize="{StaticResource IconGlyphSize}"
                         Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
@@ -369,7 +369,7 @@
                       x:Name="CopyOut"
                       Click="OnCopyOutput"
                       Style="{StaticResource EditorIconStyle}"
-                      ToolTip="Копировать вывод (Ctrl+Shift+C) — то же, что «Текущий лог» в журнале: весь вывод сервера, выбранного в таблице слева, со всеми окнами">
+                      ToolTip="Копировать вывод выбранного сервера со всеми окнами (Ctrl+Shift+C)">
                       <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Copy24" />
                     </Button>
 
@@ -393,7 +393,7 @@
                     <Button
                       Click="OnOpenBook"
                       Style="{StaticResource EditorIconStyle}"
-                      ToolTip="Избранное: команда по щелчку встаёт в это окно, запись из нескольких окон раскрывает их все. Там же — добавить в избранное это окно или все окна.">
+                      ToolTip="Избранное: щелчок вставляет команду, там же — добавить это окно или все">
                       <ui:SymbolIcon FontSize="{StaticResource IconGlyphSize}" Symbol="Heart24" />
                     </Button>
 
@@ -467,7 +467,7 @@
                     Content="sudo"
                     FontSize="12"
                     IsChecked="{Binding UseSudo, Mode=TwoWay}"
-                    ToolTip="Это окно выполняется как sudo -S -p '' bash -s, пароль сервера подаётся на stdin" />
+                    ToolTip="Выполняется через sudo, пароль сервера подаётся сам" />
                 </StackPanel>
               </Grid>
 
@@ -542,7 +542,7 @@
           Content="Выполнить"
           Icon="{ui:SymbolIcon Play24}"
           IsEnabled="{Binding CommandBatch.IsIdle}"
-          ToolTip="Все окна этой вкладки по очереди на её отмеченных серверах. Со свитчем «Везде» — во всех командных вкладках сразу, после вопроса. Ctrl+Enter в окне — только эта вкладка">
+          ToolTip="Все окна вкладки по очереди на её серверах. Со свитчем «Везде» — во всех вкладках">
           <!--  во всех окнах пусто — кнопка тусклая, но жмётся: нажатие мигает рамками окон  -->
           <ui:Button.Style>
             <Style BasedOn="{StaticResource {x:Type ui:Button}}" TargetType="ui:Button">
@@ -562,7 +562,7 @@
           Content="Везде"
           IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=Everywhere, Mode=TwoWay}"
           Style="{StaticResource DangerSwitchStyle}"
-          ToolTip="Включено — «Выполнить» запускает команды сразу во всех командных вкладках, каждая со своими окнами и серверами, после вопроса. Личные вкладки копирования не запускаются. Итог по каждой — на её ярлыке" />
+          ToolTip="«Выполнить» — во всех командных вкладках сразу, после вопроса" />
 
       </StackPanel>
 

@@ -7,7 +7,7 @@
   xmlns:pages="clr-namespace:MultiServerSync.Views.Pages"
   xmlns:services="clr-namespace:MultiServerSync.Services"
   xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-  Title="MultiServerSync"
+  Title="Multi Server Sync"
   Icon="pack://application:,,,/Assets/app.ico"
   Width="1280"
   Height="820"
@@ -849,7 +849,7 @@
     <ui:TitleBar
       x:Name="Bar"
       Grid.Row="0"
-      Title="MultiServerSync"
+      Title="Multi Server Sync"
       Icon="{core:AppIcon}">
       <ui:TitleBar.TrailingContent>
         <StackPanel
@@ -1342,7 +1342,7 @@
               Content="Одиночный выбор"
               FontSize="12"
               IsChecked="{Binding State.SingleSelectHere, Mode=TwoWay}"
-              ToolTip="Включено — отметить можно только один сервер: выбор другого снимает прежний. У команд и у копирования свой, запоминается для каждого набора серверов и отдельно для «Всех»" />
+              ToolTip="Только один сервер: выбор другого снимает прежний. Свой у каждого набора" />
           </Border>
 
           <!--  прокрутка выходит на 4 точки в поле карточки, а список возвращается на место: рамка отмеченного
@@ -1368,7 +1368,7 @@
                   IsChecked="{Binding State.PaneTab.PaneAllChecked, Mode=TwoWay}"
                   Style="{StaticResource PaneCheckStyle}"
                   Tag="Hover"
-                  ToolTip="Отметить или снять все серверы в списке этой вкладки. Если отмечена часть — отмечает все" />
+                  ToolTip="Отметить или снять все серверы. Часть отмечена — отметит все" />
               </Border>
 
               <!--  «Копирование» с несколькими окнами: у каждого окна свои серверы. Номера окон в ряд, как номер
@@ -1696,7 +1696,7 @@
                     VerticalAlignment="Center"
                     DockPanel.Dock="Right"
                     IsChecked="{Binding State.CommandLocalPc, Mode=TwoWay}"
-                    ToolTip="Включено — команды выполняются в PowerShell на этом компьютере. Выключено — снова на серверах">
+                    ToolTip="Команды — в PowerShell на этом ПК, а не на серверах">
                     <ui:ToggleSwitch.Style>
                       <Style BasedOn="{StaticResource DangerSwitchStyle}" TargetType="ui:ToggleSwitch">
                         <Style.Triggers>
@@ -1713,7 +1713,7 @@
                   <Button
                     Click="OnPickLocalPc"
                     Content="PowerShell"
-                    ToolTip="Команды этой вкладки — на этом компьютере, в PowerShell. Режим помнится у вкладки, избранное — своё. Серверы и наборы выбираются после выключения режима">
+                    ToolTip="Команды вкладки — в PowerShell на этом ПК. Серверы — после выключения режима">
                     <Button.Style>
                       <!--  включённый режим подпись не перекрашивает: его показывает свитч справа  -->
                       <Style BasedOn="{StaticResource PaneEdgeLabelStyle}" TargetType="Button">

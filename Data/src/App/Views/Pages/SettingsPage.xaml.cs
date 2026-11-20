@@ -31,6 +31,10 @@ public partial class SettingsPage : Page
 
         ThemeBox.SelectedItem ??= ThemeBox.Items[0];
 
+        // громкость не из списка (правили файл руками) — ближайшая из списка
+        SoundBox.SelectedItem = SoundBox.Items.Cast<ComboBoxItem>()
+            .MinBy(item => Math.Abs(int.Parse((string)item.Tag) - settings.FinishSoundVolume));
+
         VersionText.Text = AppVersion.Details;
         ManifestPathText.Text = "Берётся из " + AppPaths.ManifestFile;
 
@@ -138,6 +142,21 @@ public partial class SettingsPage : Page
         AppState.Current.SaveSettings();
         MainWindow.ApplyTheme(theme);
         AppLog.Hint($"Тема переключена: {theme}.");
+    }
+
+    private void OnSoundChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_ready || SoundBox.SelectedItem is not ComboBoxItem { Tag: string tag })
+        {
+            return;
+        }
+
+        var volume = int.Parse(tag);
+
+        AppState.Current.Settings.FinishSoundVolume = volume;
+        AppState.Current.SaveSettings();
+        FinishSound.Preview();
+        AppLog.Hint(volume == 0 ? "Звук окончания команды выключен." : $"Громкость звука окончания: {volume}%.");
     }
 
     private void OnNumbersChanged(object sender, RoutedEventArgs e)

@@ -531,7 +531,15 @@ public partial class MiniTerminal : UserControl
         _repeatConfirmed = false;
 
         // отказ возвращается сразу, ещё до ожидания; не закончилась сразу — значит, пошла
-        var run = tab.RunCommandAsync(from: step, onlyThis: true, servers: tab.CopyTargets);
+        // «Проводник», открыт кнопкой «В папке» — команды идут в папке, открытой в правой панели
+        var workDir = AppState.Current.Section == AppSection.Explorer
+            && AppState.Current.Settings.ExplorerCommandInFolder
+            && tab.ExplorerServer is { } paneServer
+            && tab.Explorer.RemoteServerId == paneServer.Id
+                ? tab.Explorer.Remote.Path
+                : null;
+
+        var run = tab.RunCommandAsync(from: step, onlyThis: true, servers: tab.CopyTargets, workDir: workDir);
 
         if (!run.IsCompleted)
         {
@@ -634,6 +642,27 @@ public partial class MiniTerminal : UserControl
         copy.RaiseChain();
         AppState.Current.JumpToPersonal(personal);
         AppState.Current.ShowTab(personal);
+    }
+
+    /// <summary>
+    /// ПКМ по свитчу: после следующего копирования один раз выполнить команду из этого окна
+    /// на серверах, где копирование прошло, потом свитч гаснет сам. Повторный ПКМ снимает.
+    /// Личная вкладка тут ни при чём — не создаётся и не открывается.
+    /// </summary>
+    private void OnAfterCopySwitchRightClick(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+
+        if (Tab is not { IsCopyTab: true } copy)
+        {
+            return;
+        }
+
+        copy.ToggleAfterCopyOnce();
+
+        ActionLog.Info(copy.AfterCopyOnce
+            ? $"Команда из окна мини-терминала выполнится один раз после копирования: «{copy.Title}»"
+            : $"Команды после копирования выключены: «{copy.Title}»", null, AppSection.Files, copy);
     }
 
     /// <summary>Как на «Команде»: Ctrl+Enter запускает, а пока идёт — прерывает; Esc прерывает; Ctrl+Shift+C забирает вывод.</summary>

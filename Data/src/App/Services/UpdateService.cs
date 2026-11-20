@@ -414,7 +414,9 @@ public static class UpdateService
 
         if (newLauncher is not null)
         {
-            File.Copy(newLauncher, Path.Combine(AppPaths.StagedDir, AppPaths.LauncherName), true);
+            // под именем стоящего лаунчера: лаунчер старой версии ищет замену только под своим именем,
+            // и ярлыки на него не ломаются
+            File.Copy(newLauncher, Path.Combine(AppPaths.StagedDir, Path.GetFileName(AppPaths.LauncherFile)), true);
         }
         else
         {
@@ -469,11 +471,14 @@ public static class UpdateService
 
     private static string? FindLauncher(string packageRoot)
     {
-        var expected = Path.Combine(packageRoot, AppPaths.LauncherName);
-
-        if (File.Exists(expected))
+        foreach (var name in new[] { AppPaths.LauncherName, AppPaths.OldLauncherName })
         {
-            return expected;
+            var expected = Path.Combine(packageRoot, name);
+
+            if (File.Exists(expected))
+            {
+                return expected;
+            }
         }
 
         return Directory.GetFiles(packageRoot, "*.exe").FirstOrDefault();

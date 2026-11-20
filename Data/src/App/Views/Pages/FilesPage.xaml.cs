@@ -178,11 +178,16 @@ public partial class FilesPage : Page
             return;
         }
 
+        // стоим на строке — окно открывается там, где лежит её файл или папка; иначе — где добавляли в прошлый раз
+        var start = RowsGrid.SelectedItem is TransferItem row && ParentOf(row.FullPath) is { Length: > 0 } parent
+            ? parent
+            : workspace.LastLocalFolder;
+
         if (workspace.IsPaneLocked)
         {
             var owner = Window.GetWindow(this) is { } window ? new WindowInteropHelper(window).Handle : IntPtr.Zero;
 
-            if (LocalPicker.Pick(owner, workspace.LastLocalFolder).Count > 0)
+            if (LocalPicker.Pick(owner, start).Count > 0)
             {
                 workspace.BlockedByLock();
             }
@@ -190,7 +195,7 @@ public partial class FilesPage : Page
             return;
         }
 
-        var picked = PickLocal(workspace, workspace.LastLocalFolder);
+        var picked = PickLocal(workspace, start);
 
         if (picked.Count > 0)
         {
@@ -265,8 +270,21 @@ public partial class FilesPage : Page
     /// <summary>Тот же выбор, что у «Открыть», с папки этой строки: первое выбранное встаёт на её место, остальное — новыми строками.</summary>
     private void PickForRow(TransferItem item)
     {
-        if (Workspace is not { } workspace || workspace.BlockedByLock())
+        if (Workspace is not { } workspace)
         {
+            return;
+        }
+
+        // под замком папку строки можно посмотреть, но выбранное не встаёт: отказ плашкой — как у «Открыть»
+        if (workspace.IsPaneLocked)
+        {
+            var owner = Window.GetWindow(this) is { } window ? new WindowInteropHelper(window).Handle : IntPtr.Zero;
+
+            if (LocalPicker.Pick(owner, ParentOf(item.FullPath)).Count > 0)
+            {
+                workspace.BlockedByLock();
+            }
+
             return;
         }
 
@@ -304,14 +322,15 @@ public partial class FilesPage : Page
     /// <summary>Значок у адреса на строке окна: вписать другой путь на сервере.</summary>
     private void EditAddress(CopyWindow window)
     {
-        if (Workspace is not { } workspace || workspace.BlockedByLock())
+        if (Workspace is not { } workspace)
         {
             return;
         }
 
         var dialog = new InputDialog("Путь на сервере", "Куда копировать на сервере:", window.RemotePath) { Owner = Window.GetWindow(this) };
 
-        if (dialog.ShowDialog() == true && dialog.Value.Length > 0)
+        // под замком посмотреть можно, сменить — отказ плашкой
+        if (dialog.ShowDialog() == true && dialog.Value.Length > 0 && dialog.Value != window.RemotePath && !workspace.BlockedByLock())
         {
             window.RemotePath = dialog.Value;
         }
@@ -337,14 +356,16 @@ public partial class FilesPage : Page
     /// <summary>Значок в конце строки: вписать другой путь — строка встаёт на то же место.</summary>
     private void OnEditItemPath(object sender, RoutedEventArgs e)
     {
-        if (sender is not FrameworkElement { DataContext: TransferItem item } || Workspace is not { } workspace || workspace.BlockedByLock())
+        if (sender is not FrameworkElement { DataContext: TransferItem item } || Workspace is not { } workspace)
         {
             return;
         }
 
         var dialog = new InputDialog("Путь строки", "Файл или папка на компьютере:", item.FullPath) { Owner = Window.GetWindow(this) };
 
-        if (dialog.ShowDialog() == true && dialog.Value.Length > 0)
+        // под замком посмотреть можно, сменить — отказ плашкой
+        if (dialog.ShowDialog() == true && dialog.Value.Length > 0
+            && !string.Equals(dialog.Value, item.FullPath, StringComparison.OrdinalIgnoreCase) && !workspace.BlockedByLock())
         {
             ReplaceRow(workspace, item, dialog.Value);
         }

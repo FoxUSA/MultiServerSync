@@ -63,6 +63,12 @@
       </Style.Resources>
     </Style>
 
+    <!--  включён, а незалитых нет — обычный включённый свитч темы  -->
+    <Style
+      x:Key="UnsentNoneSwitchStyle"
+      BasedOn="{StaticResource {x:Type ui:ToggleSwitch}}"
+      TargetType="ui:ToggleSwitch" />
+
     <SolidColorBrush x:Key="UnsentStaleTextBrush" Color="#C8645C" />
   </UserControl.Resources>
 
@@ -193,7 +199,7 @@
           Content="заменять без вопроса"
           IsChecked="{Binding ReplaceWithoutAsking, Mode=TwoWay}"
           Style="{StaticResource OptionStyle}"
-          ToolTip="Сняли — копирование, которое перезапишет файлы в папке назначения, сначала спросит. Одинаковые файлы при сверке по дате или сумме заменой не считаются."
+          ToolTip="Снято — перед перезаписью файлов спросит. Одинаковые по сверке не в счёт"
           Visibility="Collapsed" />
         <!--  только на «Копировании» и «Скачивании»: у «Проводника» строк с галочками нет  -->
         <StackPanel

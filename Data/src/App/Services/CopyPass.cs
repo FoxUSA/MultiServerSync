@@ -48,16 +48,27 @@ public static class CopyPass
     {
         if (!AppState.Current.CopyPassOf(tab))
         {
+            AppLog.Debug($"CopyPass: не взведена — у вкладки «{tab.Title}» галочки нет.");
             return;
         }
 
+        var once = tab.CopyPassOnce;
+
+        // разовая (правый щелчок) уходит на эту копию
+        AppState.Current.UseCopyPassOnce(tab);
+
         int generation;
+        bool wasArmed;
 
         lock (Sync)
         {
+            wasArmed = _armed;
             _armed = true;
             generation = ++_generation;
         }
+
+        AppLog.Debug($"CopyPass: взведена №{generation} · вкладка «{tab.Title}» · {(once ? "разовая" : "постоянная")}"
+            + (wasArmed ? " · прошлая ещё ждала" : string.Empty) + (_busy == 1 ? " · идёт вставка прошлой" : string.Empty));
 
         // без своей плашки: об окончании уже сказал итог, о вставке скажет Pass
         Subscribe();
@@ -221,6 +232,7 @@ public static class CopyPass
     {
         if (Interlocked.Exchange(ref _busy, 1) == 1)
         {
+            AppLog.Debug("CopyPass: фокус пропущен — идёт прошлая вставка.");
             return;
         }
 
@@ -236,7 +248,14 @@ public static class CopyPass
                     }
                 }
 
-                switch (Classify(element))
+                var target = Classify(element);
+
+                if (target != Target.Unclear || attempt == 0)
+                {
+                    AppLog.Debug($"CopyPass: фокус — {Describe(element)} → {target}" + (attempt > 0 ? $" (попытка {attempt + 1})" : string.Empty));
+                }
+
+                switch (target)
                 {
                     case Target.Input:
                         Pass();
@@ -298,6 +317,46 @@ public static class CopyPass
         }
     }
 
+    /// <summary>Для лога: чей элемент и что это.</summary>
+    private static string Describe(AutomationElement element)
+    {
+        try
+        {
+            var info = element.Current;
+            return $"{ProcessName(info.ProcessId)} · {info.ControlType.ProgrammaticName} · «{info.Name}»";
+        }
+        catch (Exception)
+        {
+            return "элемент исчез";
+        }
+    }
+
+    private static string ProcessName(int processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return process.ProcessName;
+        }
+        catch (Exception)
+        {
+            return $"процесс {processId}";
+        }
+    }
+
+    private static string ForegroundName()
+    {
+        var window = GetForegroundWindow();
+        GetWindowThreadProcessId(window, out var processId);
+        return ProcessName((int)processId);
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
     private static bool IsTerminal(int processId)
     {
         try
@@ -316,10 +375,11 @@ public static class CopyPass
         // Alt+Tab ещё держат: Ctrl+V вместе с Alt стал бы другой комбинацией — ждём, пока отпустят
         if (!WaitKeysUp(TimeSpan.FromSeconds(3)))
         {
+            AppLog.Debug("CopyPass: Ctrl/Alt/Shift/Win держали дольше 3 с — не вставлял.");
             return;
         }
 
-        if (!ClipboardHoldsOurLog())
+        if (ClipboardHoldsOurLog() is not { } asFile)
         {
             Disarm();
             AppLog.Hint("CopyPass: в буфере уже не лог программы — вставлять не стал.");
@@ -328,40 +388,144 @@ public static class CopyPass
 
         Disarm();
 
-        // Enter — после того как поле приняло вставку, иначе уйдёт пустое сообщение
+        var field = Focused();
+        var before = TextLength(field);
+
+        AppLog.Debug($"CopyPass: Ctrl+V → окно впереди: {ForegroundName()}, в поле символов: {Show(before)}{(asFile ? ", лог файлом" : string.Empty)}");
         Press(VkControl, VkV);
-        Thread.Sleep(80);
+
+        // Enter — только когда поле приняло вставку: ChatGPT принимает её не сразу, и ранний Enter
+        // уходил в пустоту — лог оставался в поле неотправленным
+        int? pasted;
+
+        if (asFile)
+        {
+            // вложение в поле не видно текстом — чату нужно время его принять
+            Thread.Sleep(1500);
+            pasted = TextLength(field);
+        }
+        else
+        {
+            pasted = WaitText(field, n => before is null || n > before, TimeSpan.FromSeconds(3));
+            Thread.Sleep(pasted is null ? 300 : 120);
+        }
+
+        AppLog.Debug($"CopyPass: Enter → окно впереди: {ForegroundName()}, в поле символов: {Show(pasted ?? TextLength(field))}");
         Press(VkReturn);
+
+        // ушло — поле опустело. Нет — Enter ещё раз, не больше двух
+        for (var retry = 1; retry <= 2; retry++)
+        {
+            Thread.Sleep(500);
+            var left = TextLength(field);
+
+            if (left is null or 0 || (before is { } b && left <= b))
+            {
+                AppLog.Debug($"CopyPass: отправлено, в поле символов: {Show(left)}.");
+                break;
+            }
+
+            if (Focused() is not { } now || now.Current.ProcessId != SafeProcessId(field))
+            {
+                AppLog.Debug("CopyPass: текст в поле остался, но фокус ушёл из окна — Enter не повторял.");
+                break;
+            }
+
+            AppLog.Debug($"CopyPass: текст ещё в поле ({left} символов) — Enter повторно ({retry}).");
+            Press(VkReturn);
+        }
 
         AppLog.Echo("CopyPass: лог вставлен и отправлен.", LogLevel.Success);
     }
 
-    private static bool ClipboardHoldsOurLog()
+    /// <summary>В буфере наш лог: true — файлом, false — текстом; null — уже не наш.</summary>
+    private static bool? ClipboardHoldsOurLog()
     {
         var dispatcher = Application.Current?.Dispatcher;
 
         if (dispatcher is null)
         {
-            return false;
+            return null;
         }
 
         // буфер читается только из потока окна; длинный лог лежит там файлом (галочка «*.txt»)
-        return dispatcher.Invoke(() =>
+        return dispatcher.Invoke<bool?>(() =>
         {
             try
             {
                 if (ClipboardText.HasFiles)
                 {
-                    return ClipboardText.IsOurLogFile(ClipboardText.ReadFiles(1));
+                    return ClipboardText.IsOurLogFile(ClipboardText.ReadFiles(1)) ? true : null;
                 }
 
-                return ClipboardText.IsTerminalOutput(ClipboardText.ReadText(1));
+                return ClipboardText.IsTerminalOutput(ClipboardText.ReadText(1)) ? false : null;
             }
             catch (Exception)
             {
-                return false;
+                return null;
             }
         });
+    }
+
+    /// <summary>Сколько символов в поле; null — поле своё содержимое не показывает.</summary>
+    private static int? TextLength(AutomationElement? field)
+    {
+        try
+        {
+            if (field is not null && field.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern))
+            {
+                return ((ValuePattern)pattern).Current.Value?.Length ?? 0;
+            }
+
+            if (field is not null && field.TryGetCurrentPattern(TextPattern.Pattern, out var text))
+            {
+                return ((TextPattern)text).DocumentRange.GetText(-1).TrimEnd('\r', '\n').Length;
+            }
+        }
+        catch (Exception)
+        {
+            // поле исчезло или занято — не знаем
+        }
+
+        return null;
+    }
+
+    /// <summary>Ждать, пока длина текста в поле станет нужной; null — не дождались или не видно.</summary>
+    private static int? WaitText(AutomationElement? field, Func<int, bool> ready, TimeSpan limit)
+    {
+        var until = DateTime.UtcNow + limit;
+
+        while (DateTime.UtcNow < until)
+        {
+            if (TextLength(field) is not { } n)
+            {
+                return null;
+            }
+
+            if (ready(n))
+            {
+                return n;
+            }
+
+            Thread.Sleep(40);
+        }
+
+        AppLog.Debug($"CopyPass: за {limit.TotalSeconds:0} с вставка в поле не появилась.");
+        return null;
+    }
+
+    private static string Show(int? length) => length?.ToString() ?? "не видно";
+
+    private static int SafeProcessId(AutomationElement? element)
+    {
+        try
+        {
+            return element?.Current.ProcessId ?? -1;
+        }
+        catch (Exception)
+        {
+            return -1;
+        }
     }
 
     private const byte VkShift = 0x10;

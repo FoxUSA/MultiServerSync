@@ -573,8 +573,15 @@ public sealed class AppState : ObservableObject
                 return;
             }
 
-            // сняли «авто» вкладки — её CopyPass вставлять нечего, снимается и она
-            if (!value && owner.SetCopyPass(false))
+            // сняли «авто» вкладки — её CopyPass вставлять нечего, снимается и она, и разовая
+            var once = !value && owner.CopyPassOnce;
+
+            if (once)
+            {
+                owner.CopyPassOnce = false;
+            }
+
+            if (!value && (owner.SetCopyPass(false) || once))
             {
                 Services.CopyPass.Disarm();
             }
@@ -585,7 +592,7 @@ public sealed class AppState : ObservableObject
 
     /// <summary>Галочки строки терминала — у открытой вкладки: сменилась вкладка или раздел, они перечитываются.</summary>
     private void RaiseTerminalChecks() =>
-        RaiseMany(nameof(AutoCopyCurrent), nameof(CopyPass), nameof(CopyPassAvailable), nameof(LogAsFile));
+        RaiseMany(nameof(AutoCopyCurrent), nameof(CopyPass), nameof(CopyPassOnceOn), nameof(CopyPassAvailable), nameof(LogAsFile));
 
     /// <summary>CopyPass и «*.txt» работают вместе с «авто»: без неё галочки гаснут.</summary>
     public bool CopyPassAvailable => AutoCopyCurrent;
@@ -686,7 +693,44 @@ public sealed class AppState : ObservableObject
         OffersCopyPass(section) && (Settings.CopyPassBySection.TryGetValue(section.ToString(), out var on) ? on : Settings.CopyPass);
 
     /// <summary>CopyPass вкладки, как сохранена: в разделе без CopyPass её нет.</summary>
-    public bool CopyPassOf(Workspace tab) => OffersCopyPass(SectionOf(tab)) && tab.CopyPass;
+    public bool CopyPassOf(Workspace tab) => OffersCopyPass(SectionOf(tab)) && (tab.CopyPass || tab.CopyPassOnce);
+
+    /// <summary>CopyPass открытой вкладки стоит на один раз — в квадратике «1» вместо галочки.</summary>
+    public bool CopyPassOnceOn => CopyPass && PaneOwner is { CopyPassOnce: true };
+
+    /// <summary>Правый щелчок по CopyPass: включить на одну автокопию, повторный — снять.</summary>
+    public void ToggleCopyPassOnce()
+    {
+        if (!CopyPassAvailable || PaneOwner is not { } owner)
+        {
+            return;
+        }
+
+        if (owner.CopyPassOnce)
+        {
+            owner.CopyPassOnce = false;
+            Services.CopyPass.Disarm();
+        }
+        else
+        {
+            owner.SetCopyPass(false);
+            owner.CopyPassOnce = true;
+        }
+
+        RaiseMany(nameof(CopyPass), nameof(CopyPassOnceOn));
+    }
+
+    /// <summary>Автокопия взвела вставку — разовая CopyPass вкладки израсходована.</summary>
+    public void UseCopyPassOnce(Workspace tab)
+    {
+        if (!tab.CopyPassOnce)
+        {
+            return;
+        }
+
+        tab.CopyPassOnce = false;
+        RaiseMany(nameof(CopyPass), nameof(CopyPassOnceOn));
+    }
 
     /// <summary>
     /// Вкладка из файла прежней версии, где «авто», «*.txt» и CopyPass были у раздела:
@@ -709,10 +753,21 @@ public sealed class AppState : ObservableObject
         get => PaneOwner is { } owner && CopyPassOf(owner) && CopyPassAvailable;
         set
         {
-            if ((value && !CopyPassAvailable) || PaneOwner is not { } owner || !owner.SetCopyPass(value))
+            if ((value && !CopyPassAvailable) || PaneOwner is not { } owner)
             {
                 return;
             }
+
+            // левый щелчок по разовой: она снимается, постоянная не включается
+            var once = owner.CopyPassOnce;
+            owner.CopyPassOnce = false;
+
+            if (!owner.SetCopyPass(value && !once) && !once)
+            {
+                return;
+            }
+
+            Raise(nameof(CopyPassOnceOn));
 
             // сняли — ждущий лог не вставится
             if (!value)
@@ -769,7 +824,7 @@ public sealed class AppState : ObservableObject
     /// команд после копирования: без него копировать вместе нечего.
     /// </summary>
     public System.Windows.Visibility ChainCopyVisibility =>
-        _section == AppSection.Files && ActiveWorkspace is { AfterCopyEnabled: true }
+        _section == AppSection.Files && ActiveWorkspace is { ShowsChain: true }
             ? System.Windows.Visibility.Visible
             : System.Windows.Visibility.Collapsed;
 
@@ -822,7 +877,7 @@ public sealed class AppState : ObservableObject
         }
 
         var owner = Workspaces.FirstOrDefault(w => w.CopyBatch.Results.Contains(copyRow));
-        return owner is { AfterCopyEnabled: true, Personal: { } personal } ? personal.CommandBatch : null;
+        return owner is { ShowsChain: true, Personal: { } personal } ? personal.CommandBatch : null;
     }
 
     /// <summary>
@@ -832,7 +887,7 @@ public sealed class AppState : ObservableObject
     public OperationBatch? AfterCopyBatchOf(OperationBatch copy)
     {
         var owner = Workspaces.FirstOrDefault(w => ReferenceEquals(w.CopyBatch, copy));
-        return owner is { AfterCopyEnabled: true, Personal: { } personal } ? personal.CommandBatch : null;
+        return owner is { ShowsChain: true, Personal: { } personal } ? personal.CommandBatch : null;
     }
 
     /// <summary>
@@ -847,10 +902,13 @@ public sealed class AppState : ObservableObject
             return null;
         }
 
+        // личные команды или разовая из мини-терминала; вывод прошлых запусков, что были до этого
+        // копирования (команды не пошли), к его отчёту не клеится
         var owner = Workspaces.FirstOrDefault(w => ReferenceEquals(w.CopyBatch, copy));
-        return owner is { AfterCopyEnabled: true, Personal: { } personal } && personal.CommandBatch.HasResults
-            ? personal.CommandBatch
-            : null;
+        return owner?.ReportChain is { HasResults: true } chain
+            && !(chain.StartedAt is { } ran && copy.StartedAt is { } copied && ran < copied)
+                ? chain
+                : null;
     }
 
     /// <summary>Команда или копирование (или повтор упавших) закончились на всех серверах — пора забрать вывод.</summary>
@@ -862,6 +920,11 @@ public sealed class AppState : ObservableObject
     public event Action<OperationResult>? TurnFinished;
 
     public void NotifyTurnFinished(OperationResult turn) => TurnFinished?.Invoke(turn);
+
+    /// <summary>Действие легло строкой в журнал вкладки с «авто» — его вывод пора в буфер.</summary>
+    public event Action<Workspace, OperationResult>? ActionAdded;
+
+    public void NotifyActionAdded(Workspace tab, OperationResult row) => ActionAdded?.Invoke(tab, row);
 
     /// <summary>Это вывод команды — одной вкладки или сводка «Выполнить везде», а не копирования или проверки связи.</summary>
     public bool IsCommandBatch(OperationBatch batch) =>

@@ -58,7 +58,7 @@
         BorderBrush="#80E07A1F"
         BorderThickness="1"
         CornerRadius="4"
-        ToolTip="Кнопки ряда, сводка и параметры — для этого окна. Другое окно — щелчок по его номеру"
+        ToolTip="Кнопки, сводка и параметры — этого окна. Другое — щелчок по номеру"
         Visibility="{Binding IsMultiWindow, Converter={StaticResource BoolToVis}}">
         <TextBlock
           HorizontalAlignment="Center"
@@ -73,7 +73,7 @@
         Content="Выбрать на сервере"
         Icon="{ui:SymbolIcon FolderOpen24}"
         Style="{StaticResource ToolButtonStyle}"
-        ToolTip="Обзор сервера: выделите файлы и папки (Ctrl, Shift) и нажмите «Выбрать». Ничего не выделено — берётся открытая папка" />
+        ToolTip="Обзор сервера: выделите и нажмите «Выбрать». Без выделения — открытая папка" />
       <!--  заданы исключения — значок на зелёной плашке: видно, что не всё из списка скачается.
             Плашка выходит влево на свой отступ, чтобы значок стоял там же, где у соседних кнопок  -->
       <ui:Button
@@ -93,13 +93,13 @@
         Content="Очистить"
         Icon="{ui:SymbolIcon Delete24}"
         Style="{StaticResource ToolButtonStyle}"
-        ToolTip="Убрать отмеченные строки, а если отметок нет — все. На сервере ничего не удаляется" />
+        ToolTip="Убрать отмеченные строки, без отметок — все. На сервере ничего не удаляется" />
       <ui:Button
         Click="OnRefresh"
         Content="Обновить"
         Icon="{ui:SymbolIcon ArrowClockwise24}"
         Style="{StaticResource ToolButtonStyle}"
-        ToolTip="Перечитать с серверов размер, число файлов и дату изменения; пока страница открыта, это происходит само каждые 30 секунд" />
+        ToolTip="Обновить размер, число файлов и дату. Само — раз в 30 с" />
     </StackPanel>
     </Grid>
 
@@ -375,6 +375,7 @@
               Grid.Column="2"
               Padding="10,5,36,6"
               controls:LockMute.IsOn="{Binding IsPaneLocked}"
+              controls:SelectAllOnClick.IsOn="True"
               ClearButtonEnabled="False"
               IsEnabled="{Binding IsNotPaneLocked}"
               FontSize="12"
@@ -429,7 +430,7 @@
         Content="Выполнить"
         Icon="{ui:SymbolIcon ArrowDownload24}"
         IsEnabled="{Binding CopyBatch.IsIdle}"
-        ToolTip="Пути всех окон этой вкладки, окна сверху вниз. Со свитчем «Везде» — на всех вкладках сразу, после вопроса" />
+        ToolTip="Скачать пути всех окон вкладки. Со свитчем «Везде» — со всех вкладок" />
 
       <ui:Button
         x:Name="CompareButton"
@@ -437,7 +438,7 @@
         Content="Сравнить"
         Icon="{ui:SymbolIcon BranchCompare24}"
         IsEnabled="{Binding CopyBatch.IsIdle}"
-        ToolTip="Сверяет файлы сервера с папкой здесь по правилам из параметров и ничего не скачивает. В статусе — сошлось или нет, что именно отличается — в выводе" />
+        ToolTip="Сверить сервер с папкой здесь, ничего не скачивая. Разница — в выводе" />
 
       <ui:ToggleSwitch
         x:Name="EverywhereSwitch"
@@ -446,7 +447,7 @@
         Content="Везде"
         IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=Everywhere, Mode=TwoWay}"
         Style="{StaticResource DangerSwitchStyle}"
-        ToolTip="Включено — «Выполнить» скачивает сразу на всех вкладках, каждая со своими путями, папкой и серверами, после вопроса. «Сравнить» тоже идёт на всех. Итог по каждой — на её ярлыке" />
+        ToolTip="«Выполнить» и «Сравнить» — сразу на всех вкладках, после вопроса" />
     </StackPanel>
 
         <!--  параметры — общий блок для «Копирования», «Скачивания» и «Проводника»  -->

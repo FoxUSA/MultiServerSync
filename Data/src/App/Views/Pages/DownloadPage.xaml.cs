@@ -184,14 +184,15 @@ public partial class DownloadPage : Page
     /// <summary>Значок у адреса на строке окна: вписать другую папку для скачивания.</summary>
     private void EditFolder(CopyWindow window)
     {
-        if (Workspace is not { } workspace || workspace.BlockedByLock())
+        if (Workspace is not { } workspace)
         {
             return;
         }
 
         var dialog = new InputDialog("Куда скачать", "Папка на этом компьютере:", window.LocalFolder) { Owner = Window.GetWindow(this) };
 
-        if (dialog.ShowDialog() == true && dialog.Value.Length > 0)
+        // под замком посмотреть можно, сменить — отказ плашкой
+        if (dialog.ShowDialog() == true && dialog.Value.Length > 0 && dialog.Value != window.LocalFolder && !workspace.BlockedByLock())
         {
             window.LocalFolder = dialog.Value;
         }
@@ -339,11 +340,6 @@ public partial class DownloadPage : Page
     /// <summary>Значок в конце строки: вписать другой путь на том же сервере — строка встаёт на то же место.</summary>
     private void OnEditRowPath(object sender, RoutedEventArgs e)
     {
-        if (Workspace?.BlockedByLock() == true)
-        {
-            return;
-        }
-
         if (sender is not FrameworkElement { DataContext: DownloadItem item } || Workspace is not { } workspace)
         {
             return;
@@ -351,7 +347,8 @@ public partial class DownloadPage : Page
 
         var dialog = new InputDialog("Путь строки", $"Путь на сервере «{item.ServerLabel}»:", item.Path) { Owner = Window.GetWindow(this) };
 
-        if (dialog.ShowDialog() != true || dialog.Value.Length == 0 || dialog.Value == item.Path)
+        // под замком посмотреть можно, сменить — отказ плашкой
+        if (dialog.ShowDialog() != true || dialog.Value.Length == 0 || dialog.Value == item.Path || workspace.BlockedByLock())
         {
             return;
         }

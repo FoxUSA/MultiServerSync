@@ -281,9 +281,8 @@
           x:Name="CrumbBar"
           Grid.Column="1"
           Cursor="IBeam"
-          MouseLeftButtonDown="OnCrumbBarClick"
           Style="{StaticResource PathGroupStyle}"
-          ToolTip="Щелчок по части пути — перейти, по пустому месту — вписать путь">
+          ToolTip="Щелчок по части пути — перейти, по пустому месту — вписать путь (Ctrl+L)">
           <DockPanel>
             <!--  у компьютера — системное окно «Открыть папку»  -->
             <Button
@@ -307,18 +306,13 @@
                 ToolTip="Копировать путь">
                 <ui:SymbolIcon FontSize="16" Symbol="Copy24" />
               </Button>
-              <Button
-                Click="OnEditPath"
-                Style="{StaticResource PathIconButtonStyle}"
-                ToolTip="Вписать путь (Ctrl+L)">
-                <ui:SymbolIcon FontSize="16" Symbol="Edit24" />
-              </Button>
             </StackPanel>
 
             <!--  части пути и на их месте — ввод пути; поле скрыто, но не убрано: ничего не прыгает  -->
             <Grid>
               <ScrollViewer
                 x:Name="CrumbScroll"
+                Focusable="False"
                 HorizontalScrollBarVisibility="Hidden"
                 VerticalScrollBarVisibility="Disabled">
                 <StackPanel
@@ -356,13 +350,16 @@
           </DockPanel>
         </Border>
 
-        <!--  подсказки подпапок, пока вписывают путь  -->
+        <!--  подсказки подпапок, пока вписывают путь. StaysOpen=False съедал щелчок, которым его закрывают, —
+              курсор в адресе мышью не ставился; закрывается сам: поле потеряло фокус, Esc, окно сдвинули  -->
         <Popup
           x:Name="SuggestPopup"
           AllowsTransparency="True"
+          Closed="OnSuggestClosed"
+          Opened="OnSuggestOpened"
           Placement="Bottom"
           PlacementTarget="{Binding ElementName=PathBox}"
-          StaysOpen="False">
+          StaysOpen="True">
           <Border
             MinWidth="{Binding ActualWidth, ElementName=PathBox}"
             MaxHeight="260"
@@ -420,7 +417,7 @@
               x:Name="RootButton"
               Click="OnRoot"
               Style="{StaticResource GroupIconButtonStyle}"
-              ToolTip="В корень: на сервере — /, на компьютере — корень диска, из него — «Этот компьютер»">
+              ToolTip="В корень: / или корень диска, выше — «Этот компьютер»">
               <ui:SymbolIcon FontSize="20" Symbol="ArrowUpload24" />
             </Button>
           </StackPanel>
@@ -431,27 +428,26 @@
           Grid.Column="1"
           Style="{StaticResource PathGroupStyle}">
           <StackPanel VerticalAlignment="Center" Orientation="Horizontal">
-            <!--  в окне обзора пути из «Копирования» и «Скачивания» вместо правки и удаления — новая папка  -->
-            <Button
-              x:Name="NewFolderButton"
-              Click="OnNewFolder"
-              Style="{StaticResource GroupIconButtonStyle}"
-              ToolTip="Новая папка в открытой (F7)"
-              Visibility="Collapsed">
-              <ui:SymbolIcon FontSize="20" Symbol="FolderAdd24" />
-            </Button>
+            <!--  в окне обзора пути из «Копирования» и «Скачивания» правки и удаления нет — остаётся новая папка  -->
             <Button
               x:Name="EditButton"
               Click="OnEdit"
               Style="{StaticResource GroupIconButtonStyle}"
-              ToolTip="Править файл под курсором во встроенном редакторе: номера строк, подсветка, поиск. Права и кодировка не меняются">
+              ToolTip="Править файл во встроенном редакторе. Права и кодировка сохраняются">
               <ui:SymbolIcon FontSize="20" Symbol="DocumentEdit24" />
+            </Button>
+            <Button
+              x:Name="NewFolderButton"
+              Click="OnNewFolder"
+              Style="{StaticResource GroupIconButtonStyle}"
+              ToolTip="Новая папка в открытой (F7)">
+              <ui:SymbolIcon FontSize="20" Symbol="FolderAdd24" />
             </Button>
             <Button
               x:Name="DeleteButton"
               Click="OnDelete"
               Style="{StaticResource GroupIconButtonStyle}"
-              ToolTip="Удалить выделенное (Del): с компьютера — в корзину, на сервере — безвозвратно, после подтверждения">
+              ToolTip="Удалить выделенное (Del): на ПК — в корзину, на сервере — насовсем">
               <ui:SymbolIcon FontSize="20" Symbol="Delete24" />
             </Button>
           </StackPanel>
@@ -566,7 +562,7 @@
                 Click="OnFilterCopied"
                 FontSize="12"
                 Style="{StaticResource PathIconButtonStyle}"
-                ToolTip="Галочки — на том, что копируется. С папки снята — её новые файлы не поедут">
+                ToolTip="Галочки на том, что копируется. Снята с папки — её новые файлы не едут">
                 <TextBlock Margin="10,0" VerticalAlignment="Center" Text="Что копируется" />
               </Button>
             </Border>
@@ -578,7 +574,7 @@
                 Click="OnFilterSkipped"
                 FontSize="12"
                 Style="{StaticResource PathIconButtonStyle}"
-                ToolTip="Галочки — на том, что не копируется. У каждого режима свои галочки, действует выбранный">
+                ToolTip="Галочки на том, что не копируется. У каждого режима свои">
                 <TextBlock Margin="10,0" VerticalAlignment="Center" Text="Что не копируется" />
               </Button>
             </Border>
@@ -590,7 +586,7 @@
               Click="OnFilterReset"
               FontSize="12"
               Style="{StaticResource PathIconButtonStyle}"
-              ToolTip="Галочки выбранного режима — снова по маскам «Эта вкладка» и «Глобально»">
+              ToolTip="Сбросить галочки режима к маскам вкладки и глобальным">
               <TextBlock Margin="10,0" VerticalAlignment="Center" Text="Сбросить" />
             </Button>
           </StackPanel>
@@ -677,7 +673,7 @@
               Icon="{ui:SymbolIcon Filter24}"
               PlaceholderText="маска"
               TextChanged="OnFileMaskChanged"
-              ToolTip="Маска: показывать в открытой папке только подходящие файлы и папки — *.conf, *.log, nginx (Ctrl+F)" />
+              ToolTip="Фильтр открытой папки по маске: *.conf, nginx (Ctrl+F)" />
             <Button
               x:Name="FileMaskClear"
               Click="OnClearFileMask"
@@ -696,7 +692,7 @@
               KeyDown="OnFolderMaskKeyDown"
               PlaceholderText="найти папку"
               TextChanged="OnFolderMaskChanged"
-              ToolTip="Ищет папки по маске вглубь от открытой. Enter по найденной — перейти в неё" />
+              ToolTip="Поиск папок по маске вглубь. Enter — перейти" />
             <Button
               x:Name="FolderMaskClear"
               Click="OnClearFolderMask"
