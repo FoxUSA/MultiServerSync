@@ -13,6 +13,12 @@ public sealed class ExplorerTabState
     /// <summary>Сервер, к которому относится папка справа: сменили сервер — папка с другого не годится.</summary>
     public string RemoteServerId { get; set; } = string.Empty;
 
+    /// <summary>Справа открыт этот компьютер, а не сервер: копирование и сравнение двух папок компьютера.</summary>
+    public bool RightComputer { get; set; }
+
+    /// <summary>Правая панель, пока в ней этот компьютер: своя папка, сервер свою не теряет.</summary>
+    public ExplorerPaneState RightLocal { get; set; } = new();
+
     /// <summary>Под замком: папка сервера, выше которой правая панель не поднимается.</summary>
     public string LockedRemotePath { get; set; } = string.Empty;
 
@@ -30,6 +36,8 @@ public sealed class ExplorerTabState
         Local = Local.Clone(),
         Remote = Remote.Clone(),
         RemoteServerId = RemoteServerId,
+        RightComputer = RightComputer,
+        RightLocal = RightLocal.Clone(),
         LockedRemotePath = LockedRemotePath,
         LockedLocalPath = LockedLocalPath,
         Split = Split,

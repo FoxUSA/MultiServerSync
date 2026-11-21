@@ -325,9 +325,15 @@ public partial class ExplorerPage : Page
     private void OnTabChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(Workspace.ExplorerServer) && sender is Workspace tab && ReferenceEquals(tab, _tab)
-            && !ReferenceEquals(tab.ExplorerServer, _remote?.Server))
+            && !tab.ExplorerOnComputer && !ReferenceEquals(tab.ExplorerServer, _remote?.Server))
         {
             _ = AttachRemoteAsync(tab);
+        }
+
+        // справа выбрали этот компьютер или вернулись к серверу
+        if (e.PropertyName == nameof(Workspace.ExplorerOnComputer) && sender is Workspace switched && ReferenceEquals(switched, _tab))
+        {
+            _ = AttachRemoteAsync(switched);
         }
 
         if (e.PropertyName == nameof(Workspace.ExplorerLockedPath))
@@ -343,6 +349,15 @@ public partial class ExplorerPage : Page
 
     private async Task AttachRemoteAsync(Workspace tab)
     {
+        // справа этот компьютер: своя память папки, сервер свою не теряет
+        if (tab.ExplorerOnComputer)
+        {
+            ReleaseRemote();
+            await RemotePane.AttachAsync(Local, tab.Explorer.RightLocal, LocalSource.ComputerTitle, ShellIcons.Computer);
+            UpdateTransferButtons();
+            return;
+        }
+
         var server = tab.ExplorerServer;
 
         if (server is null)
@@ -442,9 +457,48 @@ public partial class ExplorerPage : Page
 
     private void UpdateTransferButtons()
     {
-        LocalPane.CanTransfer = _remote is not null && LocalPane.TargetEntries.Count > 0;
-        RemotePane.CanTransfer = _remote is not null && RemotePane.TargetEntries.Count > 0
+        var bothLocal = BothLocal;
+        var ready = _remote is not null || bothLocal;
+
+        LocalPane.CanTransfer = ready && LocalPane.TargetEntries.Count > 0 && (!bothLocal || RemotePane.CurrentPath.Length > 0);
+        RemotePane.CanTransfer = ready && RemotePane.TargetEntries.Count > 0
             && LocalPane.CurrentPath.Length > 0;
+    }
+
+    /// <summary>Одна и та же папка компьютера, как бы ни был записан путь.</summary>
+    private static bool SameFolder(string a, string b)
+    {
+        if (a.Length == 0 || b.Length == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            return string.Equals(Path.GetFullPath(a).TrimEnd('\\'), Path.GetFullPath(b).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Справа тоже этот компьютер: копирование и сравнение — между двумя его папками.</summary>
+    private bool BothLocal => RemotePane.Source is LocalSource && LocalPane.Source is LocalSource && _tab is { ExplorerOnComputer: true };
+
+    /// <summary>
+    /// Внутри одной стороны — копирование и перенос на месте. Между панелями компьютера — копирование
+    /// с параметрами, как с сервером; перенос мышью между ними — на месте, средствами Windows.
+    /// </summary>
+    private bool SameSide(FilePane from, FilePane to, bool move)
+    {
+        if (BothLocal && !ReferenceEquals(from, to) && !move)
+        {
+            return false;
+        }
+
+        return ReferenceEquals(from.Source, to.Source)
+            || (from.Source is RemoteSource a && to.Source is RemoteSource b && a.Server == b.Server);
     }
 
     // ── сервер правой панели ──────────────────────────────────────────────────
@@ -457,7 +511,8 @@ public partial class ExplorerPage : Page
     {
         if (_tab is { } tab)
         {
-            ServerMenu.Show(anchor, s => ReferenceEquals(s, tab.ExplorerServer), tab.PickExplorerServer, ServerMenu.Locks.ForExplorer(tab));
+            ServerMenu.Show(anchor, s => ReferenceEquals(s, tab.ExplorerServer), tab.PickExplorerServer, ServerMenu.Locks.ForExplorer(tab),
+                computer: (tab.ExplorerOnComputer, tab.PickExplorerComputer));
         }
     }
 
@@ -475,26 +530,36 @@ public partial class ExplorerPage : Page
             return Task.CompletedTask;
         }
 
-        var to = ReferenceEquals(from, LocalPane) && from.Source is LocalSource ? RemotePane : LocalPane;
+        var to = Other(from);
+        var bothLocal = BothLocal;
 
-        if (from.Source is RemoteSource && targetDir.Length == 0)
+        if ((from.Source is RemoteSource || bothLocal) && targetDir.Length == 0)
         {
-            AppLog.Hint("Слева открыт «Этот компьютер» — откройте папку, куда скачивать.", LogLevel.Warning);
+            AppLog.Hint("В соседней панели открыт «Этот компьютер» — откройте папку, куда копировать.", LogLevel.Warning);
             return Task.CompletedTask;
         }
 
-        if (_remote is not { } remote)
+        if (_remote is null && !bothLocal)
         {
             AppLog.Hint("Сервер не выбран — выберите его кнопкой слева от пути в правой панели.", LogLevel.Warning);
             return Task.CompletedTask;
         }
 
-        if (move)
+        if (bothLocal && items.Count > 0 && from.Source?.Parent(items[0].FullPath) is { } here && SameFolder(here, targetDir))
         {
-            AppLog.Hint("Между компьютером и сервером только копирование: исходные файлы остаются на месте.");
+            AppLog.Hint("В обеих панелях одна и та же папка — копировать файлы сами на себя нельзя. Откройте в соседней панели другую папку.", LogLevel.Warning);
+            return Task.CompletedTask;
         }
 
-        var server = remote.Server;
+        if (move)
+        {
+            AppLog.Hint(bothLocal
+                ? "Между панелями кнопкой — только копирование: исходные файлы остаются на месте."
+                : "Между компьютером и сервером только копирование: исходные файлы остаются на месте.");
+        }
+
+        var remote = _remote;
+        var server = bothLocal ? ActionLog.Computer : remote!.Server;
         var options = tab.CurrentOptions;
         var verify = tab.VerifyChecksums;
         var names = items.Select(i => i.Name).ToList();
@@ -563,12 +628,20 @@ public partial class ExplorerPage : Page
             AppLog.Section = AppSection.Explorer;
             ConfirmReplace ask = (_, paths) => AskReplace(tab, paths, targetDir);
 
-            if (from.Source is LocalSource)
+            if (bothLocal)
+            {
+                // две папки компьютера: та же заливка, участник строки — «Компьютер»
+                AppLog.Info($"Копирование: {Count(items)} → {targetDir}", server.Display);
+                var payload = items.Select(i => new TransferItem(i.FullPath)).ToList();
+                await tab.UploadCoreAsync(payload, targetDir, [server], options, verify, ask, concurrent: true);
+                Local.Invalidate(targetDir);
+            }
+            else if (from.Source is LocalSource)
             {
                 AppLog.Info($"Копирование на сервер: {Count(items)} → {targetDir}", server.Display);
                 var payload = items.Select(i => new TransferItem(i.FullPath)).ToList();
                 await tab.UploadCoreAsync(payload, targetDir, [server], options, verify, ask, concurrent: true);
-                remote.Invalidate(targetDir);
+                remote!.Invalidate(targetDir);
             }
             else
             {
@@ -832,7 +905,7 @@ public partial class ExplorerPage : Page
     {
         if (drop.From is { } from)
         {
-            if (ReferenceEquals(from.Source, pane.Source) || (from.Source is RemoteSource a && pane.Source is RemoteSource b && a.Server == b.Server))
+            if (SameSide(from, pane, drop.Move))
             {
                 _ = CopyWithinAsync(pane, drop.Items, drop.TargetDir, drop.Move);
             }
@@ -1038,10 +1111,7 @@ public partial class ExplorerPage : Page
 
         if (_clip is { } clip)
         {
-            var sameSide = ReferenceEquals(clip.Pane.Source, pane.Source)
-                || (clip.Pane.Source is RemoteSource a && pane.Source is RemoteSource b && a.Server == b.Server);
-
-            if (sameSide)
+            if (SameSide(clip.Pane, pane, clip.Cut))
             {
                 await CopyWithinAsync(pane, clip.Items, target, clip.Cut);
 
@@ -1090,7 +1160,9 @@ public partial class ExplorerPage : Page
             return;
         }
 
-        if (_tab is not { } tab || _remote is not { } remote || pane.Source is not { } mine || other.Source is not { } theirs)
+        var bothLocal = BothLocal;
+
+        if (_tab is not { } tab || (_remote is null && !bothLocal) || pane.Source is not { } mine || other.Source is not { } theirs)
         {
             AppLog.Hint("Сервер не выбран — выберите его кнопкой слева от пути в правой панели.", LogLevel.Warning);
             return;
@@ -1100,11 +1172,17 @@ public partial class ExplorerPage : Page
 
         if (folder.Length == 0)
         {
-            AppLog.Hint("Слева открыт «Этот компьютер» — откройте папку, с которой сравнивать.", LogLevel.Warning);
+            AppLog.Hint("В соседней панели открыт «Этот компьютер» — откройте папку, с которой сравнивать.", LogLevel.Warning);
             return;
         }
 
-        var server = remote.Server;
+        if (bothLocal && SameFolder(pane.CurrentPath, folder))
+        {
+            AppLog.Hint("В обеих панелях одна и та же папка — сравнивать файлы с самими собой нечего. Откройте в соседней панели другую папку.", LogLevel.Warning);
+            return;
+        }
+
+        var server = bothLocal ? ActionLog.Computer : _remote!.Server;
         var paths = picked.Select(p => p.FullPath).ToList();
 
         await tab.CompareAsync(server, async (result, ct) =>
@@ -1117,13 +1195,23 @@ public partial class ExplorerPage : Page
                 ? (await theirs.ListAsync(folder, refresh: true)).FirstOrDefault(e => !e.IsDirectory && string.Equals(e.Name, file.Name, names))
                 : null;
 
+            if (twin is not null && bothLocal)
+            {
+                await CompareTwoLocalAsync(picked[0], twin, result, ct);
+                return;
+            }
+
             if (twin is not null)
             {
                 await CompareTwoAsync(picked[0], mine, twin, theirs, server, result, ct);
                 return;
             }
 
-            if (mine is LocalSource)
+            if (bothLocal)
+            {
+                await tab.CompareFoldersAsync(paths, folder, result, ct);
+            }
+            else if (mine is LocalSource)
             {
                 await tab.CompareLocalAsync(server, paths, folder, result, ct);
             }
@@ -1134,6 +1222,47 @@ public partial class ExplorerPage : Page
 
             AppLog.Info($"Сравнение с {folder}: {result.Message}", server.Display);
         });
+    }
+
+    /// <summary>
+    /// Файл и его пара в соседней папке компьютера: побайтно, до первого отличия, с полосой.
+    /// Разный размер — содержимое не читается вовсе.
+    /// </summary>
+    private static async Task CompareTwoLocalAsync(FsEntry mine, FsEntry twin, OperationResult result, CancellationToken ct)
+    {
+        result.Append("Сравнение файлов");
+        result.Append($"  выбранный: {mine.FullPath}");
+        result.Append($"             {TransferItem.Format(mine.Length)} · {mine.Modified:dd.MM.yyyy HH:mm:ss}");
+        result.Append($"  соседний:  {twin.FullPath}");
+        result.Append($"             {TransferItem.Format(twin.Length)} · {twin.Modified:dd.MM.yyyy HH:mm:ss}");
+
+        var differences = new List<string>();
+
+        if (Math.Abs((mine.Modified - twin.Modified).TotalSeconds) >= 2)
+        {
+            differences.Add(mine.Modified > twin.Modified ? "выбранный новее" : "соседний новее");
+        }
+
+        bool same;
+
+        if (mine.Length != twin.Length)
+        {
+            differences.Insert(0, $"размер на {TransferItem.Format(Math.Abs(mine.Length - twin.Length))}");
+            result.Append("  содержимое не читалось: размер разный");
+            same = false;
+        }
+        else
+        {
+            result.Append("  сверка побайтно, до первого отличия");
+            same = await LocalCopyService.SameFilesAsync(mine.FullPath, twin.FullPath, result.SetTransfer, ct);
+        }
+
+        result.Append(same
+            ? $"Итог: одинаковые по содержимому{(differences.Count > 0 ? " (" + string.Join(", ", differences) + ")" : string.Empty)}"
+            : $"Итог: отличаются по содержимому{(differences.Count > 0 ? " — " + string.Join(", ", differences) : string.Empty)}");
+
+        result.Message = same ? "одинаковые" : "отличаются";
+        AppLog.Info($"Сравнение {mine.Name}: {result.Message}", ActionLog.Computer.Display);
     }
 
     /// <summary>Файл и его пара: слева в отчёте всегда компьютер, справа сервер — как панели на экране.</summary>

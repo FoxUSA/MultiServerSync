@@ -1,0 +1,13 @@
+[Unit]
+Description=Multi Server Sync: load history (cpu, memory, disk, network)
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/bin/sh /usr/local/lib/mss-monitor/collect.sh
+Restart=always
+RestartSec=10
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

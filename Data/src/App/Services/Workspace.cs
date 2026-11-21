@@ -29,7 +29,7 @@ public enum WorkspaceStatus
 /// текст команды и терминал у каждой вкладки свои. Командная вкладка пользуется только
 /// своей частью — командой, её отметками серверов и её выводом.
 /// </summary>
-public sealed class Workspace : ObservableObject
+public sealed partial class Workspace : ObservableObject
 {
     /// <summary>Локальные SHA-256 считаются один раз и переиспользуются всеми серверами вкладки.</summary>
     private readonly ConcurrentDictionary<string, string> _localHashes = new();
@@ -139,6 +139,52 @@ public sealed class Workspace : ObservableObject
         InActiveSet(AppState.Current.Section == AppSection.Command ? CommandServers : CopyServers);
 
     /// <summary>
+    /// Серверы в том порядке, в каком их показывает панель слева: на «Команде», «Копировании» и
+    /// «Скачивании» отмеченные — сверху, остальные под ними, внутри — общий порядок. Отмеченные
+    /// запоминаются в <see cref="SortPane"/>, а не берутся живьём: щелчок по галочке строку
+    /// из-под мыши не уводит, список собирается при показе и когда мышь ушла с него.
+    /// </summary>
+    public IReadOnlyList<ServerCheck> PaneServers
+    {
+        get
+        {
+            var list = Servers;
+
+            if (!SortsPane || _paneTop.Count == 0)
+            {
+                return list;
+            }
+
+            return list.Where(c => _paneTop.Contains(c.Server.Id))
+                .Concat(list.Where(c => !_paneTop.Contains(c.Server.Id)))
+                .ToList();
+        }
+    }
+
+    /// <summary>Отмеченные на момент последней сборки списка — они стоят сверху.</summary>
+    private HashSet<string> _paneTop = new(StringComparer.Ordinal);
+
+    /// <summary>Отмеченные наверх — только в разделах с галочками целей; на «Серверах» и в остальных порядок общий.</summary>
+    private static bool SortsPane => AppState.Current.Section is AppSection.Command or AppSection.Files or AppSection.Download;
+
+    /// <summary>
+    /// Собирает панель заново: отмеченные сейчас уходят наверх. Те же отмеченные, что в прошлый раз, —
+    /// список не трогается.
+    /// </summary>
+    public void SortPane()
+    {
+        var top = Servers.Where(c => c.IsSelected).Select(c => c.Server.Id).ToHashSet(StringComparer.Ordinal);
+
+        if (top.SetEquals(_paneTop))
+        {
+            return;
+        }
+
+        _paneTop = top;
+        Raise(nameof(PaneServers));
+    }
+
+    /// <summary>
     /// Работать можно только с серверами набора этой вкладки — других в панели не видно.
     /// На «Всех» — со всеми. Набор у каждой вкладки свой, поэтому и «Выполнить везде»
     /// идёт у каждой вкладки на её собственные серверы.
@@ -217,7 +263,8 @@ public sealed class Workspace : ObservableObject
                 scope = new PaneScopeState
                 {
                     Key = key,
-                    SingleSelect = AppState.Current.CommandTabs.Contains(this) || AppState.Current.ExplorerTabs.Contains(this),
+                    SingleSelect = AppState.Current.CommandTabs.Contains(this) || AppState.Current.ExplorerTabs.Contains(this)
+                        || AppState.Current.MonitorTabs.Contains(this),
                 };
                 _scopes[key] = scope;
             }
@@ -269,7 +316,33 @@ public sealed class Workspace : ObservableObject
         }
 
         SelectServers([server.Id]);
+        SetExplorerOnComputer(false);
         Save();
+    }
+
+    /// <summary>«Проводник»: справа открыт этот компьютер — две папки компьютера с теми же копированием и сравнением.</summary>
+    public bool ExplorerOnComputer => Explorer.RightComputer;
+
+    /// <summary>«Этот компьютер» из списка серверов правой панели. Отметка сервера остаётся — вернуться к нему одним выбором.</summary>
+    public void PickExplorerComputer()
+    {
+        if (BlockedByLock())
+        {
+            return;
+        }
+
+        SetExplorerOnComputer(true);
+        Save();
+    }
+
+    private void SetExplorerOnComputer(bool value)
+    {
+        if (Explorer.RightComputer != value)
+        {
+            Explorer.RightComputer = value;
+            Raise(nameof(ExplorerOnComputer));
+            RaiseTabCounts();
+        }
     }
 
     /// <summary>
@@ -311,6 +384,9 @@ public sealed class Workspace : ObservableObject
         }
 
         Save();
+
+        // выбор из списка у подписи — мыши на панели нет, панель собирается сразу
+        SortPane();
     }
 
     /// <summary>Закреплена ли вкладка за этим сервером — для замков в списке у подписи сервера.</summary>
@@ -1252,6 +1328,20 @@ public sealed class Workspace : ObservableObject
         var stats = await DownloadService.CompareAsync(server, AppState.Current.Settings, paths, localDir, ByContent, line => result.Append(line), ct);
 
         ReportCompare(result, stats, "здесь");
+    }
+
+    /// <summary>Две папки этого компьютера: выбранное против одноимённого в соседней панели, то же правило и тот же итог.</summary>
+    public async Task CompareFoldersAsync(IReadOnlyList<string> paths, string targetDir, OperationResult result, CancellationToken ct)
+    {
+        result.Append(BlockParams);
+        result.Append($"Сравнение с {targetDir} — ничего не копируется");
+        result.Append($"объектов: {paths.Count}");
+        result.Append("── сравнение ──");
+
+        var items = await Task.Run(() => paths.Select(p => new TransferItem(p)).ToList(), ct);
+        var stats = await LocalCopyService.CompareAsync(items, targetDir, ByContent, _localHashes, line => result.Append(line), ct, result.SetTransfer);
+
+        ReportCompare(result, stats, "в соседней папке", "в соседней папке");
     }
 
     /// <summary>Что показывает терминал внизу окна: результат последней запущенной операции.</summary>
@@ -2636,7 +2726,8 @@ public sealed class Workspace : ObservableObject
                     $"Отмечено: {AllItems.Count(i => i.IsSelected)} · Серверов: {SelectedServers.Count}",
                 AppSection.Download =>
                     $"Отмечено: {PickedDownloads.Count()} · Серверов: {PickedDownloads.Select(d => d.ServerId).Distinct().Count()}",
-                AppSection.Explorer => ExplorerServer?.PaneLabel ?? "сервер не выбран",
+                AppSection.Explorer => ExplorerOnComputer ? LocalSource.ComputerTitle : ExplorerServer?.PaneLabel ?? "сервер не выбран",
+                AppSection.Monitor => MonitorServer?.PaneLabel ?? "сервер не выбран",
                 AppSection.Command when Steps.Count > 1 => $"{servers} · окон {Steps.Count}",
                 AppSection.Command => string.IsNullOrWhiteSpace(CommandText)
                     ? $"{servers} · нет команды"
@@ -2656,7 +2747,21 @@ public sealed class Workspace : ObservableObject
     {
         get
         {
-            if (AppState.Current.Section != AppSection.Explorer || ExplorerServer is null)
+            if (AppState.Current.Section != AppSection.Explorer)
+            {
+                return string.Empty;
+            }
+
+            // справа компьютер — его папка, коротко
+            if (ExplorerOnComputer)
+            {
+                var folder = Explorer.RightLocal.Path.TrimEnd('\\');
+                return folder.Length == 0 ? string.Empty
+                    : folder.LastIndexOf('\\') is var cut and > 0 ? "…\\" + folder[(cut + 1)..]
+                    : folder;
+            }
+
+            if (ExplorerServer is null)
             {
                 return string.Empty;
             }
@@ -2687,6 +2792,10 @@ public sealed class Workspace : ObservableObject
     public void RaiseSection()
     {
         Raise(nameof(Servers));
+
+        // показ заново — отмеченные собираются наверх
+        _paneTop = Servers.Where(c => c.IsSelected).Select(c => c.Server.Id).ToHashSet(StringComparer.Ordinal);
+        Raise(nameof(PaneServers));
         RaiseMany(nameof(IsTabDimmed), nameof(TabOpacity), nameof(IsTabPickable));
         RaiseSelectionInfo();
     }
@@ -2759,8 +2868,10 @@ public sealed class Workspace : ObservableObject
         Sync(CommandServers, all);
         SyncLock();
 
-        // панель получает отфильтрованный список, а не саму коллекцию — перечитывает его по сигналу
+        // панель получает отфильтрованный список, а не саму коллекцию — перечитывает его по сигналу.
+        // Отмеченные сверху остаются прежние: перестановка мышью не пересобирает список
         Raise(nameof(Servers));
+        Raise(nameof(PaneServers));
         RaiseSelectionInfo();
     }
 
@@ -3761,14 +3872,14 @@ public sealed class Workspace : ObservableObject
     private const int IgnoredShown = 200;
 
     /// <summary>Лежащее на сервере сверх сравниваемого — только список, на итог не влияет. Папка — одной строкой.</summary>
-    private static void AppendExtras(OperationResult result, IReadOnlyList<CompareExtra> extras)
+    private static void AppendExtras(OperationResult result, IReadOnlyList<CompareExtra> extras, string where = "на сервере")
     {
         if (extras.Count == 0)
         {
             return;
         }
 
-        result.Append($"── ещё на сервере в этих папках, не сравнивалось ({extras.Count}) ──");
+        result.Append($"── ещё {where} в этих папках, не сравнивалось ({extras.Count}) ──");
 
         foreach (var extra in extras.Take(IgnoredShown))
         {
@@ -3786,7 +3897,8 @@ public sealed class Workspace : ObservableObject
     /// и списки: чего нет, что отличается и чем. «Не сошлось» — не ошибка, а ответ: оранжевым.
     /// Отличия, которые выбранный режим не сверяет, на статус не влияют и идут только в вывод.
     /// </summary>
-    private static void ReportCompare(OperationResult result, CompareStats stats, string where)
+    /// <param name="extrasWhere">Где лежит сверх сравниваемого: у сервера — «на сервере».</param>
+    private static void ReportCompare(OperationResult result, CompareStats stats, string where, string extrasWhere = "на сервере")
     {
         result.Append("── итог сравнения ──");
         result.Append($"совпало файлов: {stats.Same} из {stats.Total}");
@@ -3815,7 +3927,7 @@ public sealed class Workspace : ObservableObject
 
         if (extras.Count > 0)
         {
-            result.Append($"ещё на сервере в этих папках, не сравнивалось: {extras.Count}");
+            result.Append($"ещё {extrasWhere} в этих папках, не сравнивалось: {extras.Count}");
         }
 
         result.Append("время: " + stats.Clock);
@@ -3865,7 +3977,7 @@ public sealed class Workspace : ObservableObject
             }
         }
 
-        AppendExtras(result, extras);
+        AppendExtras(result, extras, extrasWhere);
 
         // среди совпавших есть файлы с отличиями, которые режим не сверяет: «одинаковыми» их не назвать
         var hasIgnored = stats.Ignored.Count > 0;
@@ -4006,30 +4118,39 @@ public sealed class Workspace : ObservableObject
 
                 await Task.Run(() => dates[job].Value, ct);
 
-                var stats = await SshService.UploadAsync(
-                    server,
-                    settings,
-                    payload,
-                    remotePath,
-                    trustSent ? options with { Settled = SettledOn(job, server) } : options,
-                    _localHashes,
-                    line => result.Append(line),
-                    ct,
-                    step =>
+                void OnStep(UploadStep step)
+                {
+                    var text = step switch
                     {
-                        var text = step switch
-                        {
-                            UploadStep.Connecting => StepConnecting,
-                            UploadStep.CheckingHashes => StepCheckingHashes,
-                            UploadStep.CheckingDates => StepCheckingDates,
-                            _ => StepCopying,
-                        };
+                        UploadStep.Connecting => StepConnecting,
+                        UploadStep.CheckingHashes => StepCheckingHashes,
+                        UploadStep.CheckingDates => StepCheckingDates,
+                        _ => StepCopying,
+                    };
 
-                        result.Message = text + "…";
-                        Step((int)step, text);
-                    },
-                    result.SetTransfer,
-                    confirmReplace);
+                    result.Message = text + "…";
+                    Step((int)step, text);
+                }
+
+                // справа в «Проводнике» открыт этот компьютер — те же правила, только без сервера
+                var local = ReferenceEquals(server, ActionLog.Computer);
+                var there = local ? "в назначении" : "на сервере";
+
+                var stats = local
+                    ? await LocalCopyService.CopyAsync(
+                        server, payload, remotePath, options, _localHashes, line => result.Append(line), ct, OnStep, result.SetTransfer, confirmReplace)
+                    : await SshService.UploadAsync(
+                        server,
+                        settings,
+                        payload,
+                        remotePath,
+                        trustSent ? options with { Settled = SettledOn(job, server) } : options,
+                        _localHashes,
+                        line => result.Append(line),
+                        ct,
+                        OnStep,
+                        result.SetTransfer,
+                        confirmReplace);
 
                 sentTotal += stats.FilesSent;
                 seenTotal += stats.FilesSent + stats.FilesUpToDate + stats.FilesSkipped;
@@ -4052,7 +4173,7 @@ public sealed class Workspace : ObservableObject
 
                 if (options.Matching)
                 {
-                    result.Append($"пропущено, на сервере уже такой же: {stats.FilesUpToDate}");
+                    result.Append($"пропущено, {there} уже такой же: {stats.FilesUpToDate}");
 
                     if (stats.FilesRedated > 0)
                     {
@@ -4107,8 +4228,9 @@ public sealed class Workspace : ObservableObject
                     result.SetTransfer(0, 0);
                     stats.Clock.Restart();
 
-                    var mismatches = await SshService.VerifyChecksumsAsync(
-                        server, settings, stats.Files, _localHashes, line => result.Append(line), ct);
+                    var mismatches = local
+                        ? await LocalCopyService.VerifyAsync(stats.Files, _localHashes, line => result.Append(line), ct, result.SetTransfer)
+                        : await SshService.VerifyChecksumsAsync(server, settings, stats.Files, _localHashes, line => result.Append(line), ct);
 
                     stats.Clock.Mark("сверка после");
                     result.Append("время: " + stats.Clock);
@@ -5246,6 +5368,7 @@ public sealed class Workspace : ObservableObject
         BookHistory = BookHistory,
         CommandHistory = _commandHistory.Count > 0 ? _commandHistory.ToList() : null,
         SizeColumnsShown = _sizeColumnsShown?.ToList(),
+        MonitorRange = AppState.Current.MonitorTabs.Contains(this) ? MonitorRanges.Key(_monitorRange) : null,
     };
 
     /// <summary>Содержимое вкладки — для отмены действий.</summary>
@@ -5507,6 +5630,7 @@ public sealed class Workspace : ObservableObject
         }
 
         _sizeColumnsShown = state.SizeColumnsShown?.ToList();
+        _monitorRange = MonitorRanges.Parse(state.MonitorRange);
         _lockedIds = state.LockedServerIds?.ToHashSet(StringComparer.Ordinal);
 
         // серверы к этому моменту уже могли прийти — замок сверяется с ними и с открытым набором здесь же
@@ -6161,6 +6285,8 @@ public sealed class Workspace : ObservableObject
     /// <summary>Одиночный выбор действует на «Команде» и «Копировании»; на «Серверах» галочки обычные.</summary>
     public bool IsPaneSingleSelect =>
         AppState.Current.Section == AppSection.Explorer
+        // «Мониторинг» — всегда один сервер, и только у его скрытой вкладки: вкладки копирования в этом разделе не на экране
+        || (AppState.Current.Section == AppSection.Monitor && AppState.Current.MonitorTabs.Contains(this))
         || (SingleSelect && AppState.Current.Section is AppSection.Command or AppSection.Files or AppSection.Download);
 
     /// <summary>Отметки, которые сейчас в панели: команды на «Команде», иначе копирования.</summary>

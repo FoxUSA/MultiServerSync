@@ -448,6 +448,8 @@
         IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=Everywhere, Mode=TwoWay}"
         Style="{StaticResource DangerSwitchStyle}"
         ToolTip="«Выполнить» и «Сравнить» — сразу на всех вкладках, после вопроса" />
+
+      <controls:RetryFailedButton Margin="12,0,0,0" VerticalAlignment="Center" />
     </StackPanel>
 
         <!--  параметры — общий блок для «Копирования», «Скачивания» и «Проводника»  -->

@@ -579,39 +579,6 @@
       </Setter>
     </Style>
 
-    <!--  сервер «Проводника» у правого края ряда разделов: плоская подпись, подсветка под мышью  -->
-    <Style x:Key="ServerTagStyle" TargetType="Button">
-      <Setter Property="Focusable" Value="False" />
-      <Setter Property="Cursor" Value="Hand" />
-      <Setter Property="FontSize" Value="12" />
-      <Setter Property="VerticalAlignment" Value="Center" />
-      <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="Button">
-            <!--  сервер «Проводника» — как отмеченный сервер в панели слева: тусклая оранжевая рамка
-                  на тусклом оранжевом фоне; под мышью и при нажатии фон чуть плотнее  -->
-            <Border
-              x:Name="Bd"
-              Padding="10,5"
-              Background="#26E07A1F"
-              BorderBrush="#80E07A1F"
-              BorderThickness="1"
-              CornerRadius="6">
-              <ContentPresenter VerticalAlignment="Center" />
-            </Border>
-            <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="#38E07A1F" />
-              </Trigger>
-              <Trigger Property="IsPressed" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="#4AE07A1F" />
-              </Trigger>
-            </ControlTemplate.Triggers>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
-    </Style>
 
     <!--  шапка блока в боковой панели — как «ПАРАМЕТРЫ КОПИРОВАНИЯ» на страницах  -->
     <Style x:Key="PaneHeaderStyle" TargetType="TextBlock">
@@ -835,7 +802,7 @@
     </DataTemplate>
   </ui:FluentWindow.Resources>
 
-  <Grid>
+  <Grid x:Name="RootGrid">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
@@ -1254,6 +1221,20 @@
             <TextBlock Text="Скачивание" />
           </StackPanel>
         </RadioButton>
+        <!--  нагрузка одного сервера: процессор, память, диск, сеть. Вкладок у раздела нет  -->
+        <RadioButton
+          x:Name="MonitorSection"
+          Click="OnSectionClick"
+          MouseRightButtonUp="OnMonitorSectionRightClick"
+          PreviewMouseLeftButtonDown="OnNavItemMouseDown"
+          Style="{StaticResource SectionTabStyle}"
+          Tag="{x:Type pages:MonitorPage}"
+          ToolTip="Нагрузка сервера. Правая кнопка — отдельное окно">
+          <StackPanel Orientation="Horizontal">
+            <ui:SymbolIcon Margin="0,0,8,0" FontSize="16" Symbol="Pulse24" />
+            <TextBlock Text="Мониторинг" />
+          </StackPanel>
+        </RadioButton>
       </StackPanel>
 
       <!--  отмена и возврат — одни на всю программу: и действия во вкладке, и действия с самими вкладками  -->
@@ -1294,7 +1275,19 @@
 
           <!--  что это и из какого набора; справа — что подписывать под каждым сервером  -->
           <StackPanel Grid.Row="0" Margin="0,0,0,4">
-            <TextBlock Style="{StaticResource PaneHeaderStyle}" Text="ЦЕЛЕВЫЕ СЕРВЕРА" />
+            <!--  в «Мониторинге» сервер один — и подпись в единственном числе, как в макете  -->
+            <TextBlock>
+              <TextBlock.Style>
+                <Style BasedOn="{StaticResource PaneHeaderStyle}" TargetType="TextBlock">
+                  <Setter Property="Text" Value="ЦЕЛЕВЫЕ СЕРВЕРА" />
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding State.Section}" Value="{x:Static services:AppSection.Monitor}">
+                      <Setter Property="Text" Value="ЦЕЛЕВОЙ СЕРВЕР" />
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </TextBlock.Style>
+            </TextBlock>
             <Grid Margin="0,2,0,0">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
@@ -1351,7 +1344,9 @@
             x:Name="PaneScroller"
             Grid.Row="2"
             Margin="-4,0,-4,0"
-            VerticalScrollBarVisibility="Auto">
+            MouseEnter="OnPaneScrollerEnter"
+            MouseLeave="OnPaneScrollerLeave"
+            VerticalScrollBarVisibility="Hidden">
             <StackPanel Margin="4,0,4,0">
               <!--  «Отметить все» — первой строкой, как галочка в шапке таблицы на «Серверах»; под ней черта.
                     В одиночном выборе её нет  -->
@@ -1440,7 +1435,7 @@
               </ItemsControl>
 
               <!--  серверы переставляются мышью: порядок общий, его же показывают «Серверы»  -->
-              <ItemsControl x:Name="PaneServerList" ItemsSource="{Binding State.PaneTab.Servers}">
+              <ItemsControl x:Name="PaneServerList" ItemsSource="{Binding State.PaneTab.PaneServers}">
                 <ItemsControl.ItemTemplate>
                     <!--  между серверами черта: где кончается один и начинается другой; по 2 над и под ней  -->
                     <DataTemplate>
@@ -1464,6 +1459,17 @@
                           CornerRadius="6">
                         <!--  замок — в конце строки: под мышью открытый, у закреплённого сервера закрытый всегда  -->
                         <DockPanel>
+                        <!--  «Мониторинг»: у сервера есть вынесенные окна — значок в конце строки, на месте замка  -->
+                        <ui:SymbolIcon
+                          x:Name="MonitorMark"
+                          Margin="4,0,2,0"
+                          VerticalAlignment="Center"
+                          DockPanel.Dock="Right"
+                          FontSize="14"
+                          Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
+                          Symbol="Open24"
+                          ToolTip="Мониторинг сервера открыт в отдельном окне"
+                          Visibility="Collapsed" />
                         <Button
                           x:Name="Lock"
                           Click="OnPaneLockClick"
@@ -1588,6 +1594,17 @@
                           <Setter TargetName="Item" Property="Padding" Value="0" />
                           <Setter TargetName="Item" Property="BorderThickness" Value="0" />
                         </DataTrigger>
+                        <!--  «Мониторинг»: вкладки и замка у раздела нет — только выбор сервера  -->
+                        <DataTrigger Binding="{Binding DataContext.State.Section, RelativeSource={RelativeSource AncestorType=Window}}" Value="{x:Static services:AppSection.Monitor}">
+                          <Setter TargetName="Lock" Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                        <MultiDataTrigger>
+                          <MultiDataTrigger.Conditions>
+                            <Condition Binding="{Binding DataContext.State.Section, RelativeSource={RelativeSource AncestorType=Window}}" Value="{x:Static services:AppSection.Monitor}" />
+                            <Condition Binding="{Binding Server.HasMonitorWindow}" Value="True" />
+                          </MultiDataTrigger.Conditions>
+                          <Setter TargetName="MonitorMark" Property="Visibility" Value="Visible" />
+                        </MultiDataTrigger>
                       </DataTemplate.Triggers>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
@@ -1619,6 +1636,11 @@
                     <Style BasedOn="{StaticResource {x:Type ui:ToggleSwitch}}" TargetType="ui:ToggleSwitch">
                       <Style.Triggers>
                         <DataTrigger Binding="{Binding State.CommandLocalPc}" Value="True">
+                          <Setter Property="Opacity" Value="0.5" />
+                          <Setter Property="IsHitTestVisible" Value="False" />
+                        </DataTrigger>
+                        <!--  в «Мониторинге» запускать нечего — умный режим ни при чём  -->
+                        <DataTrigger Binding="{Binding State.Section}" Value="{x:Static services:AppSection.Monitor}">
                           <Setter Property="Opacity" Value="0.5" />
                           <Setter Property="IsHitTestVisible" Value="False" />
                         </DataTrigger>

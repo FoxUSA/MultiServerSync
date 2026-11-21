@@ -499,10 +499,40 @@ public partial class ResultsView : UserControl
 
     private void OnRowProperty(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(OperationResult.Status) && sender is OperationResult { Status: OperationStatus.Running } row)
+        if (e.PropertyName != nameof(OperationResult.Status) || sender is not OperationResult row)
         {
-            Dispatcher.BeginInvoke(new Action(() => FollowRunning(row)));
+            return;
         }
+
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (row.Status == OperationStatus.Running)
+            {
+                FollowRunning(row);
+            }
+            else
+            {
+                LeaveFinished(row);
+            }
+        }));
+    }
+
+    /// <summary>
+    /// Выбранная строка закончилась, а другие ещё идут — выбор переходит на идущую, чтобы перед глазами
+    /// был вывод того сервера, что работает. Выбранную руками законченную не трогает.
+    /// </summary>
+    private void LeaveFinished(OperationResult row)
+    {
+        if (_pickedByHand
+            || row.Status is OperationStatus.Running or OperationStatus.Pending
+            || !ReferenceEquals(ResultsGrid.SelectedItem, row)
+            || _rows.FirstOrDefault(r => r.Status == OperationStatus.Running) is not { } next)
+        {
+            return;
+        }
+
+        ResultsGrid.SelectedItem = next;
+        ResultsGrid.ScrollIntoView(next);
     }
 
     /// <summary>
@@ -1098,18 +1128,5 @@ public partial class ResultsView : UserControl
     {
         e.Handled = true;
         AppState.Current.ToggleCopyPassOnce();
-    }
-
-    private async void OnRetry(object sender, RoutedEventArgs e)
-    {
-        if (Batch is { } batch)
-        {
-            await batch.RetryFailedAsync(AppState.Current.Settings.MaxParallel);
-
-            if (AppState.Current.IsCommandBatch(batch) || AppState.Current.IsCopyBatch(batch))
-            {
-                AppState.Current.NotifyFinished(batch);
-            }
-        }
     }
 }

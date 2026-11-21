@@ -60,6 +60,7 @@ public sealed class LogEntry
         AppSection.Files => "Копирование",
         AppSection.Download => "Скачивание",
         AppSection.Explorer => "Проводник",
+        AppSection.Monitor => "Мониторинг",
         AppSection.Settings => "Настройки",
         _ => "Программа",
     };

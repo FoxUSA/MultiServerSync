@@ -133,6 +133,7 @@ public partial class MainWindow : FluentWindow
             AppSection.Command => typeof(CommandPage),
             AppSection.Download => typeof(DownloadPage),
             AppSection.Explorer => typeof(ExplorerPage),
+            AppSection.Monitor => typeof(MonitorPage),
             _ => typeof(FilesPage),
         });
 
@@ -197,6 +198,12 @@ public partial class MainWindow : FluentWindow
 
             // вынесенные окна вывода и запусков — снова отдельно, как были
             Terminal.RestoreDetached(settings.OutputDetached, settings.RunsDetached);
+
+            // окна «Мониторинга», открытые при выходе, — те же серверы, периоды и места
+            MonitorWindow.RestoreAll();
+
+            // «Мониторинг» читается заранее: раздел откроется сразу с графиками
+            MonitorWarmup.Start();
 
             // записи загрузки плашкой не показываем — только то, что сделано после открытия окна
             AppLog.Written += ShowToast;
@@ -273,6 +280,7 @@ public partial class MainWindow : FluentWindow
                 AppSection.Command => typeof(CommandPage),
                 AppSection.Files => typeof(FilesPage),
                 AppSection.Download => typeof(DownloadPage),
+                AppSection.Monitor => typeof(MonitorPage),
                 AppSection.Settings => typeof(SettingsPage),
                 _ => typeof(ServersPage),
             }
@@ -309,6 +317,30 @@ public partial class MainWindow : FluentWindow
         }
     }
 
+    /// <summary>
+    /// Правая кнопка по «Мониторингу»: сразу отдельное окно, раздел в главном окне не меняется. Сервер и период —
+    /// запомненные разделом; окно то же, что у кнопки выноса справа от периодов. Серверов нет — отказ под кнопкой.
+    /// </summary>
+    private void OnMonitorSectionRightClick(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+
+        if (State.Servers.Count == 0)
+        {
+            // отказ — плашкой под нажатой кнопкой, как у отказов левой кнопкой
+            if (Toast.Parent is Visual root)
+            {
+                _pressedButton = MonitorSection.TransformToVisual(root).TransformBounds(new Rect(0, 0, MonitorSection.ActualWidth, MonitorSection.ActualHeight));
+                _pressedAt = DateTime.UtcNow;
+            }
+
+            AppLog.Hint("Серверов нет — добавьте их в разделе «Серверы».", LogLevel.Warning);
+            return;
+        }
+
+        MonitorWindow.Open(State.MonitorServer, State.MonitorRange, this);
+    }
+
     /// <summary>Отмечена кнопка открытого раздела; в «Настройках» — ни одна.</summary>
     private void ShowSection()
     {
@@ -318,6 +350,7 @@ public partial class MainWindow : FluentWindow
         CommandSection.IsChecked = section == AppSection.Command;
         FilesSection.IsChecked = section == AppSection.Files;
         DownloadSection.IsChecked = section == AppSection.Download;
+        MonitorSection.IsChecked = section == AppSection.Monitor;
 
         // в «Настройках» разовых действий нет — и настраивать нечего
         OutputPrefsButton.Visibility = section == AppSection.Settings ? Visibility.Collapsed : Visibility.Visible;
@@ -384,7 +417,7 @@ public partial class MainWindow : FluentWindow
     /// <summary>Кнопки разделов следят за статусами вкладок всех разделов, и уже открытых, и новых.</summary>
     private void SetupSectionMarks()
     {
-        foreach (var tabs in new[] { State.Workspaces, State.CommandTabs, State.DownloadTabs, State.ExplorerTabs })
+        foreach (var tabs in new[] { State.Workspaces, State.CommandTabs, State.DownloadTabs, State.ExplorerTabs, State.MonitorTabs })
         {
             foreach (var tab in tabs)
             {
@@ -446,6 +479,7 @@ public partial class MainWindow : FluentWindow
         Mark(CommandSection, AppSection.Command, State.CommandTabs.Where(t => !t.IsPersonal));
         Mark(FilesSection, AppSection.Files, State.Workspaces);
         Mark(DownloadSection, AppSection.Download, State.DownloadTabs);
+        Mark(MonitorSection, AppSection.Monitor, State.MonitorTabs);
         ShowArchiveMark();
 
         void Mark(DependencyObject button, AppSection section, IEnumerable<Workspace> tabs)
@@ -774,6 +808,7 @@ public partial class MainWindow : FluentWindow
         AppSection.Files => (false, true),
         AppSection.Download => (true, false),
         AppSection.Servers => (true, false),
+        AppSection.Monitor => (true, false),
         _ => (false, false),
     };
 
@@ -968,6 +1003,62 @@ public partial class MainWindow : FluentWindow
     /// <summary>Сервер, по которому щёлкнули дважды: окно правки откроется, когда отпустят кнопку.</summary>
     private Models.ServerEntry? _paneServerToEdit;
 
+    /// <summary>Мышь ушла со списка серверов — через 3 с отмеченные собираются наверх; вернулась раньше — отсчёт сброшен.</summary>
+    private System.Windows.Threading.DispatcherTimer? _paneSortTimer;
+
+    /// <summary>
+    /// Мышь ушла со списка серверов — через 3 с отмеченные собираются наверх. Пока кнопка зажата (протяжка по галочкам,
+    /// перестановка) — ждём отпускания: строки не переставляются под рукой.
+    /// </summary>
+    private void OnPaneScrollerLeave(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton == MouseButtonState.Pressed || PaneScroller.IsMouseCaptureWithin)
+        {
+            // отпустят за пределами списка — тогда и пойдёт отсчёт
+            PreviewMouseLeftButtonUp -= OnPaneReleasedOutside;
+            PreviewMouseLeftButtonUp += OnPaneReleasedOutside;
+            return;
+        }
+
+        StartPaneSort();
+    }
+
+    private void OnPaneScrollerEnter(object sender, MouseEventArgs e) => _paneSortTimer?.Stop();
+
+    private void OnPaneReleasedOutside(object sender, MouseButtonEventArgs e)
+    {
+        PreviewMouseLeftButtonUp -= OnPaneReleasedOutside;
+
+        // после того, как протяжка или перестановка доделают своё на отпускании
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (!PaneScroller.IsMouseOver)
+            {
+                StartPaneSort();
+            }
+        }), System.Windows.Threading.DispatcherPriority.Background);
+    }
+
+    private void StartPaneSort()
+    {
+        if (_paneSortTimer is null)
+        {
+            _paneSortTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            _paneSortTimer.Tick += (_, _) =>
+            {
+                _paneSortTimer.Stop();
+
+                if (!PaneScroller.IsMouseOver && Mouse.LeftButton != MouseButtonState.Pressed)
+                {
+                    State.PaneTab?.SortPane();
+                }
+            };
+        }
+
+        _paneSortTimer.Stop();
+        _paneSortTimer.Start();
+    }
+
     /// <summary>
     /// Двойной щелчок по серверу в панели слева — его окно правки поверх, без перехода в «Серверы». Любой сервер:
     /// отмеченный или нет, под замком и приглушённый. Замок в строке — своя кнопка, её двойной щелчок не считается.
@@ -1109,7 +1200,8 @@ public partial class MainWindow : FluentWindow
             fixedCount: 0,
             (item, to) =>
             {
-                var shown = State.ActiveWorkspace.Servers;
+                // серверы той вкладки, чья панель на экране: в «Мониторинге» это его скрытая вкладка
+                var shown = State.PaneTab?.PaneServers ?? [];
 
                 if (item is Models.ServerCheck dragged && to < shown.Count)
                 {
@@ -1282,11 +1374,95 @@ public partial class MainWindow : FluentWindow
             {
                 ShowExplorerServer();
             }
+
+            if (e.PropertyName == nameof(AppState.Section))
+            {
+                Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, FitMonitorMinimum);
+            }
         };
 
         ApplyServerPane();
         ShowTabs();
         ShowExplorerServer();
+
+        // «Мониторинг» ничего не режет и не прокручивает: окно не ужимается меньше, чем нужно разделу
+        _baseMinWidth = MinWidth;
+        _baseMinHeight = MinHeight;
+        _basePageMin = PageRow.MinHeight;
+        PageFrame.SizeChanged += (_, _) => FitMonitorMinimum();
+        ExplorerServerTag.SizeChanged += (_, _) => FitMonitorMinimum();
+        SectionBar.SizeChanged += (_, _) => FitMonitorMinimum();
+    }
+
+    private double _baseMinWidth;
+    private double _baseMinHeight;
+    private double _basePageMin;
+    private bool _monitorHooked;
+
+    /// <summary>
+    /// Пока открыт «Мониторинг», окно не меньше, чем нужно ему целиком: карточки на самой плотной ступени,
+    /// периоды коротко, ряд разделов с подписью сервера. Страница не отдаёт нижней панели больше, чем может.
+    /// Ушли из раздела — прежние минимумы, их раздел не уменьшает.
+    /// </summary>
+    private void FitMonitorMinimum()
+    {
+        if (!IsLoaded || RootGrid.ActualHeight <= 0 || WindowState == WindowState.Minimized)
+        {
+            return;
+        }
+
+        // ряд разделов: кнопки, отмена, подпись сервера справа — каждый своей естественной шириной. С кнопкой
+        // «Мониторинга» ряд стал длиннее, и во всех разделах окно не ужимается так, чтобы он резался
+        var row = Math.Ceiling(SectionBar.Children.OfType<FrameworkElement>().Sum(b => b.DesiredSize.Width)
+            + (ExplorerServerTag.IsVisible ? ExplorerServerTag.DesiredSize.Width + 12 : 0)
+            + 96 + 2 * (6 + 1 + 5.34));
+
+        if (State.Section != AppSection.Monitor || !_pages.TryGetValue(typeof(MonitorPage), out var page) || page is not MonitorPage monitor)
+        {
+            var plain = Math.Max(_baseMinWidth, row);
+
+            if (Math.Abs(MinWidth - plain) > 0.5 || MinHeight != _baseMinHeight || PageRow.MinHeight != _basePageMin)
+            {
+                MinWidth = plain;
+                MinHeight = _baseMinHeight;
+                PageRow.MinHeight = _basePageMin;
+            }
+
+            return;
+        }
+
+        if (!_monitorHooked)
+        {
+            _monitorHooked = true;
+            monitor.Monitor.NeedChanged += FitMonitorMinimum;
+        }
+
+        var need = monitor.Monitor.Need;
+
+        var pageMin = Math.Max(_basePageMin, need.Height + 2);
+
+        if (Math.Abs(PageRow.MinHeight - pageMin) > 0.5)
+        {
+            PageRow.MinHeight = pageMin;
+        }
+
+        // всё, кроме страницы, — по рядам и столбцам раскладки, а не по текущему размеру страницы: тот в
+        // середине раскладки бывает ещё прежним, и минимум окна выходил бы больше нужного
+        var frame = Math.Max(0, ActualWidth - RootGrid.ActualWidth);
+        var frameHeight = Math.Max(0, ActualHeight - RootGrid.ActualHeight);
+        var rows = RootGrid.RowDefinitions.Where(r => !ReferenceEquals(r, PageRow)).Sum(r => r.ActualHeight);
+        var width = Math.Ceiling(Math.Max(_baseMinWidth, Math.Max(row, frame + 2 * 5.34 + PaneColumn.ActualWidth + 2 + need.Width)));
+        var height = Math.Ceiling(Math.Max(_baseMinHeight, frameHeight + rows + pageMin));
+
+        if (Math.Abs(MinWidth - width) > 0.5)
+        {
+            MinWidth = width;
+        }
+
+        if (Math.Abs(MinHeight - height) > 0.5)
+        {
+            MinHeight = height;
+        }
     }
 
     /// <summary>
@@ -1311,7 +1487,8 @@ public partial class MainWindow : FluentWindow
     /// </summary>
     private void ShowExplorerServer()
     {
-        var tab = State.Section is AppSection.Explorer or AppSection.Files or AppSection.Command or AppSection.Download
+        // «Мониторинг» — открытая вкладка раздела: сервер один, замка нет
+        var tab = State.Section is AppSection.Explorer or AppSection.Files or AppSection.Command or AppSection.Download or AppSection.Monitor
             && State.Tabs.Count > 0
             ? State.ActiveWorkspace
             : null;
@@ -1352,6 +1529,19 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
+        // справа в «Проводнике» открыт этот компьютер: две папки компьютера, сервера и замка нет
+        if (explorer && tab.ExplorerOnComputer)
+        {
+            ExplorerServerIcon.Source = ShellIcons.Computer;
+            ExplorerServerName.Text = LocalSource.ComputerTitle;
+            ExplorerServerUser.Text = string.Empty;
+            ExplorerServerAddress.Text = string.Empty;
+            ExplorerServerTag.ToolTip = "Справа открыт этот компьютер — щелчок открывает список серверов";
+            ExplorerServerLock.Visibility = Visibility.Collapsed;
+            ExplorerServerTag.Visibility = Visibility.Visible;
+            return;
+        }
+
         ExplorerServerIcon.Source = ShellIcons.Server;
         var picked = explorer
             ? (tab.ExplorerServer is { } one ? [one] : [])
@@ -1366,7 +1556,12 @@ public partial class MainWindow : FluentWindow
             : picked.Count > 1
                 ? "Отмечены: " + string.Join(", ", picked.Select(s => s.PaneLabel)) + ". Щелчок — список серверов"
                 : "Целевой сервер вкладки — щелчок открывает список серверов";
-        ExplorerServerLock.Visibility = picked.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ExplorerServerLock.Visibility = picked.Count > 0 && State.Section != AppSection.Monitor ? Visibility.Visible : Visibility.Collapsed;
+
+        if (State.Section == AppSection.Monitor)
+        {
+            ExplorerServerTag.ToolTip = "Сервер мониторинга — щелчок открывает список серверов";
+        }
         ExplorerServerLockIcon.Symbol = tab.IsPaneLocked ? SymbolRegular.LockClosed24 : SymbolRegular.LockOpen24;
         ExplorerServerLock.ToolTip = tab.IsPaneLocked
             ? tab.ExplorerLockedPath is { Length: > 0 } lockedPath && explorer
@@ -1403,7 +1598,7 @@ public partial class MainWindow : FluentWindow
     private void OnExplorerTagTabChanged(object? sender, PropertyChangedEventArgs e)
     {
         // отметки серверов поднимают и то и другое — подпись перечитывается по любому
-        if (e.PropertyName is nameof(Workspace.ExplorerServer) or nameof(Workspace.SelectionInfo) or nameof(Workspace.IsPaneLocked) or nameof(Workspace.ExplorerLockedPath) or nameof(Workspace.LocalPc))
+        if (e.PropertyName is nameof(Workspace.ExplorerServer) or nameof(Workspace.SelectionInfo) or nameof(Workspace.IsPaneLocked) or nameof(Workspace.ExplorerLockedPath) or nameof(Workspace.LocalPc) or nameof(Workspace.ExplorerOnComputer))
         {
             ShowExplorerServer();
         }
@@ -1424,7 +1619,20 @@ public partial class MainWindow : FluentWindow
                 s => ReferenceEquals(s, tab.ExplorerServer),
                 tab.PickExplorerServer,
                 Controls.ServerMenu.Locks.ForExplorer(tab),
-                alignRight: true);
+                alignRight: true,
+                computer: (tab.ExplorerOnComputer, tab.PickExplorerComputer));
+            return;
+        }
+
+        // «Мониторинг»: один сервер, без замков; у серверов с вынесенными окнами — значок
+        if (State.Section == AppSection.Monitor)
+        {
+            Controls.ServerMenu.Show(
+                ExplorerServerTag,
+                s => tab.SelectedServers.Contains(s),
+                tab.PickTargetServer,
+                alignRight: true,
+                marked: s => s.HasMonitorWindow);
             return;
         }
 

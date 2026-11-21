@@ -1,0 +1,15 @@
+<Page
+  x:Class="MultiServerSync.Views.Pages.MonitorPage"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+  xmlns:controls="clr-namespace:MultiServerSync.Views.Controls"
+  Title="Мониторинг"
+  ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
+  ui:Design.Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  ScrollViewer.CanContentScroll="False">
+
+  <!--  нагрузка выбранного слева сервера; у вынесенных окон тот же вид  -->
+  <controls:MonitorView x:Name="View" />
+</Page>

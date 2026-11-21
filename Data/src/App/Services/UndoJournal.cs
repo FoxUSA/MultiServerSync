@@ -339,7 +339,7 @@ public static class UndoJournal
     public static event Action? Changed;
 
     public static bool Covers(AppSection section) =>
-        section is AppSection.Files or AppSection.Command or AppSection.Download or AppSection.Servers;
+        section is AppSection.Files or AppSection.Command or AppSection.Download or AppSection.Monitor or AppSection.Servers;
 
     /// <summary>Чья память сейчас на стрелках: открытая вкладка, на «Серверах» — открытый набор.</summary>
     private static object? CurrentOwner()
@@ -349,7 +349,7 @@ public static class UndoJournal
         return state.Section switch
         {
             AppSection.Servers => state.ActiveServerSet,
-            AppSection.Files or AppSection.Command or AppSection.Download => state.ActiveWorkspace,
+            AppSection.Files or AppSection.Command or AppSection.Download or AppSection.Monitor => state.ActiveWorkspace,
             _ => null,
         };
     }
@@ -617,7 +617,7 @@ public static class UndoJournal
         get
         {
             var state = AppState.Current;
-            return state.Workspaces.Concat(state.CommandTabs).Concat(state.DownloadTabs);
+            return state.Workspaces.Concat(state.CommandTabs).Concat(state.DownloadTabs).Concat(state.MonitorTabs);
         }
     }
 

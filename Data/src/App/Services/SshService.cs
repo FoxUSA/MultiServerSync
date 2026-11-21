@@ -3299,7 +3299,7 @@ public static class SshService
     /// Сумма локального файла из общего кэша операции. Серверы просят её одновременно —
     /// без замка каждый читал бы тот же файл с диска заново.
     /// </summary>
-    private static string LocalSha256(ConcurrentDictionary<string, string> cache, string path)
+    internal static string LocalSha256(ConcurrentDictionary<string, string> cache, string path)
     {
         // сумма помнится вместе с размером и временем записи: файл, пересобранный по тому же
         // пути, считается заново — иначе сверка сравнивала сервер с суммой прежней версии

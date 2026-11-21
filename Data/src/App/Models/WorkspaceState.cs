@@ -154,6 +154,9 @@ public sealed class WorkspaceState
     /// <summary>Какие столбцы размера показаны при исключениях, если выбирали сами. null — по умолчанию, со звёздочкой.</summary>
     public List<string>? SizeColumnsShown { get; set; }
 
+    /// <summary>«Мониторинг»: период вкладки — live, 1h, 24h, 7d, 30d, 90d. Null — «Сейчас».</summary>
+    public string? MonitorRange { get; set; }
+
     /// <summary>Галочка «Весь журнал».</summary>
     public bool JournalWhole { get; set; }
 
@@ -251,4 +254,16 @@ public sealed class WorkspacesFile
 
     /// <summary>Последняя открытая вкладка основной ленты и архива каждого раздела: значок архива возвращает на них.</summary>
     public List<string>? LastInStripIds { get; set; }
+
+    /// <summary>
+    /// Прежняя единственная скрытая вкладка «Мониторинга» (3.3.12 до вкладок): только читается — при первом запуске
+    /// становится первой вкладкой раздела. Больше не пишется.
+    /// </summary>
+    public WorkspaceState? MonitorTab { get; set; }
+
+    /// <summary>Открытая вкладка раздела «Мониторинг».</summary>
+    public string ActiveMonitorId { get; set; } = string.Empty;
+
+    /// <summary>Вкладки раздела «Мониторинг». Пусто — файл версии, где вкладок у раздела не было.</summary>
+    public List<WorkspaceState> MonitorTabs { get; set; } = new();
 }

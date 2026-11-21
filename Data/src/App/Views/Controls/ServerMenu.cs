@@ -51,13 +51,36 @@ public static class ServerMenu
     /// <param name="locks">Замки в строках; нет — список без замков («Проводник», окно обзора).</param>
     /// <param name="alignRight">Правый край списка — вровень с правым краем кнопки.</param>
     /// <param name="muted">Все строки приглушены — «PowerShell» на «Команде»: сейчас работа не с серверами.</param>
+    /// <param name="computer">
+    /// «Проводник»: первой строкой «Этот компьютер» — открыть его в правой панели. Current — он сейчас открыт
+    /// (тогда серверы не подсвечены), Pick — выбор.
+    /// </param>
+    /// <param name="marked">«Мониторинг»: у каких серверов справа значок «открыт в окне» — только пометка, выбору не мешает.</param>
     public static void Show(FrameworkElement anchor, Func<ServerEntry, bool> isCurrent, Action<ServerEntry> pick,
-        Locks? locks = null, bool alignRight = false, bool muted = false)
+        Locks? locks = null, bool alignRight = false, bool muted = false, (bool Current, Action Pick)? computer = null,
+        Func<ServerEntry, bool>? marked = null)
     {
         var menu = new ContextMenu { PlacementTarget = anchor, Placement = PlacementMode.Bottom, FontSize = 13 };
 
         // названия и адреса — одной шириной у всех строк: адреса и замки встают ровными столбцами
         Grid.SetIsSharedSizeScope(menu, true);
+
+        if (computer is { } pc)
+        {
+            var item = new MenuItem();
+            item.Header = ComputerRow(pc.Current, locks is not null);
+            item.Click += (_, _) => pc.Pick();
+
+            // под замком вкладка держит свой сервер — компьютер, как и прочие строки, приглушён
+            item.Opacity = muted || locks?.TabLocked() == true ? 0.5 : 1;
+            menu.Items.Add(item);
+            menu.Items.Add(new Separator());
+
+            if (pc.Current)
+            {
+                isCurrent = _ => false;
+            }
+        }
 
         var rows = new List<(MenuItem Item, ServerEntry Server)>();
         var sets = AppState.Current.ServerSets.Where(s => s.Rows.Count > 0).ToList();
@@ -66,7 +89,7 @@ public static class ServerMenu
         {
             if (sets.Count > 1)
             {
-                if (menu.Items.Count > 0)
+                if (menu.Items.Count > 0 && menu.Items[^1] is not Separator)
                 {
                     menu.Items.Add(new Separator());
                 }
@@ -101,14 +124,14 @@ public static class ServerMenu
             foreach (var (item, server) in rows)
             {
                 var locked = locks?.IsLocked(server) == true;
-                item.Header = Row(anchor, item, server, isCurrent(server), locks, tabLocked, locked, Fill);
+                item.Header = Row(anchor, item, server, isCurrent(server), locks, tabLocked, locked, Fill, marked?.Invoke(server) == true);
                 item.Opacity = muted || (tabLocked && !locked) ? 0.5 : 1;
             }
         }
 
         Fill();
 
-        if (menu.Items.Count == 0)
+        if (rows.Count == 0)
         {
             menu.Items.Add(new MenuItem { Header = "Серверов нет — добавьте в разделе «Серверы»", IsEnabled = false });
         }
@@ -180,7 +203,7 @@ public static class ServerMenu
 
     /// <summary>Строка: значок, название и логин, адрес, замок. Рамка есть у всех, у выбранного — видимая.</summary>
     private static FrameworkElement Row(FrameworkElement anchor, MenuItem item, ServerEntry server, bool current,
-        Locks? locks, bool tabLocked, bool locked, Action refill)
+        Locks? locks, bool tabLocked, bool locked, Action refill, bool marked = false)
     {
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -223,6 +246,22 @@ public static class ServerMenu
         grid.Children.Add(name);
         grid.Children.Add(address);
 
+        if (marked)
+        {
+            // мониторинг этого сервера открыт ещё в одном окне — значок там же, где у строки был бы замок
+            var mark = new SymbolIcon
+            {
+                Symbol = SymbolRegular.Open24,
+                FontSize = 14,
+                Margin = new Thickness(14, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                ToolTip = "Открыт ещё в одном окне",
+            };
+            mark.SetResourceReference(Control.ForegroundProperty, "AccentTextFillColorPrimaryBrush");
+            Grid.SetColumn(mark, 3);
+            grid.Children.Add(mark);
+        }
+
         if (locks is not null)
         {
             // место под замок есть у каждой строки, даже без него: замки — ровным столбцом
@@ -234,6 +273,54 @@ public static class ServerMenu
             {
                 slot.Child = LockButton(anchor, item, server, locks, locked, refill);
             }
+        }
+
+        return new Border
+        {
+            Child = grid,
+            Padding = new Thickness(6, 3, 8, 3),
+            CornerRadius = new CornerRadius(4),
+            BorderThickness = new Thickness(1),
+            Background = current ? PickFill : Brushes.Transparent,
+            BorderBrush = current ? PickStroke : Brushes.Transparent,
+        };
+    }
+
+    /// <summary>Строка «Этот компьютер» — тем же видом, что у сервера: значок, название, пустой адрес, место под замок.</summary>
+    private static FrameworkElement ComputerRow(bool current, bool lockSlot)
+    {
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "ServerName" });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, SharedSizeGroup = "ServerAddress" });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var icon = new Image
+        {
+            Source = ShellIcons.Computer,
+            Width = 16,
+            Height = 16,
+            Margin = new Thickness(0, 0, 8, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        var name = new TextBlock
+        {
+            Text = LocalSource.ComputerTitle,
+            FontWeight = current ? FontWeights.SemiBold : FontWeights.Normal,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 20, 0),
+        };
+
+        Grid.SetColumn(name, 1);
+        grid.Children.Add(icon);
+        grid.Children.Add(name);
+
+        if (lockSlot)
+        {
+            var slot = new Border { Width = 20, Height = 20, Margin = new Thickness(14, 0, 0, 0) };
+            Grid.SetColumn(slot, 3);
+            grid.Children.Add(slot);
         }
 
         return new Border

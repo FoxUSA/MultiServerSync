@@ -24,6 +24,9 @@
     <Resource Include="Assets\user_data.ico" />
     <!--  подсветка редактора «Править» для того, чего нет в AvalonEdit: bash, YAML, конфиги  -->
     <EmbeddedResource Include="Assets\Highlighting\*.xshd" />
+    <!--  «Мониторинг»: сборщик истории и его служба — ставятся на сервер кнопкой «Включить сбор»  -->
+    <EmbeddedResource Include="Assets\Monitor\collect.sh" />
+    <EmbeddedResource Include="Assets\Monitor\mss-monitor.service" />
   </ItemGroup>
 
   <ItemGroup>

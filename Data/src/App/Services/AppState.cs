@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.IO;
@@ -17,6 +17,9 @@ public enum AppSection
     Files,
     Download,
     Explorer,
+
+    /// <summary>«Мониторинг»: нагрузка одного сервера — процессор, память, диск, сеть. Вкладок нет.</summary>
+    Monitor,
     Settings,
 }
 
@@ -42,6 +45,7 @@ public sealed class AppState : ObservableObject
     private Workspace? _activeCommand;
     private Workspace? _activeDownload;
     private Workspace? _activeExplorer;
+    private Workspace? _activeMonitor;
 
     /// <summary>
     /// Вкладка «Команд», открытая до перехода в личные команды, и сама личная вкладка: на ленте
@@ -74,6 +78,9 @@ public sealed class AppState : ObservableObject
     /// <summary>Вкладки раздела «Проводник»: у каждой свой сервер, свои папки и параметры переноса.</summary>
     public ObservableCollection<Workspace> ExplorerTabs { get; } = new();
 
+    /// <summary>Вкладки раздела «Мониторинг»: у каждой свой сервер (только один) и свой период.</summary>
+    public ObservableCollection<Workspace> MonitorTabs { get; } = new();
+
     public ObservableCollection<Workspace> Tabs => TabsFor(_section);
 
     private ObservableCollection<Workspace> TabsFor(AppSection section) => section switch
@@ -81,22 +88,25 @@ public sealed class AppState : ObservableObject
         AppSection.Command => CommandTabs,
         AppSection.Download => DownloadTabs,
         AppSection.Explorer => ExplorerTabs,
+        AppSection.Monitor => MonitorTabs,
         _ => Workspaces,
     };
 
     /// <summary>Раздел, чьи вкладки сейчас в ленте: «Серверы» и «Настройки» показывают копирование.</summary>
     private AppSection TabSection =>
-        _section is AppSection.Command or AppSection.Download or AppSection.Explorer ? _section : AppSection.Files;
+        _section is AppSection.Command or AppSection.Download or AppSection.Explorer or AppSection.Monitor ? _section : AppSection.Files;
 
     private AppSection SectionOf(Workspace workspace) =>
         ReferenceEquals(workspace, _serversDesk) ? AppSection.Servers
         : CommandTabs.Contains(workspace) ? AppSection.Command
         : DownloadTabs.Contains(workspace) ? AppSection.Download
         : ExplorerTabs.Contains(workspace) ? AppSection.Explorer
+        : MonitorTabs.Contains(workspace) ? AppSection.Monitor
         : AppSection.Files;
 
     /// <summary>Все вкладки обоих разделов — для того, что касается каждой: серверы, наборы, занятость.</summary>
-    public IEnumerable<Workspace> AllWorkspaces => Workspaces.Concat(CommandTabs).Concat(DownloadTabs).Concat(ExplorerTabs);
+    public IEnumerable<Workspace> AllWorkspaces =>
+        Workspaces.Concat(CommandTabs).Concat(DownloadTabs).Concat(ExplorerTabs).Concat(MonitorTabs);
 
     /// <summary>В каком списке живёт вкладка.</summary>
     public ObservableCollection<Workspace> TabsOf(Workspace workspace) => TabsFor(SectionOf(workspace));
@@ -257,6 +267,32 @@ public sealed class AppState : ObservableObject
     /// <summary>Чей вывод в терминале внизу: на «Серверах» — своей вкладки раздела, иначе открытой.</summary>
     public Workspace TerminalOwner => _section == AppSection.Servers ? ServersDesk : ActiveWorkspace;
 
+    /// <summary>Открытая вкладка «Мониторинга» — даже когда на экране другой раздел.</summary>
+    public Workspace ActiveMonitorTab => _activeMonitor ?? MonitorTabs[0];
+
+    /// <summary>Сервер открытой вкладки «Мониторинга» — отмеченный в её панели слева; null — не выбран.</summary>
+    public ServerEntry? MonitorServer => MonitorTabs.Count > 0 ? ActiveMonitorTab.MonitorServer : null;
+
+    /// <summary>Период открытой вкладки «Мониторинга».</summary>
+    public MonitorRange MonitorRange
+    {
+        get => MonitorTabs.Count > 0 ? ActiveMonitorTab.MonitorRange : MonitorRange.Live;
+        set
+        {
+            if (MonitorTabs.Count > 0)
+            {
+                ActiveMonitorTab.MonitorRange = value;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Вкладка «Мониторинга», в чей журнал внизу ложатся записи про сервер (связь, сбор истории): та, что
+    /// показывает его, — открытая первой; никто не показывает — открытая вкладка раздела.
+    /// </summary>
+    public Workspace MonitorTabOf(ServerEntry server) =>
+        MonitorServer == server ? ActiveMonitorTab : MonitorTabs.FirstOrDefault(t => t.MonitorServer == server) ?? ActiveMonitorTab;
+
     /// <summary>Набор серверов открытой вкладки — он стоит в панели «Целевые сервера».</summary>
     public ServerSet? PaneSet => PaneOwner?.PaneSet;
 
@@ -334,7 +370,7 @@ public sealed class AppState : ObservableObject
 
     /// <summary>Ряд вкладок — на «Копировании» и на «Команде», у каждой свои вкладки.</summary>
     public bool ShowsWorkspaceTabs =>
-        _section is AppSection.Files or AppSection.Command or AppSection.Download or AppSection.Explorer;
+        _section is AppSection.Files or AppSection.Command or AppSection.Download or AppSection.Explorer or AppSection.Monitor;
 
     /// <summary>Ряд наборов серверов виден только на «Серверах».</summary>
     public bool ShowsServerSetTabs => _section == AppSection.Servers;
@@ -832,7 +868,7 @@ public sealed class AppState : ObservableObject
     /// Отмеченные серверы в панели слева выделены рамкой и фоном — там, где по ним что-то запускается:
     /// «Копирование», «Команда», «Скачивание». На «Серверах» галочки слева значат другое.
     /// </summary>
-    public bool PaneHighlightsPicks => _section is AppSection.Files or AppSection.Command or AppSection.Download;
+    public bool PaneHighlightsPicks => _section is AppSection.Files or AppSection.Command or AppSection.Download or AppSection.Monitor;
 
     /// <summary>Значок «окно команды» в строке кнопок терминала — только в «Проводнике»: на других страницах окно команды своё.</summary>
     public System.Windows.Visibility CommandFlipVisibility =>
@@ -956,6 +992,7 @@ public sealed class AppState : ObservableObject
             AppSection.Command => _activeCommand ?? CommandTabs[0],
             AppSection.Download => _activeDownload ?? DownloadTabs[0],
             AppSection.Explorer => _activeExplorer ?? ExplorerTabs[0],
+            AppSection.Monitor => _activeMonitor ?? MonitorTabs[0],
             _ => _active ?? Workspaces[0],
         };
         set
@@ -971,6 +1008,7 @@ public sealed class AppState : ObservableObject
                 AppSection.Command => _activeCommand,
                 AppSection.Download => _activeDownload,
                 AppSection.Explorer => _activeExplorer,
+                AppSection.Monitor => _activeMonitor,
                 _ => _active,
             };
 
@@ -1007,6 +1045,9 @@ public sealed class AppState : ObservableObject
                         ExplorerTabs.Remove(filter);
                     }
 
+                    break;
+                case AppSection.Monitor:
+                    _activeMonitor = value;
                     break;
                 default:
                     _active = value;
@@ -1390,7 +1431,13 @@ public sealed class AppState : ObservableObject
         // новая вкладка проводника открывается там же, где стоит текущая, — как новая вкладка в Windows
         workspace.Explorer = source?.Explorer.Clone() ?? new ExplorerTabState();
 
-        if (source is not null)
+        if (source is not null && ReferenceEquals(tabs, MonitorTabs))
+        {
+            // «Мониторинг»: новая вкладка — без выбранного сервера (новые цели не отмечаются сами), период «Сейчас»;
+            // набор серверов — как у открытой
+            workspace.CopyPaneFrom(source);
+        }
+        else if (source is not null)
         {
             // оба набора галочек переезжают на новую вкладку такими же, как были, —
             // во всех наборах серверов, а не только в открытом: у каждого набора своя память
@@ -1768,7 +1815,8 @@ public sealed class AppState : ObservableObject
         var wasJumped = ReferenceEquals(workspace, _jumpedTo) && ReferenceEquals(_activeCommand, workspace);
 
         if (ReferenceEquals(_active, workspace) || ReferenceEquals(_activeCommand, workspace)
-            || ReferenceEquals(_activeDownload, workspace) || ReferenceEquals(_activeExplorer, workspace))
+            || ReferenceEquals(_activeDownload, workspace) || ReferenceEquals(_activeExplorer, workspace)
+            || ReferenceEquals(_activeMonitor, workspace))
         {
             // соседа — из той же ленты: архивные вкладки лежат в том же списке, и сосед по списку
             // мог оказаться архивным — тогда лента шла за ним и сама открывала архив.
@@ -1976,7 +2024,8 @@ public sealed class AppState : ObservableObject
         }
 
         var wasOpen = ReferenceEquals(_active, workspace) || ReferenceEquals(_activeCommand, workspace)
-            || ReferenceEquals(_activeDownload, workspace) || ReferenceEquals(_activeExplorer, workspace);
+            || ReferenceEquals(_activeDownload, workspace) || ReferenceEquals(_activeExplorer, workspace)
+            || ReferenceEquals(_activeMonitor, workspace);
 
         // сначала открыть соседнюю в той же ленте, потом перенести ярлык: лента не остаётся без выбранного
         if (wasOpen
@@ -2079,6 +2128,8 @@ public sealed class AppState : ObservableObject
             ActiveExplorerId = (_activeExplorer is { FilterOf: null } explorer ? explorer : _explorerBeforeFilter ?? ExplorerTabs[0]).Id,
             ExplorerTabs = ExplorerTabs.Where(w => w.FilterOf is null).Select(w => w.ToState()).ToList(),
             LastInStripIds = _lastInStrip.Select(p => LastInStrip(p.Key.Tabs, p.Key.Archived)?.Id).OfType<string>().ToList(),
+            ActiveMonitorId = (_activeMonitor ?? MonitorTabs[0]).Id,
+            MonitorTabs = MonitorTabs.Select(w => w.ToState()).ToList(),
         });
     }
 
@@ -2191,7 +2242,7 @@ public sealed class AppState : ObservableObject
 
     /// <summary>Вкладки всех разделов загружены — до этого сохранять и переключать нечего.</summary>
     internal bool TabsLoaded =>
-        Workspaces.Count > 0 && CommandTabs.Count > 0 && DownloadTabs.Count > 0 && ExplorerTabs.Count > 0;
+        Workspaces.Count > 0 && CommandTabs.Count > 0 && DownloadTabs.Count > 0 && ExplorerTabs.Count > 0 && MonitorTabs.Count > 0;
 
     // ── сохранение ─────────────────────────────────────────────────────────────
 
@@ -2410,6 +2461,46 @@ public sealed class AppState : ObservableObject
 
             _activeExplorer = ExplorerTabs.FirstOrDefault(w => w.Id == file?.ActiveExplorerId) ?? ExplorerTabs[0];
 
+            // вкладки «Мониторинга». Файл без них — из версии, где у раздела была одна скрытая вкладка (MonitorTab,
+            // период — в настройках): она становится первой, с тем же сервером и периодом. Нет и её — одна основная,
+            // сервер не выбран, набор как у первой вкладки копирования
+            var monitorStates = file?.MonitorTabs ?? new List<WorkspaceState>();
+            var legacyMonitor = monitorStates.Count == 0;
+
+            if (legacyMonitor)
+            {
+                var first = file?.MonitorTab ?? new WorkspaceState();
+                first.Id = string.Empty;
+                first.Title = "Основная";
+                first.IsMain = true;
+                first.IsArchived = false;
+                first.MonitorRange ??= Settings.MonitorRange;
+                monitorStates.Add(first);
+            }
+
+            for (var i = 0; i < monitorStates.Count; i++)
+            {
+                var state = monitorStates[i];
+                var tab = new Workspace(
+                    string.IsNullOrWhiteSpace(state.Id) ? Guid.NewGuid().ToString("N") : state.Id,
+                    string.IsNullOrWhiteSpace(state.Title) ? (i == 0 ? "Основная" : $"Вкладка {i + 1}") : state.Title,
+                    isMain: i == 0);
+
+                tab.SyncServers(Servers);
+                tab.SelectServers((state.SelectedServerIds ?? []).Take(1));
+                tab.Restore(state);
+
+                if (legacyMonitor && file?.MonitorTab is null)
+                {
+                    tab.CopyPaneFrom(Workspaces[0]);
+                }
+
+                MonitorTabs.Add(tab);
+            }
+
+            _activeMonitor = MonitorTabs.FirstOrDefault(w => w.Id == file?.ActiveMonitorId) ?? MonitorTabs[0];
+            _paneMigrated |= legacyMonitor;
+
             // связки, у которых пропала одна сторона, распускаем: личная без родителя становится обычной
             foreach (var copy in Workspaces.Concat(DownloadTabs).Where(w => w.AfterCopyTabId.Length > 0 && w.Personal is null))
             {
@@ -2437,13 +2528,13 @@ public sealed class AppState : ObservableObject
             var lastIds = (file?.LastInStripIds ?? []).ToHashSet(StringComparer.Ordinal);
 
             foreach (var tab in AllWorkspaces.Where(w => lastIds.Contains(w.Id))
-                .Concat([_active!, _activeCommand!, _activeDownload!, _activeExplorer!]))
+                .Concat([_active!, _activeCommand!, _activeDownload!, _activeExplorer!, _activeMonitor!]))
             {
                 RememberInStrip(tab);
             }
 
             AppLog.Debug($"Вкладок копирования: {Workspaces.Count}, команды: {CommandTabs.Count}, "
-                + $"скачивания: {DownloadTabs.Count}, проводника: {ExplorerTabs.Count}.");
+                + $"скачивания: {DownloadTabs.Count}, проводника: {ExplorerTabs.Count}, мониторинга: {MonitorTabs.Count}.");
         }
         finally
         {

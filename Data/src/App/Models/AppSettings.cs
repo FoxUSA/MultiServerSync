@@ -74,6 +74,27 @@ public sealed class ActionOutputPrefs
     public bool ProgramJournal { get; set; }
 }
 
+/// <summary>Вынесенное окно «Мониторинга» в настройках: какой сервер, какой период и где стояло окно.</summary>
+public sealed class MonitorWindowState
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    public string ServerId { get; set; } = string.Empty;
+
+    public string Range { get; set; } = "live";
+
+    /// <summary>Обычное положение и размер — у развёрнутого окна те, к которым оно вернётся.</summary>
+    public double? Left { get; set; }
+
+    public double? Top { get; set; }
+
+    public double Width { get; set; }
+
+    public double Height { get; set; }
+
+    public bool Maximized { get; set; }
+}
+
 public sealed class AppSettings
 {
     /// <summary>Light | Dark | System</summary>
@@ -349,6 +370,19 @@ public sealed class AppSettings
     public double OutputWidth { get; set; } = 900;
 
     public double OutputHeight { get; set; } = 620;
+
+    /// <summary>
+    /// Период «Мониторинга» из версии, где вкладок у раздела не было: только читается при переносе в первую вкладку.
+    /// Теперь период у каждой вкладки свой (<c>WorkspaceState.MonitorRange</c>).
+    /// </summary>
+    public string MonitorRange { get; set; } = "live";
+
+    /// <summary>
+    /// Вынесенные окна «Мониторинга», открытые сейчас: у каждого свой сервер, период, место, размер и развёрнутость.
+    /// Пишутся по ходу (перенос, размер, период — с задержкой) и при выходе остаются: следующий запуск открывает их снова.
+    /// Закрыл окно сам — его записи нет.
+    /// </summary>
+    public List<MonitorWindowState> MonitorWindows { get; set; } = new();
 
     public void PushHistory(ObservableCollection<string> list, string value, int limit = 25)
     {

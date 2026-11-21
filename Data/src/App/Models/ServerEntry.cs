@@ -233,6 +233,16 @@ public sealed class ServerEntry : ObservableObject
     [JsonIgnore]
     public string PaneLabel => string.IsNullOrWhiteSpace(Name) ? Host : Name;
 
+    private bool _hasMonitorWindow;
+
+    /// <summary>«Мониторинг»: у сервера есть вынесенные окна — в панели слева у него значок.</summary>
+    [JsonIgnore]
+    public bool HasMonitorWindow
+    {
+        get => _hasMonitorWindow;
+        set => Set(ref _hasMonitorWindow, value);
+    }
+
     public ServerEntry Clone() => new()
     {
         Id = Guid.NewGuid().ToString("N"),

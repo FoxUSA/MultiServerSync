@@ -19,6 +19,40 @@
       <sys:Double x:Key="IconButtonSize">36</sys:Double>
       <sys:Double x:Key="IconGlyphSize">20</sys:Double>
 
+      <!--  подпись сервера: у правого края ряда разделов и в шапке вынесенного окна «Мониторинга»; подсветка под мышью  -->
+      <Style x:Key="ServerTagStyle" TargetType="Button">
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="Button">
+              <!--  сервер «Проводника» — как отмеченный сервер в панели слева: тусклая оранжевая рамка
+                    на тусклом оранжевом фоне; под мышью и при нажатии фон чуть плотнее  -->
+              <Border
+                x:Name="Bd"
+                Padding="10,5"
+                Background="#26E07A1F"
+                BorderBrush="#80E07A1F"
+                BorderThickness="1"
+                CornerRadius="6">
+                <ContentPresenter VerticalAlignment="Center" />
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                  <Setter TargetName="Bd" Property="Background" Value="#38E07A1F" />
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                  <Setter TargetName="Bd" Property="Background" Value="#4AE07A1F" />
+                </Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
+
       <!--
         WPF UI 4.3: при нажатии шаблон кнопки берёт цвет привязкой к TemplatedParent на самой кнопке. Её там нет,
         и текст откатывается к системному чёрному. Триггер стиля сильнее триггера шаблона, поэтому цвет задаём здесь.

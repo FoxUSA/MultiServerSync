@@ -719,8 +719,14 @@ public sealed class LocalSource : IFileSource
         return (bytes, files, dirs);
     }, ct);
 
+    /// <summary>SHA-256 файла; «Остановить» обрывает чтение на ближайшем куске, а не после последнего байта.</summary>
     public Task<string> HashAsync(string path, CancellationToken ct) =>
-        Task.Run(() => SshService.ComputeLocalSha256(path), ct);
+        Task.Run(() =>
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1 << 20);
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            return Convert.ToHexString(sha.ComputeHash(new TransferMeter(null, ct).Wrap(stream))).ToLowerInvariant();
+        }, ct);
 
     public Task<byte[]> ReadFileAsync(string path, long limit) => Task.Run(() =>
     {

@@ -333,6 +333,7 @@ public static class CopyWindowLayout
         buttons.IsVisibleChanged += (_, _) => Place();
         ((INotifyCollectionChanged)grid.Items).CollectionChanged += (_, _) => Place();
         FollowColumns(grid);
+        KeepFilled(grid);
 
         // шапка получает высоту после разметки
         grid.Dispatcher.BeginInvoke(new Action(Place), DispatcherPriority.Loaded);
@@ -429,6 +430,73 @@ public static class CopyWindowLayout
             {
                 panel.InvalidateMeasure();
             }
+        }
+
+        FillLater(grid);
+    }
+
+    /// <summary>
+    /// Столбец «остаток ширины» (путь) иногда остаётся посчитанным под прежнюю ширину таблицы: её меняли, пока
+    /// страница была скрыта (другой раздел, другая вкладка), или сжались столбцы «по содержимому» — и справа от
+    /// строк пустая полоса, а путь обрезан. Таблица показалась или сменила размер — остаток считается заново.
+    /// </summary>
+    public static void KeepFilled(DataGrid grid)
+    {
+        grid.SizeChanged += (_, _) => FillLater(grid);
+        grid.IsVisibleChanged += (_, _) => FillLater(grid);
+    }
+
+    private static readonly HashSet<DataGrid> WaitingFill = new();
+
+    private static void FillLater(DataGrid grid)
+    {
+        if (!WaitingFill.Add(grid))
+        {
+            return;
+        }
+
+        // после разметки: ширины столбцов и видимой части к этому времени уже новые
+        grid.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            WaitingFill.Remove(grid);
+            Fill(grid);
+        }), DispatcherPriority.ContextIdle);
+    }
+
+    private static void Fill(DataGrid grid)
+    {
+        if (!grid.IsVisible || FindChild<ScrollViewer>(grid) is not { ViewportWidth: > 0 } scroll)
+        {
+            return;
+        }
+
+        var shown = grid.Columns.Where(c => c.Visibility == Visibility.Visible).ToList();
+        var stars = shown.Where(c => c.Width.IsStar).ToList();
+
+        if (stars.Count == 0)
+        {
+            return;
+        }
+
+        var total = shown.Sum(c => c.ActualWidth);
+        var gap = scroll.ViewportWidth - total;
+
+        // сошлось — трогать нечего; столбцы шире таблицы из-за наименьшей ширины пути — тоже не наш случай
+        if (Math.Abs(gap) <= 1 || (gap < 0 && stars.All(c => c.ActualWidth <= c.MinWidth + 0.5)))
+        {
+            return;
+        }
+
+        // в лог: если полоса появится снова, по этой строке видно, когда и на сколько разошлось
+        AppLog.Debug($"Таблица: столбец пути пересчитан — столбцы {total:0}, видно {scroll.ViewportWidth:0}, разница {gap:0}");
+
+        foreach (var column in stars)
+        {
+            var share = column.Width.Value;
+
+            // то же значение свойство не заметило бы: через «по содержимому» остаток делится заново
+            column.Width = DataGridLength.Auto;
+            column.Width = new DataGridLength(share, DataGridLengthUnitType.Star);
         }
     }
 

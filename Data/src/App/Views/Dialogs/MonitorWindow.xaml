@@ -1,0 +1,116 @@
+<ui:FluentWindow
+  x:Class="MultiServerSync.Views.Dialogs.MonitorWindow"
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:controls="clr-namespace:MultiServerSync.Views.Controls"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+  Title="Мониторинг"
+  Icon="pack://application:,,,/Assets/app.ico"
+  Width="520"
+  Height="430"
+  MinWidth="0"
+  MinHeight="0"
+  ui:Design.Background="{DynamicResource ApplicationBackgroundBrush}"
+  ui:Design.Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  ExtendsContentIntoTitleBar="True"
+  Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+  ShowInTaskbar="True"
+  TextOptions.TextFormattingMode="Display"
+  UseLayoutRounding="True"
+  WindowBackdropType="None"
+  WindowCornerPreference="Round"
+  WindowStartupLocation="Manual">
+
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <!--  шапка: та же подпись сервера, что в ряду разделов главного окна, — щелчок открывает список серверов,
+          и окно переключается на выбранный; «+» — ещё одно окно с этим сервером. Крестик окна — закрыть окно  -->
+    <ui:TitleBar x:Name="Bar" Grid.Row="0" Height="44">
+      <ui:TitleBar.Header>
+        <StackPanel
+          x:Name="Head"
+          Margin="5.34,0,0,0"
+          HorizontalAlignment="Left"
+          VerticalAlignment="Center"
+          Orientation="Horizontal">
+          <Button
+            x:Name="ServerTag"
+            Height="32"
+            Click="OnServerTag"
+            Style="{StaticResource ServerTagStyle}"
+            ToolTip="Сменить сервер в этом окне">
+            <StackPanel Orientation="Horizontal">
+              <Image
+                x:Name="ServerIcon"
+                Width="16"
+                Height="16"
+                Margin="0,0,8,0"
+                VerticalAlignment="Center" />
+              <!--  имя видно всегда; не влезли — уходят адрес, потом логин  -->
+              <controls:FitPanel x:Name="Who" VerticalAlignment="Center" Gap="8" />
+              <ui:SymbolIcon
+                Margin="10,0,0,0"
+                VerticalAlignment="Center"
+                FontSize="12"
+                Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                Symbol="ArrowDown24" />
+            </StackPanel>
+          </Button>
+          <Button
+            x:Name="MoreButton"
+            Width="32"
+            Height="32"
+            Margin="4,0,0,0"
+            Click="OnMore"
+            Cursor="Hand"
+            Focusable="False"
+            ToolTip="Ещё одно окно с этим сервером">
+            <Button.Template>
+              <ControlTemplate TargetType="Button">
+                <Border
+                  x:Name="Bd"
+                  Background="{DynamicResource ControlFillColorDefaultBrush}"
+                  BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                  BorderThickness="1"
+                  CornerRadius="6">
+                  <ui:SymbolIcon
+                    x:Name="Glyph"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    FontSize="16"
+                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                    Symbol="Add24" />
+                </Border>
+                <ControlTemplate.Triggers>
+                  <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                    <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                  </Trigger>
+                  <Trigger Property="IsPressed" Value="True">
+                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}" />
+                  </Trigger>
+                </ControlTemplate.Triggers>
+              </ControlTemplate>
+            </Button.Template>
+          </Button>
+        </StackPanel>
+      </ui:TitleBar.Header>
+    </ui:TitleBar>
+
+    <!--  страница — такой же карточкой, как в главном окне; от края окна 5,34, как там  -->
+    <Border
+      x:Name="Card"
+      Grid.Row="1"
+      Margin="5.34,0,5.34,5.34"
+      Background="{DynamicResource SolidBackgroundFillColorQuarternaryBrush}"
+      BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
+      BorderThickness="1"
+      CornerRadius="8">
+      <controls:MonitorView x:Name="View" IsDetached="True" />
+    </Border>
+  </Grid>
+</ui:FluentWindow>

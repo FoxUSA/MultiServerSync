@@ -257,15 +257,6 @@
           IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=CopyWithChain, Mode=TwoWay}"
           ToolTip="Вместе с выводом личных команд вкладки, одним отчётом"
           Visibility="{Binding Source={x:Static services:AppState.Current}, Path=ChainCopyVisibility}" />
-        <ui:Button
-          Margin="0,0,4,0"
-          Padding="9,2"
-          Click="OnRetry"
-          Content="Повторить упавшие"
-          FontSize="11"
-          Icon="{ui:SymbolIcon ArrowClockwise24}"
-          Visibility="{Binding CanRetry, Converter={StaticResource BoolToVis}}" />
-        <!--  «*.txt» и CopyPass — правее «Повторить упавшие»: не сдвигаются, когда она появляется и пропадает  -->
         <CheckBox
           MinWidth="0"
           MinHeight="0"
@@ -295,7 +286,8 @@
       </StackPanel>
     </Grid>
 
-    <!--  поровну: слева таблица серверов, справа вывод; границу двигает разделитель  -->
+    <!--  поровну: слева таблица серверов, справа вывод. Граница мышью не двигается (сказано 21.11): перетянутая,
+          она ужимала таблицу ниже её минимума и резала строки; между ними — зазор 4  -->
     <Grid Grid.Row="1">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="1*" MinWidth="320" />
@@ -469,12 +461,6 @@
         </StackPanel>
         </Grid>
       </Border>
-
-      <GridSplitter
-        Grid.Column="1"
-        Width="4"
-        HorizontalAlignment="Stretch"
-        Background="Transparent" />
 
       <!--  две стороны одного окна: вывод и окно команды. Переворот — сжатие к середине и разворот
             другой стороной, как страница. Высота у сторон одна — их ячейка  -->

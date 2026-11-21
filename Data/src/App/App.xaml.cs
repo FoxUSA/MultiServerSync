@@ -152,6 +152,16 @@ public partial class App : Application
 
         AtomicFile.Flush();
 
+        // прочитанная история «Мониторинга» — на диск, следующий запуск покажет её сразу
+        try
+        {
+            MonitorFeed.SaveAllCaches();
+        }
+        catch
+        {
+            // кэш — не данные: не записался, прочитаем с сервера
+        }
+
         // помощник администратора уходит вместе с программой
         AdminShell.Stop();
 
