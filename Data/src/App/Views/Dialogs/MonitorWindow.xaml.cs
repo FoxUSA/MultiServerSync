@@ -46,6 +46,9 @@ public partial class MonitorWindow : Wpf.Ui.Controls.FluentWindow
         View.NeedChanged += FitMinimum;
         Bar.SizeChanged += (_, _) => FitHead();
 
+        // перенесли на монитор с другим масштабом — запас на округление считается по нему
+        DpiChanged += (_, _) => Dispatcher.BeginInvoke(FitMinimum, System.Windows.Threading.DispatcherPriority.Loaded);
+
         _saveLater.Tick += (_, _) =>
         {
             _saveLater.Stop();
@@ -326,8 +329,9 @@ public partial class MonitorWindow : Wpf.Ui.Controls.FluentWindow
         var head = HeadChrome() + Who.FirstWidth + CaptionButtons;
         var chrome = Card.Margin.Left + Card.Margin.Right + Card.BorderThickness.Left + Card.BorderThickness.Right;
 
-        MinWidth = Math.Ceiling(Math.Max(head, need.Width + chrome));
-        MinHeight = Math.Ceiling(Bar.Height + Card.Margin.Bottom + Card.BorderThickness.Top + Card.BorderThickness.Bottom + need.Height);
+        // до целых точек экрана с запасом: на 125–250% поля округляются, и впритык край срезал бы «ГБ»
+        MinWidth = Core.DevicePixel.Up(Math.Max(head, need.Width + chrome), this);
+        MinHeight = Core.DevicePixel.Up(Bar.Height + Card.Margin.Bottom + Card.BorderThickness.Top + Card.BorderThickness.Bottom + need.Height, this);
     }
 
     private void OnServerTag(object sender, RoutedEventArgs e)

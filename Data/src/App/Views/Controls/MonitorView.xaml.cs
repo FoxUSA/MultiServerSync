@@ -252,7 +252,8 @@ public partial class MonitorView : UserControl
 
         var full = RangesWidth(shortLabels: false);
         var detach = DetachButton.Visibility == Visibility.Visible ? DetachButton.Width + 4 : 0;
-        var wantShort = width < 640 - 16 || full + detach > width + 0.01;
+        // точка экрана запаса: на 125–250% кнопки округляются и полные подписи впритык срезались бы краем
+        var wantShort = width < 640 - 16 || full + detach + Core.DevicePixel.Of(this) > width;
 
         if (wantShort == _shortLabels)
         {

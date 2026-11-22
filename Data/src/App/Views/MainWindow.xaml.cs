@@ -313,13 +313,21 @@ public partial class MainWindow : FluentWindow
                 State.CloseExplorerFilter();
             }
 
+            // переход в «Мониторинг» кнопкой — как правый щелчок: сервер из раздела, откуда пришли, период «Сейчас»
+            if (page == typeof(MonitorPage) && State.Section != AppSection.Monitor && State.MonitorTabs.Count > 0)
+            {
+                State.ActiveMonitorTab.SeedMonitor(State.PaneTab?.PaneServers.FirstOrDefault(c => c.IsSelected)?.Server);
+            }
+
             Navigate(page);
         }
     }
 
     /// <summary>
-    /// Правая кнопка по «Мониторингу»: сразу отдельное окно, раздел в главном окне не меняется. Сервер и период —
-    /// запомненные разделом; окно то же, что у кнопки выноса справа от периодов. Серверов нет — отказ под кнопкой.
+    /// Правая кнопка по «Мониторингу»: сразу отдельное окно, раздел в главном окне не меняется; окно то же, что у
+    /// кнопки выноса справа от периодов. Сервер — первый отмеченный в панели открытого раздела, в том порядке, как она
+    /// показывает (в самом «Мониторинге» — его выбранный); отмеченных нет — окно без сервера. Период — всегда «Сейчас».
+    /// Серверов нет — отказ под кнопкой.
     /// </summary>
     private void OnMonitorSectionRightClick(object sender, MouseButtonEventArgs e)
     {
@@ -338,7 +346,11 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        MonitorWindow.Open(State.MonitorServer, State.MonitorRange, this);
+        var server = State.Section == AppSection.Monitor
+            ? State.MonitorServer
+            : State.PaneTab?.PaneServers.FirstOrDefault(c => c.IsSelected)?.Server;
+
+        MonitorWindow.Open(server, MonitorRange.Live, this);
     }
 
     /// <summary>Отмечена кнопка открытого раздела; в «Настройках» — ни одна.</summary>
@@ -1392,6 +1404,9 @@ public partial class MainWindow : FluentWindow
         PageFrame.SizeChanged += (_, _) => FitMonitorMinimum();
         ExplorerServerTag.SizeChanged += (_, _) => FitMonitorMinimum();
         SectionBar.SizeChanged += (_, _) => FitMonitorMinimum();
+
+        // перенесли на монитор с другим масштабом — запас на округление считается по нему
+        DpiChanged += (_, _) => Dispatcher.BeginInvoke(FitMonitorMinimum, System.Windows.Threading.DispatcherPriority.Loaded);
     }
 
     private double _baseMinWidth;
@@ -1413,9 +1428,9 @@ public partial class MainWindow : FluentWindow
 
         // ряд разделов: кнопки, отмена, подпись сервера справа — каждый своей естественной шириной. С кнопкой
         // «Мониторинга» ряд стал длиннее, и во всех разделах окно не ужимается так, чтобы он резался
-        var row = Math.Ceiling(SectionBar.Children.OfType<FrameworkElement>().Sum(b => b.DesiredSize.Width)
+        var row = Core.DevicePixel.Up(SectionBar.Children.OfType<FrameworkElement>().Sum(b => b.DesiredSize.Width)
             + (ExplorerServerTag.IsVisible ? ExplorerServerTag.DesiredSize.Width + 12 : 0)
-            + 96 + 2 * (6 + 1 + 5.34));
+            + 96 + 2 * (6 + 1 + 5.34), this);
 
         if (State.Section != AppSection.Monitor || !_pages.TryGetValue(typeof(MonitorPage), out var page) || page is not MonitorPage monitor)
         {
@@ -1451,8 +1466,9 @@ public partial class MainWindow : FluentWindow
         var frame = Math.Max(0, ActualWidth - RootGrid.ActualWidth);
         var frameHeight = Math.Max(0, ActualHeight - RootGrid.ActualHeight);
         var rows = RootGrid.RowDefinitions.Where(r => !ReferenceEquals(r, PageRow)).Sum(r => r.ActualHeight);
-        var width = Math.Ceiling(Math.Max(_baseMinWidth, Math.Max(row, frame + 2 * 5.34 + PaneColumn.ActualWidth + 2 + need.Width)));
-        var height = Math.Ceiling(Math.Max(_baseMinHeight, frameHeight + rows + pageMin));
+        // до целых точек экрана с запасом: на 125–250% поля округляются, и впритык край срезал бы карточку
+        var width = Core.DevicePixel.Up(Math.Max(_baseMinWidth, Math.Max(row, frame + 2 * 5.34 + PaneColumn.ActualWidth + 2 + need.Width)), this);
+        var height = Core.DevicePixel.Up(Math.Max(_baseMinHeight, frameHeight + rows + pageMin), this);
 
         if (Math.Abs(MinWidth - width) > 0.5)
         {

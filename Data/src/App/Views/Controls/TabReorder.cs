@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -180,7 +180,7 @@ public sealed class TabReorder
         {
             if (ReferenceEquals(e.OriginalSource, _host))
             {
-                Cancel();
+                Cancel("мышь ушла к другому элементу");
             }
         };
         host.PreviewKeyDown += OnKeyDown;
@@ -219,6 +219,76 @@ public sealed class TabReorder
 
     /// <summary>Мышь с элементом над <see cref="OutTarget"/> или ушла с него — подсветить цель.</summary>
     public Action<bool>? OverOutTarget { get; set; }
+
+    /// <summary>
+    /// Цель далеко от ряда (соседняя таблица): ушла мышь за пределы ряда — элемент возвращается на место
+    /// и бледнеет, а у курсора плашка <see cref="DragGhost"/> с этим названием и числом. Не задано — элемент
+    /// ездит только внутри ряда (цель рядом с ним — значок архива).
+    /// </summary>
+    public Func<object, (ImageSource? Icon, string Title, int Count)>? GhostOf { get; init; }
+
+    /// <summary>Вторая строка плашки: что случится при отпускании; не над целью — оранжевая, отказ.</summary>
+    public Func<bool, string?>? GhostAction { get; init; }
+
+    private DragGhost? _ghost;
+
+    /// <summary>
+    /// Мышь с элементом ушла с самих элементов ряда — в режиме плашки у курсора. Граница — от начала
+    /// первого элемента до конца последнего, а не панель и не список: панель строк таблицы растянута
+    /// на всю её высоту, и пустота под строками считалась бы рядом — строка стояла внизу, в руке пусто.
+    /// </summary>
+    private bool MouseOutside
+    {
+        get
+        {
+            if (GhostOf is null || _panel is null || _items.Count == 0 || _origins.Length != _items.Count)
+            {
+                return false;
+            }
+
+            var last = _items.Count - 1;
+            var top = _origins[0].Y;
+            var bottom = _origins[last].Y + _items[last].ActualHeight;
+            var rows = new Rect(0, top, _panel.ActualWidth, Math.Max(0, bottom - top));
+
+            return !rows.Contains(Mouse.GetPosition(_panel));
+        }
+    }
+
+    /// <summary>Плашка у курсора: появляется за пределами ряда, едет за мышью, пропадает при возврате.</summary>
+    private void UpdateGhost()
+    {
+        if (GhostOf is null || !_dragging || _items.Count <= _from)
+        {
+            return;
+        }
+
+        var dragged = _items[_from];
+
+        if (!MouseOutside)
+        {
+            CloseGhost();
+            dragged.Opacity = _overOut ? 0.5 : 1;
+            return;
+        }
+
+        if (_ghost is null && _itemOf(dragged) is { } item)
+        {
+            var (icon, title, count) = GhostOf(item);
+            _ghost = new DragGhost(_host, icon, title, count);
+            AppLog.Debug($"«{Label(item)}» вынесен за пределы ряда: у курсора плашка.");
+        }
+
+        _ghost?.Follow();
+        _ghost?.SetAction(GhostAction?.Invoke(_overOut), refused: !_overOut);
+        dragged.Opacity = 0.5;
+    }
+
+    private void CloseGhost()
+    {
+        _ghost?.Close();
+        _ghost = null;
+    }
 
     private bool _overOut;
 
@@ -291,6 +361,7 @@ public sealed class TabReorder
             e.Handled = true;
             Follow(e.GetPosition(_panel));
             UpdateOverOut();
+            UpdateGhost();
             return;
         }
 
@@ -337,7 +408,7 @@ public sealed class TabReorder
         if (_dragging && e.Key == Key.Escape)
         {
             e.Handled = true;
-            Cancel();
+            Cancel("Escape");
         }
     }
 
@@ -478,6 +549,13 @@ public sealed class TabReorder
             }
         }
 
+        // мышь ушла за пределы ряда к дальней цели: в ряду элемент стоит на своём месте
+        if (MouseOutside)
+        {
+            pos = _origins[_from];
+            target = _from;
+        }
+
         Place(dragged, pos - _origins[_from]);
 
         if (target == _target)
@@ -585,7 +663,7 @@ public sealed class TabReorder
     }
 
     /// <summary>Отмена: все едут на свои прежние места.</summary>
-    private void Cancel()
+    private void Cancel(string why)
     {
         if (!_dragging)
         {
@@ -594,7 +672,7 @@ public sealed class TabReorder
 
         var dragged = _items[_from];
 
-        AppLog.Debug($"Перетаскивание «{Label(_itemOf(dragged))}» отменено.");
+        AppLog.Debug($"Перетаскивание «{Label(_itemOf(dragged))}» отменено: {why}.");
 
         Stop();
         _settling = true;
@@ -613,6 +691,7 @@ public sealed class TabReorder
     private void Stop()
     {
         _dragging = false;
+        CloseGhost();
         UpdateOverOut();
         _edgeTimer.Stop();
 

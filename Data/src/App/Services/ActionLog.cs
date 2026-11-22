@@ -59,13 +59,15 @@ public static class ActionLog
     /// <param name="section">Раздел записи; нет — раздел идущей операции или открытый в окне.</param>
     /// <param name="tab">Вкладка, в чей терминал ложится строка; нет — открытая.</param>
     /// <param name="details">Полный вывод строки: что именно сделано, по строке на объект.</param>
+    /// <param name="byUser">false — событие случилось само (файл пропал с диска): с «авто» вкладки буфер не трогается.</param>
     public static void Write(
         LogLevel level,
         string summary,
         ServerEntry? where = null,
         AppSection? section = null,
         Workspace? tab = null,
-        IEnumerable<string>? details = null)
+        IEnumerable<string>? details = null,
+        bool byUser = true)
     {
         where ??= Program;
 
@@ -121,11 +123,11 @@ public static class ActionLog
         // строки терминала живут в окне — из рабочего потока только через него
         if (dispatcher is not null && !dispatcher.CheckAccess())
         {
-            dispatcher.BeginInvoke(() => target.AddActionRow(where, level, summary, lines));
+            dispatcher.BeginInvoke(() => target.AddActionRow(where, level, summary, lines, byUser));
             return;
         }
 
-        target.AddActionRow(where, level, summary, lines);
+        target.AddActionRow(where, level, summary, lines, byUser);
     }
 
     /// <summary>Открытая вкладка — пока вкладки не загружены, строке некуда лечь.</summary>

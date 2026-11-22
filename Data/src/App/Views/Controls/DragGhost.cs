@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -99,10 +99,29 @@ internal sealed class DragGhost
     }
 
     /// <summary>Куда упадёт: «Копировать в /var/www». Пусто — бросить тут нельзя.</summary>
-    public void SetAction(string? text)
+    /// <param name="refused">Сюда бросить нельзя — подпись оранжевая, как отказ.</param>
+    public void SetAction(string? text, bool refused = false)
     {
         _action.Text = text ?? string.Empty;
         _action.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
+
+        if (refused)
+        {
+            _action.Foreground = Refused;
+        }
+        else
+        {
+            _action.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
+        }
+    }
+
+    private static readonly Brush Refused = Frozen(Color.FromRgb(0xE0, 0x7A, 0x1F));
+
+    private static Brush Frozen(Color color)
+    {
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
     }
 
     /// <summary>Правее и ниже курсора — чтобы не закрывать строку, на которую бросают.</summary>

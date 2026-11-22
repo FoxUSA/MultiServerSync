@@ -118,6 +118,9 @@ public sealed class FitPanel : Panel
         var stopped = false;
         var first = true;
 
+        // запас в точку экрана: на 125–250% ширины кусков округляются, «ровно впритык» не должно терять кусок
+        var slack = Core.DevicePixel.Of(this);
+
         foreach (UIElement child in InternalChildren)
         {
             if (child.Visibility == Visibility.Collapsed)
@@ -139,8 +142,7 @@ public sealed class FitPanel : Panel
 
             first = false;
 
-            // запас в сотую точки: на 150% ширина текста округляется, «ровно впритык» не должно терять кусок
-            if (!stopped && x + extra + w <= available.Width + 0.01)
+            if (!stopped && x + extra + w <= available.Width + slack)
             {
                 x += extra + w;
                 shown++;

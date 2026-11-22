@@ -5557,8 +5557,9 @@ public sealed partial class Workspace : ObservableObject
             }
             else
             {
+                // одной строкой на всю вкладку, когда она загрузится: ReportMissingAtStart
                 missing++;
-                AppLog.Warn(OnTab($"Пропал объект из списка копирования: {item.Path}"));
+                (_missingAtStart ??= []).Add((item.Path, null));
             }
         }
 
@@ -5714,6 +5715,8 @@ public sealed partial class Workspace : ObservableObject
                 + (missing > 0 ? $", не найдено {missing}" : string.Empty), Title);
         }
 
+        ReportMissingAtStart();
+
         RaiseMany(
             nameof(RemotePath),
             nameof(Items),
@@ -5779,15 +5782,16 @@ public sealed partial class Workspace : ObservableObject
     private OperationBatch ActionBatch => AppState.Current.CommandTabs.Contains(this) ? CommandBatch : CopyBatch;
 
     /// <summary>Разовое действие — строкой в терминал этой вкладки; терминал переключается на этот прогон.</summary>
-    internal void AddActionRow(ServerEntry where, LogLevel level, string summary, IReadOnlyList<string> lines)
+    internal void AddActionRow(ServerEntry where, LogLevel level, string summary, IReadOnlyList<string> lines, bool byUser = true)
     {
         SetScope();
         var batch = ActionBatch;
         var row = batch.AddAction(where, level, summary, lines);
         ShowResults(batch);
 
-        // создание, удаление, переименование — всё, что легло в журнал: с «авто» вкладки его вывод уходит в буфер
-        if (AutoCopy)
+        // создание, удаление, переименование — всё, что легло в журнал: с «авто» вкладки его вывод уходит в буфер.
+        // Что случилось само (файл пропал с диска), буфер не трогает: человек туда ничего не просил
+        if (AutoCopy && byUser)
         {
             AppState.Current.NotifyActionAdded(this, row);
         }
@@ -5953,12 +5957,16 @@ public sealed partial class Workspace : ObservableObject
 
         foreach (var item in candidates.Where(i => !i.ExistsOnDisk && AllItems.Contains(i)))
         {
-            _missingSince.TryAdd(item, now);
+            if (_missingSince.TryAdd(item, now))
+            {
+                item.GoneIn = (int)MissingGrace.TotalSeconds;
+            }
         }
 
+        // раз в секунду: на месте галочки идёт отсчёт до ухода строки
         if (_missingSince.Count > 0 && _missingTimer is null)
         {
-            _missingTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+            _missingTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _missingTimer.Tick += (_, _) => CheckMissing();
             _missingTimer.Start();
         }
@@ -5974,11 +5982,13 @@ public sealed partial class Workspace : ObservableObject
             if (!AllItems.Contains(item))
             {
                 _missingSince.Remove(item);
+                item.GoneIn = null;
             }
             else if (item.ExistsOnDisk)
             {
                 // файл вернулся: за удалённой папкой наблюдатель умер вместе с ней — заводим заново
                 _missingSince.Remove(item);
+                item.GoneIn = null;
                 back = true;
 
                 if (_watchers.Remove(item, out var dead))
@@ -5987,6 +5997,11 @@ public sealed partial class Workspace : ObservableObject
                     _watchers[item] = new ItemWatcher(item, OnItemChangedOnDisk, OnWatchLost);
                 }
             }
+        }
+
+        foreach (var (item, since) in _missingSince)
+        {
+            item.GoneIn = Math.Max(0, (int)Math.Ceiling((MissingGrace - (now - since)).TotalSeconds));
         }
 
         var gone = _missingSince.Where(p => now - p.Value >= MissingGrace).Select(p => p.Key).ToList();
@@ -6013,11 +6028,88 @@ public sealed partial class Workspace : ObservableObject
         }
 
         RemoveItems(gone);
+        ReportMissing(gone.Select(i => (i.FullPath, (bool?)i.IsDirectory)).ToList(), atStart: false);
+    }
 
-        var names = string.Join(", ", gone.Take(5).Select(i => i.Name))
-            + (gone.Count > 5 ? $" и ещё {gone.Count - 5}" : string.Empty);
+    /// <summary>Пропавшее при открытии вкладки: пишется, когда вкладки загружены и терминалу есть куда лечь.</summary>
+    private List<(string Path, bool? IsDirectory)>? _missingAtStart;
 
-        AppLog.Info(OnTab($"Убрано из списка — на диске больше нет: {names}"));
+    private System.Windows.Threading.DispatcherTimer? _missingAtStartTimer;
+
+    /// <summary>
+    /// Строки ушли из списка, потому что файлов нет на диске: одна оранжевая строка в журнал и терминал
+    /// на всё событие, сколько бы ни ушло. До пяти — имена в самой строке, больше — только число; полный
+    /// список путей — в выводе строки.
+    /// </summary>
+    /// <param name="atStart">Удалили, пока программа была закрыта: заметили при открытии вкладки.</param>
+    private void ReportMissing(IReadOnlyList<(string Path, bool? IsDirectory)> gone, bool atStart)
+    {
+        if (gone.Count == 0)
+        {
+            return;
+        }
+
+        var what = gone.Count <= 5
+            ? string.Join(", ", gone.Select(g => Path.GetFileName(g.Path.TrimEnd(Path.DirectorySeparatorChar)) is { Length: > 0 } name ? name : g.Path))
+            : $"{gone.Count} {Plural(gone.Count, "объект", "объекта", "объектов")}";
+
+        var summary = (atStart ? "Убрано из списка при открытии — нет на диске: " : "Убрано из списка — нет на диске: ") + what;
+
+        var details = new List<string>
+        {
+            atStart
+                ? "Удалено с диска, пока программа была закрыта."
+                : $"Пропало с диска и не вернулось за {(int)MissingGrace.TotalSeconds} с.",
+        };
+
+        details.AddRange(gone.Select(g => g.IsDirectory switch
+        {
+            true => "папка  " + g.Path,
+            false => "файл   " + g.Path,
+            null => g.Path,
+        }));
+
+        ActionLog.Write(LogLevel.Warning, summary, ActionLog.Computer, AppSection.Files, this, details, byUser: false);
+    }
+
+    private static string Plural(int n, string one, string few, string many) =>
+        (n % 10, n % 100) switch
+        {
+            (1, not 11) => one,
+            (>= 2 and <= 4, < 12 or > 14) => few,
+            _ => many,
+        };
+
+    /// <summary>Пропавшее при открытии — в журнал, как только вкладки загружены (до этого строке некуда лечь).</summary>
+    private void ReportMissingAtStart()
+    {
+        if (_missingAtStart is not { Count: > 0 } || _missingAtStartTimer is not null)
+        {
+            return;
+        }
+
+        _missingAtStartTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _missingAtStartTimer.Tick += (_, _) =>
+        {
+            // терминалы и журнал читаются из файла после вкладок (и после пароля) — раньше строку затрёт
+            if (!AppState.Current.TabsLoaded || Application.Current?.MainWindow is not Views.MainWindow { IsLoaded: true })
+            {
+                return;
+            }
+
+            _missingAtStartTimer.Stop();
+            _missingAtStartTimer = null;
+
+            var gone = _missingAtStart;
+            _missingAtStart = null;
+
+            // вкладка, поднятая только для памяти отмены, в лентах не стоит — её терминал никто не видит
+            if (AppState.Current.LiveTab(Id) is not null)
+            {
+                ReportMissing(gone ?? [], atStart: true);
+            }
+        };
+        _missingAtStartTimer.Start();
     }
 
     /// <summary>Windows не успела передать все изменения — перечитываем весь список.</summary>

@@ -448,14 +448,17 @@ public sealed class MonitorCard : Border
             // ступень — первая, на которой всё видимое помещается целиком; строке «за период» нужна своя ширина
             _level = 5;
 
+            // запас в точку экрана: на 125–250% поля и строки округляются, впритык ступень терялась бы зря
+            var slack = Core.DevicePixel.Of(this);
+
             for (var level = 0; level <= 5; level++)
             {
-                if (level <= 2 && !_noHistory && _foot.Child is not null && _footNeed > inner + 0.01)
+                if (level <= 2 && !_noHistory && _foot.Child is not null && _footNeed > inner + slack)
                 {
                     continue;
                 }
 
-                if (Need(level, inner) <= height + 0.01)
+                if (Need(level, inner) <= height + slack)
                 {
                     _level = level;
                     break;
@@ -475,9 +478,16 @@ public sealed class MonitorCard : Border
                 }
             }
 
-            // самое нужное: значение и название, кусок за куском, пока не встретится первая подпись
+            // меньше строки «название, значение и подписи к нему» карточка не бывает: окно не сужается так, чтобы она не влезла
             _bigTight.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            var essential = EssentialWidth();
+            var essential = _bigTight.FullWidth + slack;
+
+            // замер без предела выше затёр раскладку — у тесной ступени строка снова меряется по своей ширине,
+            // иначе она показывала все куски и обрезалась краем карточки («свободно 15.6» без «ГБ»)
+            if (visible.Contains(_bigTight))
+            {
+                _bigTight.Measure(new Size(w, double.PositiveInfinity));
+            }
             var need = new Size(
                 Math.Max(MinNeed.Width, Tight.Left + Tight.Right + essential),
                 Math.Max(MinNeed.Height, Tight.Top + Tight.Bottom + _bigTight.DesiredSize.Height));
@@ -489,18 +499,6 @@ public sealed class MonitorCard : Border
             }
 
             return new Size(width, height);
-        }
-
-        /// <summary>Название и главное число в тесной строке — без них карточка не говорит ничего.</summary>
-        private double EssentialWidth()
-        {
-            if (_bigTight.Children.Count < 2)
-            {
-                return _bigTight.FirstWidth;
-            }
-
-            _bigTight.Children[1].Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            return _bigTight.FirstWidth + _bigTight.Gap + _bigTight.Children[1].DesiredSize.Width;
         }
 
         protected override Size ArrangeOverride(Size finalSize)

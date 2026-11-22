@@ -82,6 +82,26 @@ public sealed class TransferItem : ObservableObject, IRowCheck
     /// <summary>Файл или папка ещё на месте. Удалённое локально из списка убирается.</summary>
     public bool ExistsOnDisk => IsDirectory ? Directory.Exists(FullPath) : File.Exists(FullPath);
 
+    private int? _goneIn;
+
+    /// <summary>
+    /// Файла на диске нет: через сколько секунд строка уйдёт из списка. Показывается вместо галочки;
+    /// null — файл на месте.
+    /// </summary>
+    public int? GoneIn
+    {
+        get => _goneIn;
+        set
+        {
+            if (Set(ref _goneIn, value))
+            {
+                Raise(nameof(IsGone));
+            }
+        }
+    }
+
+    public bool IsGone => _goneIn is not null;
+
     public string SizeText => _sizeBytes < 0 ? "—" : Format(_sizeBytes);
 
     /// <summary>

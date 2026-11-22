@@ -28,6 +28,10 @@ public partial class ServersPage : Page
         Controls.CopyWindowLayout.FollowColumns(LeftGrid);
         Controls.CopyWindowLayout.FollowColumns(RightGrid);
 
+        // строки таскаются мышью: внутри таблицы — порядок, на соседнюю таблицу — в её набор
+        Draggable(LeftGrid, RightGrid);
+        Draggable(RightGrid, LeftGrid);
+
         AppState.Current.PropertyChanged += OnStateChanged;
         ShowPicked();
 
@@ -179,24 +183,26 @@ public partial class ServersPage : Page
 
     private void OnCopyOver(object sender, RoutedEventArgs e) => Transfer(keep: true);
 
-    private void Transfer(bool keep)
+    private void Transfer(bool keep) => Transfer(keep, Picked, Set, AppState.Current.ServersOther);
+
+    /// <param name="picked">Что переносится.</param>
+    /// <returns>Что легло в набор <paramref name="to"/>: перенесённые серверы или их копии.</returns>
+    private static List<ServerEntry> Transfer(bool keep, IReadOnlyList<ServerEntry> picked, ServerSet from, ServerSet to)
     {
         var state = AppState.Current;
         var action = keep ? "Скопировать" : "Перенести";
-        var from = Set;
-        var to = state.ServersOther;
-        var picked = Picked;
+        var landed = new List<ServerEntry>();
 
         if (picked.Count == 0)
         {
             AppLog.Hint($"{action}: не отмечено ни одного сервера.", LogLevel.Warning);
-            return;
+            return landed;
         }
 
         if (ReferenceEquals(from, to))
         {
             AppLog.Hint($"В обеих таблицах набор «{from.Title}» — откройте в другой таблице другой набор.", LogLevel.Warning);
-            return;
+            return landed;
         }
 
         var done = new List<ServerEntry>();
@@ -216,10 +222,12 @@ public partial class ServersPage : Page
                 copy.SetId = to.Id;
                 copy.IsSelected = false;
                 state.Servers.Add(copy);
+                landed.Add(copy);
             }
             else
             {
                 s.SetId = to.Id;
+                landed.Add(s);
             }
 
             done.Add(s);
@@ -243,6 +251,105 @@ public partial class ServersPage : Page
         ActionLog.Write(done.Count > 0 ? LogLevel.Success : LogLevel.Info,
             $"{verb} серверов из «{from.Title}» в «{to.Title}»: {done.Count}{note}.", null, AppSection.Servers, null,
             done.Select(s => s.Display));
+
+        return landed;
+    }
+
+    /// <summary>
+    /// Перетаскивание строк мышью — тот же <see cref="Controls.TabReorder"/>, что у серверов в панели слева
+    /// и у ярлыков. Внутри таблицы меняет порядок (он один на всю программу), брошенная на соседнюю
+    /// таблицу строка переносится в её набор, с Ctrl — копируется. Схватили отмеченную галочкой строку —
+    /// едут все отмеченные. За саму галочку не хватается — она щёлкается.
+    /// </summary>
+    private void Draggable(System.Windows.Controls.DataGrid grid, System.Windows.Controls.DataGrid other)
+    {
+        // строк немного, а перетаскиванию нужны обёртки всех строк, а не только видимых
+        VirtualizingPanel.SetIsVirtualizing(grid, false);
+
+        var otherFrame = ReferenceEquals(other, LeftGrid) ? LeftFrame : RightFrame;
+
+        _ = new Controls.TabReorder(grid, null, item => item is ServerCheck, fixedCount: 0, (item, to) =>
+        {
+            if (item is ServerCheck dragged && to < grid.Items.Count && grid.Items[to] is ServerCheck anchor)
+            {
+                AppState.Current.MoveServer(dragged.Server, anchor.Server);
+            }
+        })
+        {
+            OutTarget = other,
+
+            // до соседней таблицы строка не дотянется: за пределами своей у курсора плашка, как в «Проводнике»
+            GhostOf = item =>
+            {
+                var server = ((ServerCheck)item).Server;
+                var from = SetOf(grid);
+                var count = from.Picked.Contains(server) ? from.Picked.Count : 1;
+                return (ShellIcons.Server, server.PaneLabel, count);
+            },
+            // вторая строка всегда говорит, что будет при отпускании
+            GhostAction = over => over
+                ? ((Keyboard.Modifiers & ModifierKeys.Control) != 0 ? "Отпустите — скопировать" : "Отпустите — перенести") + $" в «{SetOf(other).Title}»"
+                : "Сюда бросить нельзя — только на соседнюю таблицу",
+
+            // над соседней таблицей она в рамке: отпустишь — строка уйдёт туда
+            OverOutTarget = over =>
+            {
+                if (over)
+                {
+                    otherFrame.Visibility = Visibility.Visible;
+                }
+                else
+                {
+                    ShowPicked();
+                }
+            },
+            DroppedOut = item =>
+            {
+                ShowPicked();
+
+                if (item is ServerCheck dragged)
+                {
+                    DropOnOther(dragged.Server, grid, other);
+                }
+            },
+        };
+    }
+
+    private void DropOnOther(ServerEntry dragged, System.Windows.Controls.DataGrid grid, System.Windows.Controls.DataGrid other)
+    {
+        var state = AppState.Current;
+        var from = SetOf(grid);
+        var to = SetOf(other);
+        var keep = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
+
+        // строка под мышью в соседней таблице — запомнить до переноса: таблицы после него перестроятся
+        var anchor = RowUnderMouse(other);
+
+        var checkedOnes = from.Picked;
+        IReadOnlyList<ServerEntry> picked = checkedOnes.Contains(dragged) ? checkedOnes : [dragged];
+        var landed = Transfer(keep, picked, from, to);
+
+        // один сервер встаёт туда, где его отпустили; несколько — в общем порядке
+        if (landed.Count == 1 && anchor is not null && !ReferenceEquals(anchor, landed[0]))
+        {
+            state.MoveServer(landed[0], anchor);
+        }
+    }
+
+    /// <summary>Набор, что показывает таблица.</summary>
+    private ServerSet SetOf(System.Windows.Controls.DataGrid grid) =>
+        ReferenceEquals(grid, LeftGrid) ? AppState.Current.ServersLeft : AppState.Current.ServersRight;
+
+    private static ServerEntry? RowUnderMouse(System.Windows.Controls.DataGrid grid)
+    {
+        DependencyObject? node = grid.InputHitTest(Mouse.GetPosition(grid)) as DependencyObject;
+
+        while (node is not null and not DataGridRow)
+        {
+            node = node is System.Windows.Media.Visual ? System.Windows.Media.VisualTreeHelper.GetParent(node) : null;
+        }
+
+        return (node as DataGridRow)?.Item is ServerCheck { Server: { } server } ? server : null;
     }
 
     private static bool SameServer(ServerEntry a, ServerEntry b) =>

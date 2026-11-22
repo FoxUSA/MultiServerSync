@@ -15,6 +15,10 @@
     <!--  номер версии задаёт build.ps1 (-p:Version), источник правды — Data\manifest.json  -->
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <!--  свой масштаб у каждого монитора (PerMonitorV2): без него на втором экране окно мыльное  -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!--  WFO0003 — совет WinForms задавать масштаб своим API; окна у нас WPF, ему нужен именно манифест  -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

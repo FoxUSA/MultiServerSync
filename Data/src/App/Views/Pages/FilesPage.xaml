@@ -191,19 +191,40 @@
                   </Viewbox>
                 </DataGridTemplateColumn.Header>
                 <DataGridTemplateColumn.CellTemplate>
+                  <!--  файла нет на диске — вместо галочки секунды до ухода строки из списка  -->
                   <DataTemplate>
-                    <Viewbox
-                      Width="16"
-                      Height="16"
-                      HorizontalAlignment="Center"
-                      VerticalAlignment="Center">
-                      <CheckBox
-                        MinWidth="0"
-                        MinHeight="0"
-                        Margin="0"
-                        Padding="0"
-                        IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                    </Viewbox>
+                    <Grid>
+                      <Viewbox
+                        x:Name="Check"
+                        Width="16"
+                        Height="16"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
+                        <CheckBox
+                          MinWidth="0"
+                          MinHeight="0"
+                          Margin="0"
+                          Padding="0"
+                          IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                      </Viewbox>
+                      <TextBlock
+                        x:Name="Countdown"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        FontFamily="Consolas"
+                        FontSize="12"
+                        FontWeight="SemiBold"
+                        Foreground="#E07A1F"
+                        Text="{Binding GoneIn}"
+                        ToolTip="Файла нет на диске: строка уйдёт из списка, когда отсчёт дойдёт до нуля. Файл вернётся — строка останется."
+                        Visibility="Collapsed" />
+                    </Grid>
+                    <DataTemplate.Triggers>
+                      <DataTrigger Binding="{Binding IsGone}" Value="True">
+                        <Setter TargetName="Check" Property="Visibility" Value="Collapsed" />
+                        <Setter TargetName="Countdown" Property="Visibility" Value="Visible" />
+                      </DataTrigger>
+                    </DataTemplate.Triggers>
                   </DataTemplate>
                 </DataGridTemplateColumn.CellTemplate>
               </DataGridTemplateColumn>

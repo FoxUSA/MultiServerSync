@@ -34,6 +34,28 @@ public sealed partial class Workspace
         }
     }
 
+    /// <summary>
+    /// Переход в «Мониторинг» кнопкой раздела, как правый щелчок по ней: сервер — первый отмеченный в разделе, откуда пришли (не из набора
+    /// вкладки — вкладка переходит на его набор), отмеченных не было — сервер не выбран; период — «Сейчас».
+    /// Под замком сервер не меняется.
+    /// </summary>
+    public void SeedMonitor(ServerEntry? server)
+    {
+        if (!IsPaneLocked)
+        {
+            if (server is not null && !_paneAllSets && PaneSet is { } current && !current.Contains(server)
+                && AppState.Current.ServerSets.FirstOrDefault(s => s.Contains(server)) is { } owner)
+            {
+                PickPaneSet(owner);
+            }
+
+            Select(CopyServers, server is null ? [] : [server.Id]);
+        }
+
+        MonitorRange = MonitorRange.Live;
+        Save();
+    }
+
     /// <summary>Файл, вшитый в программу: скрипт сборщика и служба systemd (Assets\Monitor).</summary>
     private static string MonitorAsset(string name)
     {
