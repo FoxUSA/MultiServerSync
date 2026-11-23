@@ -2,6 +2,7 @@ using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -214,16 +215,89 @@ public static class CopyWindowLayout
 
                     focus(window);
 
-                    // курсор — на первую строку окна, как щелчком по ней; у пустого и свёрнутого окна строк не видно
+                    // курсор — на первую строку окна, как щелчком по ней; у пустого и свёрнутого окна строк не видно —
+                    // клавиатура остаётся у таблицы, чтобы стрелки ходили по окнам
                     if (!window.IsCollapsed && rows.FirstRowOf(window) is { } first and not EmptyWindowRow)
                     {
                         grid.Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() => FocusRow(grid, first)));
+                    }
+                    else
+                    {
+                        grid.Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() => FocusGrid(grid)));
                     }
 
                     return;
                 }
             }
         };
+
+        grid.PreviewKeyDown += (_, e) => Arrow(grid, rows, focus, e);
+    }
+
+    /// <summary>
+    /// Стрелки вверх и вниз при нескольких окнах: по строкам развёрнутого окна ходит сама таблица, а с крайней
+    /// строки, со свёрнутого или пустого окна — фокус на соседнее окно. Развёрнутое — курсор на его ближнюю строку.
+    /// </summary>
+    private static void Arrow(DataGrid grid, WindowRows rows, Action<CopyWindow> focus, KeyEventArgs e)
+    {
+        if (e.Key is not (Key.Up or Key.Down) || Keyboard.Modifiers != ModifierKeys.None || Keyboard.FocusedElement is TextBoxBase)
+        {
+            return;
+        }
+
+        var windows = rows.View?.Groups?.OfType<CollectionViewGroup>().Select(g => g.Name).OfType<CopyWindow>().ToList();
+
+        if (windows is not { Count: > 1 })
+        {
+            return;
+        }
+
+        var down = e.Key == Key.Down;
+        var here = grid.CurrentItem;
+        var owner = rows.WindowOf(here);
+
+        if (owner is { IsCollapsed: false } && here is not EmptyWindowRow)
+        {
+            // внутри окна — обычный ход таблицы
+            if (!ReferenceEquals(here, down ? rows.LastRowOf(owner) : rows.FirstRowOf(owner)))
+            {
+                return;
+            }
+        }
+        else
+        {
+            owner = windows.FirstOrDefault(w => w.IsFocused) ?? windows[0];
+        }
+
+        e.Handled = true;
+        var index = windows.IndexOf(owner) + (down ? 1 : -1);
+
+        if (index < 0 || index >= windows.Count)
+        {
+            return;
+        }
+
+        var next = windows[index];
+        focus(next);
+
+        if (!next.IsCollapsed && (down ? rows.FirstRowOf(next) : rows.LastRowOf(next)) is { } row and not EmptyWindowRow)
+        {
+            FocusRow(grid, row);
+        }
+        else
+        {
+            FocusGrid(grid);
+        }
+
+        Show(grid, rows, next);
+    }
+
+    /// <summary>Курсора на строке нет, клавиатура у самой таблицы: выделение прежнего окна не остаётся висеть.</summary>
+    private static void FocusGrid(DataGrid grid)
+    {
+        grid.UnselectAll();
+        grid.CurrentCell = default;
+        grid.Focus();
     }
 
     /// <summary>

@@ -57,6 +57,14 @@ public sealed class DownloadItem : ObservableObject, IRowCheck
         set => Set(ref _isSelected, value);
     }
 
+    private bool _isUnsent;
+
+    public bool IsUnsent
+    {
+        get => _isUnsent;
+        set => Set(ref _isUnsent, value);
+    }
+
     public RowMemory Memory { get; set; } = new();
 
     /// <summary>

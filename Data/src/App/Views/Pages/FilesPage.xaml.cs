@@ -503,8 +503,7 @@ public partial class FilesPage : Page
     {
         if (Workspace?.Personal is { } personal)
         {
-            AppState.Current.JumpToPersonal(personal);
-            AppState.Current.ShowTab(personal);
+            Dialogs.AfterCopyWindow.Open(personal);
         }
     }
 

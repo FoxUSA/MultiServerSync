@@ -602,7 +602,7 @@ public partial class MiniTerminal : UserControl
         ActionLog.Info("Поле команды очищено", null, AppState.Current.Section, Tab, ["было:", was]);
     }
 
-    /// <summary>Быстрая ссылка в личные команды, как стрелка на ярлыке; личной вкладки нет — создаётся.</summary>
+    /// <summary>Личные команды — окном поверх программы; личной вкладки нет — создаётся.</summary>
     private void OnGoPersonal(object sender, RoutedEventArgs e)
     {
         if (Tab is not { IsCopyTab: true } tab)
@@ -611,13 +611,12 @@ public partial class MiniTerminal : UserControl
         }
 
         var personal = tab.Personal ?? AppState.Current.CreatePersonalTab(tab);
-        AppState.Current.JumpToPersonal(personal);
-        AppState.Current.ShowTab(personal);
+        Dialogs.AfterCopyWindow.Open(personal);
     }
 
     /// <summary>
     /// Свитч «после копирования». Первое включение создаёт пустую личную вкладку команд
-    /// и сразу ведёт на неё; дальше свитч только включает и выключает запуск после копирования.
+    /// и сразу открывает её окном; дальше свитч только включает и выключает запуск после копирования.
     /// </summary>
     private void OnAfterCopySwitch(object sender, RoutedEventArgs e)
     {
@@ -640,8 +639,7 @@ public partial class MiniTerminal : UserControl
 
         personal = AppState.Current.CreatePersonalTab(copy);
         copy.RaiseChain();
-        AppState.Current.JumpToPersonal(personal);
-        AppState.Current.ShowTab(personal);
+        Dialogs.AfterCopyWindow.Open(personal);
     }
 
     /// <summary>

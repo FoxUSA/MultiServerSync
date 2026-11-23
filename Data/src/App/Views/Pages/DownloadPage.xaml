@@ -122,6 +122,7 @@
         <Grid Grid.Row="0">
           <DataGrid
             x:Name="RowsGrid"
+            Grid.IsSharedSizeScope="True"
             BorderThickness="0"
             CanUserReorderColumns="False"
             CellStyle="{StaticResource AppDataGridCellStyle}"
@@ -168,12 +169,19 @@
                       HorizontalAlignment="Center"
                       VerticalAlignment="Center">
                       <CheckBox
+                        x:Name="Box"
                         MinWidth="0"
                         MinHeight="0"
                         Margin="0"
                         Padding="0"
                         IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                     </Viewbox>
+                    <!--  свитч «Отмечать нескачанные» нашёл строку нескачанной — зелёная галочка в пустом квадрате  -->
+                    <DataTemplate.Triggers>
+                      <DataTrigger Binding="{Binding IsUnsent}" Value="True">
+                        <Setter TargetName="Box" Property="Style" Value="{StaticResource UnsentCheckStyle}" />
+                      </DataTrigger>
+                    </DataTemplate.Triggers>
                   </DataTemplate>
                 </DataGridTemplateColumn.CellTemplate>
               </DataGridTemplateColumn>

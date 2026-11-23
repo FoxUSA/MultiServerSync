@@ -1627,6 +1627,7 @@ public sealed partial class Workspace : ObservableObject
         }
 
         RaiseMany(nameof(UnsentOn), nameof(DownloadInfo), nameof(AllDownloadsSelected), nameof(AllWindowsDownloadsSelected), nameof(TabCounts), nameof(TabTooltip));
+        ShowUnsent();
 
         if (!_restoring)
         {
@@ -2292,10 +2293,6 @@ public sealed partial class Workspace : ObservableObject
         RaiseMany(
             nameof(AfterCopyEnabled), nameof(AfterCopyOnce), nameof(ShowsChain), nameof(Personal), nameof(HasPersonal), nameof(IsCopyTab),
             nameof(Notices), nameof(HasNotices), nameof(PersonalButtonText));
-
-        // галочка «+ команды» в терминале видна, только пока свитч включён. Current ещё нет,
-        // пока вкладки читаются при запуске — тогда и показывать нечего
-        AppState.Current?.RaiseChainCopy();
     }
 
     /// <summary>
@@ -3160,6 +3157,8 @@ public sealed partial class Workspace : ObservableObject
                     row.Memory.Before = null;
                     row.Memory.Marked = false;
                 }
+
+                ShowUnsent();
             }
             else
             {
@@ -3379,7 +3378,7 @@ public sealed partial class Workspace : ObservableObject
             dated.Where(r => r.Item2 is not null && r.Item2 != r.Item1.Memory.Date).Select(r => r.Item1).ToHashSet());
     }
 
-    private static void MarkUnsent(List<IRowCheck> rows, HashSet<IRowCheck> unsent)
+    private void MarkUnsent(List<IRowCheck> rows, HashSet<IRowCheck> unsent)
     {
         // прежние галочки остаются те, что были до самого первого нажатия
         foreach (var row in rows)
@@ -3387,6 +3386,30 @@ public sealed partial class Workspace : ObservableObject
             row.Memory.Before ??= row.IsSelected;
             row.Memory.Marked = unsent.Contains(row);
             row.IsSelected = row.Memory.Marked;
+        }
+
+        ShowUnsent();
+    }
+
+    /// <summary>
+    /// Зелёным — то, что свитч нашёл незалитым: галочка строки и рамка номера её окна. Зелёный значит «всё чётко»:
+    /// только пока свитч зелёный. Выключен или покраснел (галочки тронули руками) — зелёного нигде нет.
+    /// </summary>
+    private void ShowUnsent()
+    {
+        var on = UnsentOn;
+
+        foreach (var window in CopyWindows)
+        {
+            var any = false;
+
+            foreach (var row in window.Items.Cast<IRowCheck>().Concat(window.Downloads))
+            {
+                row.IsUnsent = on && row.Memory.Before is not null && row.Memory.Marked;
+                any |= row.IsUnsent;
+            }
+
+            window.HasUnsent = any;
         }
     }
 
@@ -3480,7 +3503,7 @@ public sealed partial class Workspace : ObservableObject
 
         // с галочкой «+ команды» автокопия ждёт команды после копирования — и личные, и разовую
         // из мини-терминала: отчёт один, копирование и команды. Иначе второй затирал бы в буфере первый
-        var together = ReportChain is not null && AppState.Current.Settings.CopyWithChain;
+        var together = ReportChain is not null && AppState.Current.CopyWithChain;
 
         if (notify && !together)
         {
@@ -4496,19 +4519,24 @@ public sealed partial class Workspace : ObservableObject
         bool approved = false,
         IReadOnlyList<ServerEntry>? servers = null,
         Action<OperationResult>? prepare = null,
-        string? workDir = null)
+        string? workDir = null,
+        Workspace? source = null)
     {
+        // окна и история команд — у source (окно «Команды после копирования»), а запуск, вывод,
+        // журнал и терминал — у этой вкладки, как у её мини-терминала
+        var src = source ?? this;
+
         if (CommandBatch.IsRunning)
         {
             AppLog.Hint("Команда уже выполняется.", LogLevel.Warning);
             return false;
         }
 
-        var steps = RunnableSteps(from, onlyThis);
+        var steps = src.RunnableSteps(from, onlyThis);
 
         if (steps.Count == 0)
         {
-            return Refuse("команда", onlyThis || Steps.Count == 1 ? "Команда пустая." : "Во всех окнах пусто.");
+            return Refuse("команда", onlyThis || src.Steps.Count == 1 ? "Команда пустая." : "Во всех окнах пусто.");
         }
 
         var targets = servers ?? CommandTargets;
@@ -4524,7 +4552,7 @@ public sealed partial class Workspace : ObservableObject
         // умный режим: сервер непривычный для этих команд — сначала спросить, одним окном на все
         if (!approved && !local)
         {
-            var check = RunHistory.CheckCommands(this, Numbered(steps), targets);
+            var check = RunHistory.CheckCommands(this, src.Numbered(steps), targets);
 
             if (!RunHistory.Confirm(check))
             {
@@ -4539,7 +4567,7 @@ public sealed partial class Workspace : ObservableObject
         // первое окно — наверху истории
         foreach (var step in Enumerable.Reverse(steps))
         {
-            RememberCommand(step.Text);
+            src.RememberCommand(step.Text);
         }
 
         Save();
@@ -4547,7 +4575,7 @@ public sealed partial class Workspace : ObservableObject
         // цепочка: ненулевой код останавливает её на сервере. Одиночная команда — как в терминале:
         // что она вернула — её дело, а не ошибка программы
         var chain = steps.Count > 1;
-        var numbered = Steps.Count > 1;
+        var numbered = src.Steps.Count > 1;
 
         AppLog.Started(
             chain
@@ -4556,7 +4584,7 @@ public sealed partial class Workspace : ObservableObject
                     + ": " + Preview(steps[0].Text),
             ActionLog.WhereText(targets));
 
-        foreach (var step in Steps)
+        foreach (var step in src.Steps)
         {
             if (steps.Contains(step))
             {
@@ -5478,6 +5506,7 @@ public sealed partial class Workspace : ObservableObject
             }
 
             RenumberWindows();
+            ShowUnsent();
 
             foreach (var window in CopyWindows)
             {
@@ -6423,14 +6452,20 @@ public sealed partial class Workspace : ObservableObject
         AppLog.Hint($"Одиночный выбор: оставлен один сервер — {picked[0].Server.PaneLabel}.");
     }
 
-    private void RaiseCopyInfo() => RaiseMany(
-        nameof(UnsentOn),
-        nameof(TargetsInfo),
-        nameof(DownloadInfo),
-        nameof(AllItemsSelected),
-        nameof(AllWindowsItemsSelected),
-        nameof(TabCounts),
-        nameof(TabTooltip));
+    private void RaiseCopyInfo()
+    {
+        RaiseMany(
+            nameof(UnsentOn),
+            nameof(TargetsInfo),
+            nameof(DownloadInfo),
+            nameof(AllItemsSelected),
+            nameof(AllWindowsItemsSelected),
+            nameof(TabCounts),
+            nameof(TabTooltip));
+
+        // галочки тронули руками — свитч мог покраснеть, зелёное гаснет
+        ShowUnsent();
+    }
 
     private void RaiseSelectionInfo()
     {

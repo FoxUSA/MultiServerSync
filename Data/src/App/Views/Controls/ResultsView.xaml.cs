@@ -201,9 +201,9 @@ public partial class ResultsView : UserControl
     /// Строка кнопок стоит в одной строке с ярлыками «Терминал / Журнал»: слева отступ
     /// на их ширину, высота — как у них, чтобы кнопки встали по их середине.
     /// </summary>
-    public void AlignToolbar(double indent, double height)
+    public void AlignToolbar(double indent, double height, double right)
     {
-        ToolBar.Margin = new Thickness(indent, 0, 0, 4);
+        ToolBar.Margin = new Thickness(indent, 0, right, 4);
         ToolBar.MinHeight = height;
         _toolIndent = indent;
         FitLeftTools();

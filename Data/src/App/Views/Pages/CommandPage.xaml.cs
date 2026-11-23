@@ -39,25 +39,59 @@ public partial class CommandPage : Page
     /// <summary>Тик секундомеров окон — один на страницу, а не по таймеру на окно.</summary>
     private readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromMilliseconds(250) };
 
-    public CommandPage()
+    public CommandPage() : this(null)
+    {
+    }
+
+    /// <summary>
+    /// <paramref name="fixedTab"/> — личная вкладка в окне «Команды после копирования»: страница
+    /// держится за неё, за открытой вкладкой не следует и раздел программы не меняет.
+    /// </summary>
+    public CommandPage(Workspace? fixedTab)
     {
         InitializeComponent();
 
+        _fixed = fixedTab is not null;
+
         // история — своя у вкладки, та же, что в избранном: строка привязана к CommandHistory открытой вкладки
-        DataContext = AppState.Current.ActiveWorkspace;
-        AppState.Current.ActiveWorkspaceChanged += workspace => DataContext = workspace;
+        DataContext = fixedTab ?? AppState.Current.ActiveWorkspace;
+
+        if (!_fixed)
+        {
+            AppState.Current.ActiveWorkspaceChanged += workspace => DataContext = workspace;
+        }
 
         // выбор в истории держится только пока окно совпадает с выбранной строкой
         DataContextChanged += OnWorkspaceSwitched;
         Attach(Workspace);
 
+        RunBatch = RunTab?.CommandBatch;
+        DataContextChanged += (_, _) => RunBatch = RunTab?.CommandBatch;
+
+        // в окне «Команды после копирования» — как мини-терминал копирования: без «Везде» и повтора упавших
+        if (_fixed)
+        {
+            EverywhereSwitch.Visibility = Visibility.Collapsed;
+            RetryButton.Visibility = Visibility.Collapsed;
+        }
+
         Loaded += (_, _) => ListenClipboard();
-        ClipboardWatch.Changed += () => HasClipboardText = ClipboardWatch.HasText;
+        ClipboardWatch.Changed += OnClipboardChanged;
 
         StepsScroll.SizeChanged += (_, _) => FitSteps();
         ((INotifyCollectionChanged)StepsList.Items).CollectionChanged += (_, _) => FitSteps();
 
-        Wpf.Ui.Appearance.ApplicationThemeManager.Changed += (_, _) => PaintBoxes();
+        Wpf.Ui.Appearance.ApplicationThemeManager.Changed += OnThemeChanged;
+
+        // страница в своём окне живёт, пока окно открыто: подписки на общее не держат её после закрытия
+        if (_fixed)
+        {
+            Unloaded += (_, _) =>
+            {
+                ClipboardWatch.Changed -= OnClipboardChanged;
+                Wpf.Ui.Appearance.ApplicationThemeManager.Changed -= OnThemeChanged;
+            };
+        }
 
         _clock.Tick += (_, _) =>
         {
@@ -72,7 +106,11 @@ public partial class CommandPage : Page
         {
             if (IsVisible)
             {
-                AppState.Current.Section = AppSection.Command;
+                if (!_fixed)
+                {
+                    AppState.Current.Section = AppSection.Command;
+                }
+
                 _clock.Start();
             }
             else
@@ -83,6 +121,29 @@ public partial class CommandPage : Page
     }
 
     private Workspace? Workspace => DataContext as Workspace;
+
+    /// <summary>Страница в окне «Команды после копирования», а не в главном окне.</summary>
+    private readonly bool _fixed;
+
+    /// <summary>
+    /// Чей запуск: в главном окне — открытой вкладки; в окне «Команды после копирования» — вкладки копирования,
+    /// как у её мини-терминала: вывод, журнал и терминал её, окна и история — личной вкладки.
+    /// </summary>
+    private Workspace? RunTab => _fixed && Workspace?.Owner is { } owner ? owner : Workspace;
+
+    public static readonly DependencyProperty RunBatchProperty = DependencyProperty.Register(
+        nameof(RunBatch), typeof(OperationBatch), typeof(CommandPage), new PropertyMetadata(null));
+
+    /// <summary>Запуск, по которому кнопки «Выполнить» и «Остановить»: см. <see cref="RunTab"/>.</summary>
+    public OperationBatch? RunBatch
+    {
+        get => (OperationBatch?)GetValue(RunBatchProperty);
+        private set => SetValue(RunBatchProperty, value);
+    }
+
+    private void OnClipboardChanged() => HasClipboardText = ClipboardWatch.HasText;
+
+    private void OnThemeChanged(Wpf.Ui.Appearance.ApplicationTheme theme, System.Windows.Media.Color accent) => PaintBoxes();
 
     /// <summary>Окно, куда подставлять: окно в фокусе.</summary>
     private CommandStep? ActiveStep => Workspace?.Steps.FirstOrDefault(s => s.IsFocused);
@@ -726,7 +787,7 @@ public partial class CommandPage : Page
             return;
         }
 
-        if (AppState.Current.Everywhere)
+        if (AppState.Current.Everywhere && !_fixed)
         {
             await RunEverywhereAsync(workspace);
         }
@@ -848,7 +909,8 @@ public partial class CommandPage : Page
         {
             FlashSteps(steps);
         }
-        else if (workspace.CommandTargets.Count == 0 && Window.GetWindow(this) is MainWindow main)
+        else if ((_fixed ? RunTab?.CopyTargets.Count ?? 0 : workspace.CommandTargets.Count) == 0
+            && Application.Current.MainWindow is MainWindow main)
         {
             main.FlashTargets();
         }
@@ -870,7 +932,11 @@ public partial class CommandPage : Page
 
         _repeatConfirmed = false;
 
-        if (await workspace.RunCommandAsync(from: from, onlyThis: onlyThis))
+        var run = _fixed && RunTab is { } host && !ReferenceEquals(host, workspace)
+            ? host.RunCommandAsync(from: from, onlyThis: onlyThis, servers: host.CopyTargets, source: workspace)
+            : workspace.RunCommandAsync(from: from, onlyThis: onlyThis);
+
+        if (await run)
         {
             _lastTab = workspace;
             _lastCommand = signature;
@@ -883,9 +949,9 @@ public partial class CommandPage : Page
 
     private async Task InterruptAsync()
     {
-        if (Workspace is { CommandBatch.IsRunning: true } workspace)
+        if (RunBatch is { IsRunning: true } batch)
         {
-            await workspace.CommandBatch.StopAsync();
+            await batch.StopAsync();
         }
     }
 
@@ -899,7 +965,7 @@ public partial class CommandPage : Page
         var mods = System.Windows.Input.Keyboard.Modifiers;
         var ctrl = (mods & System.Windows.Input.ModifierKeys.Control) != 0;
         var shift = (mods & System.Windows.Input.ModifierKeys.Shift) != 0;
-        var running = Workspace?.CommandBatch.IsRunning == true;
+        var running = RunBatch?.IsRunning == true;
 
         if (ctrl && e.Key == System.Windows.Input.Key.Enter)
         {
@@ -929,14 +995,15 @@ public partial class CommandPage : Page
     /// <summary>Значок над первым окном: то же, что «Текущий лог» в терминале внизу.</summary>
     private void OnCopyOutput(object sender, RoutedEventArgs e)
     {
-        if (Workspace?.CommandBatch.HasResults != true)
+        if (RunBatch?.HasResults != true)
         {
             FlashSteps(StepOf(sender) is { } step ? [step] : []);
             AppLog.Hint("Копировать нечего — команда ещё не выполнялась.", LogLevel.Warning);
             return;
         }
 
-        if (Window.GetWindow(this) is MainWindow main)
+        // из окна «Команды после копирования» — тот же терминал главного окна: в нём вывод вкладки копирования
+        if (Application.Current.MainWindow is MainWindow main)
         {
             main.Terminal.CopyCurrent();
         }

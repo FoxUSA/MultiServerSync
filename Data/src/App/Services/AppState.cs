@@ -626,11 +626,46 @@ public sealed class AppState : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Галочка «Auto Copy»: только автокопия, без вставки. С «Auto Copy &amp; Paste» они исключают друг друга —
+    /// поставили эту, та снимается. Внутри вставка — та же автокопия плюс CopyPass.
+    /// </summary>
+    public bool AutoCopyOnly
+    {
+        get => AutoCopyCurrent && !CopyPass;
+        set
+        {
+            if (PaneOwner is not { } owner)
+            {
+                return;
+            }
+
+            if (value)
+            {
+                var hadPaste = owner.CopyPass || owner.CopyPassOnce;
+                owner.CopyPassOnce = false;
+                owner.SetCopyPass(false);
+
+                if (hadPaste)
+                {
+                    Services.CopyPass.Disarm();
+                }
+
+                owner.SetAutoCopy(true);
+                RaiseTerminalChecks();
+            }
+            else
+            {
+                AutoCopyCurrent = false;
+            }
+        }
+    }
+
     /// <summary>Галочки строки терминала — у открытой вкладки: сменилась вкладка или раздел, они перечитываются.</summary>
     private void RaiseTerminalChecks() =>
-        RaiseMany(nameof(AutoCopyCurrent), nameof(CopyPass), nameof(CopyPassOnceOn), nameof(CopyPassAvailable), nameof(LogAsFile));
+        RaiseMany(nameof(AutoCopyCurrent), nameof(AutoCopyOnly), nameof(CopyPass), nameof(CopyPassOnceOn), nameof(CopyPassAvailable), nameof(LogAsFile));
 
-    /// <summary>CopyPass и «*.txt» работают вместе с «авто»: без неё галочки гаснут.</summary>
+    /// <summary>CopyPass работает вместе с «Auto Copy»: без неё галочка гаснет. «Буфер .txt» от неё не зависит.</summary>
     public bool CopyPassAvailable => AutoCopyCurrent;
 
     /// <summary>Вкладка, чья операция: её галочки решают, что делать с выводом по окончании.</summary>
@@ -640,13 +675,13 @@ public sealed class AppState : ObservableObject
     private bool LegacyLogAsFile(AppSection section) =>
         Settings.LogAsFileBySection.TryGetValue(section.ToString(), out var on) && on;
 
-    /// <summary>Галочка «*.txt» в строке терминала — у каждой вкладки своя, погашена без «авто».</summary>
+    /// <summary>Галочка «Буфер .txt» в строке терминала — у каждой вкладки своя; кнопкам копирования она нужна и без «Auto Copy».</summary>
     public bool LogAsFile
     {
-        get => PaneOwner is { } owner && owner.LogAsFile && CopyPassAvailable;
+        get => PaneOwner is { } owner && owner.LogAsFile;
         set
         {
-            if ((value && !CopyPassAvailable) || PaneOwner is not { } owner || !owner.SetLogAsFile(value))
+            if (PaneOwner is not { } owner || !owner.SetLogAsFile(value))
             {
                 return;
             }
@@ -734,13 +769,15 @@ public sealed class AppState : ObservableObject
     /// <summary>CopyPass открытой вкладки стоит на один раз — в квадратике «1» вместо галочки.</summary>
     public bool CopyPassOnceOn => CopyPass && PaneOwner is { CopyPassOnce: true };
 
-    /// <summary>Правый щелчок по CopyPass: включить на одну автокопию, повторный — снять.</summary>
+    /// <summary>Правый щелчок по CopyPass: включить на одну автокопию, повторный — снять. Вставке нужна автокопия — включается сама.</summary>
     public void ToggleCopyPassOnce()
     {
-        if (!CopyPassAvailable || PaneOwner is not { } owner)
+        if (PaneOwner is not { } owner)
         {
             return;
         }
+
+        owner.SetAutoCopy(true);
 
         if (owner.CopyPassOnce)
         {
@@ -753,7 +790,7 @@ public sealed class AppState : ObservableObject
             owner.CopyPassOnce = true;
         }
 
-        RaiseMany(nameof(CopyPass), nameof(CopyPassOnceOn));
+        RaiseTerminalChecks();
     }
 
     /// <summary>Автокопия взвела вставку — разовая CopyPass вкладки израсходована.</summary>
@@ -765,7 +802,7 @@ public sealed class AppState : ObservableObject
         }
 
         tab.CopyPassOnce = false;
-        RaiseMany(nameof(CopyPass), nameof(CopyPassOnceOn));
+        RaiseMany(nameof(CopyPass), nameof(CopyPassOnceOn), nameof(AutoCopyOnly));
     }
 
     /// <summary>
@@ -781,18 +818,22 @@ public sealed class AppState : ObservableObject
     }
 
     /// <summary>
-    /// Галочка CopyPass в строке терминала — у каждой вкладки своя. Во вкладке, где «авто»
-    /// не стоит, показывается снятой и погашенной.
+    /// Галочка «Auto Copy &amp; Paste» в строке терминала — у каждой вкладки своя. Независима от «Auto Copy», но
+    /// исключает её: поставили — автокопия включается сама (вставлять без неё нечего), «Auto Copy» снимается;
+    /// сняли — выключено всё.
     /// </summary>
     public bool CopyPass
     {
         get => PaneOwner is { } owner && CopyPassOf(owner) && CopyPassAvailable;
         set
         {
-            if ((value && !CopyPassAvailable) || PaneOwner is not { } owner)
+            if (PaneOwner is not { } owner)
             {
                 return;
             }
+
+            // поставили — вставке нужна автокопия; сняли — гаснет и она: ни той, ни другой
+            owner.SetAutoCopy(value);
 
             // левый щелчок по разовой: она снимается, постоянная не включается
             var once = owner.CopyPassOnce;
@@ -800,6 +841,7 @@ public sealed class AppState : ObservableObject
 
             if (!owner.SetCopyPass(value && !once) && !once)
             {
+                RaiseTerminalChecks();
                 return;
             }
 
@@ -811,11 +853,10 @@ public sealed class AppState : ObservableObject
                 Services.CopyPass.Disarm();
             }
 
-            Raise();
+            RaiseTerminalChecks();
         }
     }
 
-    /// <summary>Галочка «+ команды» у копирования вывода: копировать и вывод личных команд вкладки.</summary>
     /// <summary>
     /// «Сохранять вывод» у окна вывода: в нём весь вывод выбранного сервера по всем строкам журнала подряд —
     /// например, вся сессия «PowerShell» со всеми ответами. Снято — только выбранная строка.
@@ -836,33 +877,11 @@ public sealed class AppState : ObservableObject
         }
     }
 
-    public bool CopyWithChain
-    {
-        get => Settings.CopyWithChain;
-        set
-        {
-            if (Settings.CopyWithChain == value)
-            {
-                return;
-            }
-
-            Settings.CopyWithChain = value;
-            Raise();
-            SaveSettings();
-            AppLog.Hint(value
-                ? "Копирование вывода в разделе «Копирование» берёт и вывод личных команд вкладки."
-                : "Копирование вывода — только копирование, без личных команд.");
-        }
-    }
-
     /// <summary>
-    /// Галочка «+ команды» — только в «Копировании» и только у вкладки с включённым свитчем
-    /// команд после копирования: без него копировать вместе нечего.
+    /// Склеивать вывод копирования с выводом команд после копирования (была галочка «+ команды»). Убрано
+    /// 23.11: команды после копирования и так стоят своими строками в терминале и копируются его кнопками.
     /// </summary>
-    public System.Windows.Visibility ChainCopyVisibility =>
-        _section == AppSection.Files && ActiveWorkspace is { ShowsChain: true }
-            ? System.Windows.Visibility.Visible
-            : System.Windows.Visibility.Collapsed;
+    public bool CopyWithChain => false;
 
     /// <summary>
     /// Отмеченные серверы в панели слева выделены рамкой и фоном — там, где по ним что-то запускается:
@@ -873,9 +892,6 @@ public sealed class AppState : ObservableObject
     /// <summary>Значок «окно команды» в строке кнопок терминала — только в «Проводнике»: на других страницах окно команды своё.</summary>
     public System.Windows.Visibility CommandFlipVisibility =>
         _section == AppSection.Explorer ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
-
-    /// <summary>Свитч команд после копирования переключили — галочка «+ команды» появляется или прячется.</summary>
-    public void RaiseChainCopy() => Raise(nameof(ChainCopyVisibility));
 
     /// <summary>
     /// Личные команды строки копирования — для поля вывода, которое показывает их следом:
@@ -907,7 +923,7 @@ public sealed class AppState : ObservableObject
 
     public OperationBatch? ChainBatchOf(OperationResult copyRow)
     {
-        if (!Settings.CopyWithChain)
+        if (!CopyWithChain)
         {
             return null;
         }
@@ -933,7 +949,7 @@ public sealed class AppState : ObservableObject
     public OperationBatch? ChainFor(OperationBatch copy)
     {
         // у сравнения личные команды не идут — их прошлый вывод к его отчёту не клеится
-        if (!Settings.CopyWithChain || copy.OperationName.StartsWith(Workspace.CompareName, StringComparison.OrdinalIgnoreCase))
+        if (!CopyWithChain || copy.OperationName.StartsWith(Workspace.CompareName, StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
@@ -1077,7 +1093,6 @@ public sealed class AppState : ObservableObject
 
             // у вкладки свой набор и свой одиночный выбор — панель слева переключается на них
             RaisePane();
-            RaiseChainCopy();
             ActiveWorkspaceChanged?.Invoke(value);
             SaveWorkspaces();
         }
@@ -1114,7 +1129,7 @@ public sealed class AppState : ObservableObject
 
             // лента показывает вкладки открытого раздела — сначала список, потом выбор в нём
             RaiseMany(nameof(Section), nameof(Tabs), nameof(ShowsWorkspaceTabs), nameof(ShowsServerSetTabs), nameof(ShowsTabStrip),
-                nameof(AutoCopyCurrent), nameof(CopyPass), nameof(CopyPassAvailable), nameof(CopyPassVisibility), nameof(LogAsFile), nameof(ChainCopyVisibility), nameof(CommandFlipVisibility), nameof(PaneHighlightsPicks),
+                nameof(AutoCopyCurrent), nameof(AutoCopyOnly), nameof(CopyPass), nameof(CopyPassAvailable), nameof(CopyPassVisibility), nameof(LogAsFile), nameof(CommandFlipVisibility), nameof(PaneHighlightsPicks),
                 nameof(Everywhere), nameof(TerminalOwner),
                 nameof(PaneShowIp), nameof(PaneShowUser));
             RaisePane();
@@ -1142,7 +1157,6 @@ public sealed class AppState : ObservableObject
 
                 RaiseMany(nameof(ActiveWorkspace), nameof(PaneTab));
                 RaiseDim();
-                RaiseChainCopy();
                 ActiveWorkspaceChanged?.Invoke(now);
             }
         }
@@ -1536,6 +1550,18 @@ public sealed class AppState : ObservableObject
         _jumpedTo = null;
     }
 
+    /// <summary>Личные вкладки, чьи окна «Команды после копирования» открыты: пустыми они не убираются.</summary>
+    private readonly HashSet<Workspace> _personalWindows = new();
+
+    public void PersonalWindowOpened(Workspace personal) => _personalWindows.Add(personal);
+
+    /// <summary>Окно «Команды после копирования» закрыли: пустая только что созданная вкладка убирается, как при уходе.</summary>
+    public void PersonalWindowClosed(Workspace personal)
+    {
+        _personalWindows.Remove(personal);
+        DropUntouchedPersonal();
+    }
+
     /// <summary>
     /// Нажали «Создать команды после копирования», сходили в «Команды» и вернулись, ничего не написав:
     /// вкладка как не создавалась — убирается молча, без журнала и отмены, свитч у родителя гаснет.
@@ -1543,6 +1569,12 @@ public sealed class AppState : ObservableObject
     /// </summary>
     private void DropUntouchedPersonal()
     {
+        // окно её ещё открыто — решится, когда закроют
+        if (_freshPersonal is { } open && _personalWindows.Contains(open))
+        {
+            return;
+        }
+
         var fresh = _freshPersonal;
         _freshPersonal = null;
 

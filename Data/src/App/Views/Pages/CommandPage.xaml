@@ -339,7 +339,7 @@
                       Click="OnRunStep"
                       Style="{StaticResource EditorIconStyle}"
                       ToolTip="Выполнить только это окно"
-                      Visibility="{Binding DataContext.CommandBatch.IsIdle, RelativeSource={RelativeSource AncestorType=Page}, Converter={StaticResource BoolToVis}}">
+                      Visibility="{Binding RunBatch.IsIdle, RelativeSource={RelativeSource AncestorType=Page}, Converter={StaticResource BoolToVis}}">
                       <ui:SymbolIcon
                         FontSize="{StaticResource IconGlyphSize}"
                         Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
@@ -359,7 +359,7 @@
                       Click="OnInterrupt"
                       Style="{StaticResource EditorIconStyle}"
                       ToolTip="{x:Static controls:StopButton.Hint}"
-                      Visibility="{Binding DataContext.CommandBatch.IsRunning, RelativeSource={RelativeSource AncestorType=Page}, Converter={StaticResource BoolToVis}}">
+                      Visibility="{Binding RunBatch.IsRunning, RelativeSource={RelativeSource AncestorType=Page}, Converter={StaticResource BoolToVis}}">
                       <ui:SymbolIcon
                         FontSize="{StaticResource IconGlyphSize}"
                         Foreground="#E0574A"
@@ -490,7 +490,7 @@
                 <DataTrigger Binding="{Binding IsTailEmpty}" Value="True">
                   <Setter TargetName="RunBelow" Property="pages:CommandPage.Idle" Value="True" />
                 </DataTrigger>
-                <DataTrigger Binding="{Binding DataContext.CommandBatch.HasResults, RelativeSource={RelativeSource AncestorType=Page}}" Value="False">
+                <DataTrigger Binding="{Binding RunBatch.HasResults, RelativeSource={RelativeSource AncestorType=Page}}" Value="False">
                   <Setter TargetName="CopyOut" Property="pages:CommandPage.Idle" Value="True" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HasClipboardText, RelativeSource={RelativeSource AncestorType=Page}}" Value="False">
@@ -500,7 +500,7 @@
                 <DataTrigger Binding="{Binding HasBelow}" Value="False">
                   <Setter TargetName="RunBelow" Property="Visibility" Value="Collapsed" />
                 </DataTrigger>
-                <DataTrigger Binding="{Binding DataContext.CommandBatch.IsRunning, RelativeSource={RelativeSource AncestorType=Page}}" Value="True">
+                <DataTrigger Binding="{Binding RunBatch.IsRunning, RelativeSource={RelativeSource AncestorType=Page}}" Value="True">
                   <Setter TargetName="RunBelow" Property="Visibility" Value="Collapsed" />
                 </DataTrigger>
                 <!--  вывод общий на все окна — копировать его достаточно с первого  -->
@@ -541,7 +541,7 @@
           Click="OnRun"
           Content="Выполнить"
           Icon="{ui:SymbolIcon Play24}"
-          IsEnabled="{Binding CommandBatch.IsIdle}"
+          IsEnabled="{Binding RunBatch.IsIdle, RelativeSource={RelativeSource AncestorType=Page}}"
           ToolTip="Все окна вкладки по очереди на её серверах. Со свитчем «Везде» — во всех вкладках">
           <!--  во всех окнах пусто — кнопка тусклая, но жмётся: нажатие мигает рамками окон  -->
           <ui:Button.Style>
@@ -564,7 +564,7 @@
           Style="{StaticResource DangerSwitchStyle}"
           ToolTip="«Выполнить» — во всех командных вкладках сразу, после вопроса" />
 
-        <controls:RetryFailedButton Margin="12,0,0,0" VerticalAlignment="Center" />
+        <controls:RetryFailedButton x:Name="RetryButton" Margin="12,0,0,0" VerticalAlignment="Center" />
       </StackPanel>
 
       <TextBlock

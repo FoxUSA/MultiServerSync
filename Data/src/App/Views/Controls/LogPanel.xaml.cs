@@ -122,9 +122,9 @@ public partial class LogPanel : UserControl
     }
 
     /// <summary>То же, что у терминала: строка кнопок — в одной строке с ярлыками «Терминал / Журнал».</summary>
-    public void AlignToolbar(double indent, double height)
+    public void AlignToolbar(double indent, double height, double right)
     {
-        ToolBar.Margin = new Thickness(indent, 0, 0, 4);
+        ToolBar.Margin = new Thickness(indent, 0, right, 4);
         ToolBar.MinHeight = height;
     }
 

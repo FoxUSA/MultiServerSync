@@ -11,6 +11,9 @@ public interface IRowCheck
     string Name { get; }
 
     RowMemory Memory { get; }
+
+    /// <summary>Свитч «Отмечать незалитые» включён и нашёл строку незалитой: галочка зелёная.</summary>
+    bool IsUnsent { get; set; }
 }
 
 /// <summary>
@@ -70,6 +73,14 @@ public sealed class TransferItem : ObservableObject, IRowCheck
     }
 
     public RowMemory Memory { get; set; } = new();
+
+    private bool _isUnsent;
+
+    public bool IsUnsent
+    {
+        get => _isUnsent;
+        set => Set(ref _isUnsent, value);
+    }
 
     public string FullPath { get; }
 

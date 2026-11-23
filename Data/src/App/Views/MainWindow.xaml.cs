@@ -59,6 +59,7 @@ public partial class MainWindow : FluentWindow
         ApplyTheme(settings.Theme);
 
         BottomRow.Height = new GridLength(Math.Max(0, settings.LogPanelHeight));
+        // свёрнута ли панель — как было при выходе; сворачивает кнопка в её правом углу
         SetBottomVisible(settings.LogPanelVisible);
 
         // натянутое разделителем запоминается сразу: от него считается доля при смене рядов ленты
@@ -96,8 +97,6 @@ public partial class MainWindow : FluentWindow
             }
         };
 
-        InputBindings.Add(new KeyBinding(
-            new Core.RelayCommand(_ => ToggleBottom()), Key.F12, ModifierKeys.None));
         InputBindings.Add(new KeyBinding(
             new Core.RelayCommand(_ => AddTab()), Key.T, ModifierKeys.Control));
         InputBindings.Add(new KeyBinding(
@@ -1688,7 +1687,7 @@ public partial class MainWindow : FluentWindow
         _stripHeight = e.NewSize.Height;
         _stripMin = Math.Min(_stripMin, _stripHeight);
 
-        if (BottomPanel.Visibility == Visibility.Visible && BottomRow.Height.IsAbsolute)
+        if (_bottomOpen && BottomRow.Height.IsAbsolute)
         {
             BottomRow.Height = new GridLength(BottomFor(StoredBottom()));
         }
@@ -2394,21 +2393,36 @@ public partial class MainWindow : FluentWindow
         return null;
     }
 
-    /// <summary>Нижняя панель прячется и разворачивается по F12; кнопки в шапке для этого нет.</summary>
-    private void ToggleBottom() => SetBottomVisible(BottomPanel.Visibility != Visibility.Visible);
+    /// <summary>Нижняя панель развёрнута; свёрнутая — одна строка ярлыков с кнопкой в углу.</summary>
+    private bool _bottomOpen = true;
 
     private void SetBottomVisible(bool visible)
     {
-        // спрятали — натянутая высота не теряется, панель вернётся такой же
+        // свернули — натянутая высота не теряется, панель развернётся такой же
         if (!visible)
         {
             RememberBottom();
         }
 
-        BottomPanel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        _bottomOpen = visible;
+        BottomContent.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         BottomSplitter.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
 
-        BottomRow.Height = new GridLength(visible ? BottomFor(StoredBottom()) : 0);
+        BottomRow.Height = visible ? new GridLength(BottomFor(StoredBottom())) : GridLength.Auto;
+
+        BottomFoldIcon.Symbol = visible ? Wpf.Ui.Controls.SymbolRegular.PanelBottomContract20 : Wpf.Ui.Controls.SymbolRegular.PanelBottomExpand20;
+        BottomFoldButton.ToolTip = visible ? "Свернуть панель" : "Развернуть панель";
+    }
+
+    private void OnBottomFold(object sender, RoutedEventArgs e) => SetBottomVisible(!_bottomOpen);
+
+    /// <summary>Щелчок по ярлыку свёрнутой панели её разворачивает.</summary>
+    private void OnBottomTabClick(object sender, RoutedEventArgs e)
+    {
+        if (!_bottomOpen)
+        {
+            SetBottomVisible(true);
+        }
     }
 
     /// <summary>
@@ -2417,7 +2431,7 @@ public partial class MainWindow : FluentWindow
     /// </summary>
     private void RememberBottom()
     {
-        if (BottomPanel.Visibility != Visibility.Visible || BottomRow.ActualHeight <= 40)
+        if (!_bottomOpen || BottomRow.ActualHeight <= 40)
         {
             return;
         }
@@ -2441,7 +2455,7 @@ public partial class MainWindow : FluentWindow
     /// <summary>Разворачивает нижнюю панель на вкладке «Терминал».</summary>
     private void ShowTerminal()
     {
-        if (BottomPanel.Visibility != Visibility.Visible)
+        if (!_bottomOpen)
         {
             SetBottomVisible(true);
         }
@@ -2463,10 +2477,17 @@ public partial class MainWindow : FluentWindow
     }
 
     /// <summary>Ярлыки «Терминал / Журнал» разложились — кнопки обоих встают в их строку, правее них.</summary>
-    private void OnBottomTabsSized(object sender, SizeChangedEventArgs e)
+    private void OnBottomTabsSized(object sender, SizeChangedEventArgs e) => AlignBottomToolbars();
+
+    private void OnBottomFoldSized(object sender, SizeChangedEventArgs e) => AlignBottomToolbars();
+
+    /// <summary>Кнопки обоих встают правее ярлыков и левее кнопки «Свернуть» в углу.</summary>
+    private void AlignBottomToolbars()
     {
-        Terminal.AlignToolbar(e.NewSize.Width, e.NewSize.Height);
-        Log.AlignToolbar(e.NewSize.Width, e.NewSize.Height);
+        // кнопка заходит в угол карточки отрицательным отступом — строке уступается только видимая часть
+        var right = Math.Max(0, BottomFoldButton.ActualWidth + BottomFoldButton.Margin.Right) + 6;
+        Terminal.AlignToolbar(BottomTabs.ActualWidth, BottomTabs.ActualHeight, right);
+        Log.AlignToolbar(BottomTabs.ActualWidth, BottomTabs.ActualHeight, right);
     }
 
     // ── трей и выход ───────────────────────────────────────────────────────────
@@ -2552,7 +2573,7 @@ public partial class MainWindow : FluentWindow
         settings.WindowTop = bounds.Top;
         settings.WindowMaximized = _maximized;
 
-        settings.LogPanelVisible = BottomPanel.Visibility == Visibility.Visible;
+        settings.LogPanelVisible = _bottomOpen;
         settings.BottomOnJournal = JournalTab.IsChecked == true;
         RememberBottom();
 

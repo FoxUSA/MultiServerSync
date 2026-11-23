@@ -309,12 +309,6 @@ public sealed class AppSettings
     public bool AutoCopyCurrentAfterCopy { get; set; }
 
     /// <summary>
-    /// Копирование вывода в разделе «Копирование» берёт и вывод личных команд вкладки:
-    /// в буфере один отчёт — сначала копирование, потом команды.
-    /// </summary>
-    public bool CopyWithChain { get; set; }
-
-    /// <summary>
     /// Сортировка таблиц: имя таблицы → «свойство|asc|desc». Порядок, выбранный щелчком
     /// по заголовку, переживает смену вкладки и закрытие программы.
     /// </summary>
@@ -370,6 +364,11 @@ public sealed class AppSettings
     public double OutputWidth { get; set; } = 900;
 
     public double OutputHeight { get; set; } = 620;
+
+    /// <summary>Размер окна «Команды после копирования» — каким его оставили.</summary>
+    public double AfterCopyWidth { get; set; } = 1000;
+
+    public double AfterCopyHeight { get; set; } = 640;
 
     /// <summary>
     /// Период «Мониторинга» из версии, где вкладок у раздела не было: только читается при переносе в первую вкладку.

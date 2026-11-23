@@ -152,6 +152,7 @@
         <Grid Grid.Row="0">
           <DataGrid
             x:Name="RowsGrid"
+            Grid.IsSharedSizeScope="True"
             BorderThickness="0"
             CanUserReorderColumns="False"
             CellStyle="{StaticResource AppDataGridCellStyle}"
@@ -201,6 +202,7 @@
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center">
                         <CheckBox
+                          x:Name="Box"
                           MinWidth="0"
                           MinHeight="0"
                           Margin="0"
@@ -220,6 +222,9 @@
                         Visibility="Collapsed" />
                     </Grid>
                     <DataTemplate.Triggers>
+                      <DataTrigger Binding="{Binding IsUnsent}" Value="True">
+                        <Setter TargetName="Box" Property="Style" Value="{StaticResource UnsentCheckStyle}" />
+                      </DataTrigger>
                       <DataTrigger Binding="{Binding IsGone}" Value="True">
                         <Setter TargetName="Check" Property="Visibility" Value="Collapsed" />
                         <Setter TargetName="Countdown" Property="Visibility" Value="Visible" />

@@ -13,6 +13,21 @@
 
   <BooleanToVisibilityConverter x:Key="WindowBoolToVis" />
 
+  <!--  Строку свитч «Отмечать незалитые» нашёл незалитой — квадрат как у пустой галочки, галочка и рамка зелёные.
+        Кисти — те, что шаблон галочки WPF UI берёт в отмеченном виде; ставит шаблон ячейки по IsUnsent строки  -->
+  <Style
+    x:Key="UnsentCheckStyle"
+    BasedOn="{StaticResource {x:Type CheckBox}}"
+    TargetType="CheckBox">
+    <Style.Resources>
+      <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillChecked" Color="{DynamicResource ControlAltFillColorSecondary}" />
+      <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillCheckedPointerOver" Color="{DynamicResource ControlAltFillColorTertiary}" />
+      <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillCheckedPressed" Color="{DynamicResource ControlAltFillColorQuarternary}" />
+      <SolidColorBrush x:Key="CheckBoxCheckBorderBrush" Color="#3DB85E" />
+      <SolidColorBrush x:Key="CheckBoxCheckGlyphForeground" Color="#3DB85E" />
+    </Style.Resources>
+  </Style>
+
   <!--  Номер окна — как кнопка, без оранжевого. Окно в фокусе — оба его номера (на разделителе и в строке пути)
         на тусклой оранжевой плашке; встало на суммах — красная рамка. Окно в Tag  -->
   <Style x:Key="WindowNumberStyle" TargetType="Button">
@@ -50,6 +65,10 @@
         <Setter Property="Cursor" Value="Arrow" />
         <Setter Property="ToolTip" Value="Это окно в фокусе: кнопки сверху, сводка и параметры — для него" />
       </DataTrigger>
+      <!--  свитч «Отмечать незалитые» нашёл в окне незалитое — только рамка зелёная, и у окна в фокусе тоже  -->
+      <DataTrigger Binding="{Binding Tag.HasUnsent, RelativeSource={RelativeSource Self}}" Value="True">
+        <Setter Property="BorderBrush" Value="#3DB85E" />
+      </DataTrigger>
       <DataTrigger Binding="{Binding Tag.IsFailed, RelativeSource={RelativeSource Self}}" Value="True">
         <Setter Property="BorderBrush" Value="#E85C5C" />
       </DataTrigger>
@@ -57,8 +76,8 @@
   </Style>
 
   <!--  Группа строк окна: сверху номер — квадрат ровно над галочкой строки, — название, справа плюс и минус;
-        под ними черта во всю ширину над строками окна. Между окнами — пустая полоса высотой со строку.
-        Окно одно — разделителя нет  -->
+        под ними черта во всю ширину над строками окна. Между окнами — зазор 4: шапка с фоном и чертой и так
+        отделяет окна, а полоса в строку у свёрнутых окон стояла пустой. Окно одно — разделителя нет  -->
   <Style x:Key="WindowGroupStyle" TargetType="GroupItem">
     <Setter Property="Template">
       <Setter.Value>
@@ -69,14 +88,16 @@
             <Grid
               x:Name="Divider"
               Height="26"
-              Margin="0,24,0,0"
+              Margin="0,4,0,0"
               Background="{DynamicResource ControlFillColorDefaultBrush}"
               Cursor="Hand"
               ToolTip="Щелчок — свернуть строки окна и перейти в него. Двойной по адресу — «Обзор»">
+              <!--  номер, название и черта — общей ширины у всех окон (Grid.IsSharedSizeScope у таблицы):
+                    адреса начинаются в одном столбике, по самому длинному названию  -->
               <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" SharedSizeGroup="WinNumber" />
+                <ColumnDefinition Width="Auto" SharedSizeGroup="WinName" />
+                <ColumnDefinition Width="Auto" SharedSizeGroup="WinBar" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
               </Grid.ColumnDefinitions>
@@ -94,6 +115,7 @@
                 MinWidth="18"
                 Margin="4,0,6,0"
                 Padding="2,0"
+                HorizontalAlignment="Left"
                 VerticalAlignment="Center"
                 Content="{Binding Name.NumberText}"
                 FontSize="12"

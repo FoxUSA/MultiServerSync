@@ -37,6 +37,14 @@ public sealed class CopyWindow : ObservableObject
     private bool _isFocused;
     private bool _isFailed;
     private bool _isCollapsed;
+    private bool _hasUnsent;
+
+    /// <summary>Свитч «Отмечать незалитые» включён, и в окне есть незалитое: номер окна зелёный.</summary>
+    public bool HasUnsent
+    {
+        get => _hasUnsent;
+        set => Set(ref _hasUnsent, value);
+    }
 
     public CopyWindow(Workspace owner, string remotePath)
     {

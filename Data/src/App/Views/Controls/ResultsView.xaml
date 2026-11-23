@@ -235,54 +235,41 @@
           </ui:Button.Icon>
         </ui:Button>
         <!--  без левого отступа темы (11): зазор до «Текущий лог» такой же, как между кнопками.
-              Без правого: кнопки, «авто» и «*.txt» — один блок, зазор между галочками 8  -->
+              Без правого: кнопки и галочки — один блок, зазор между галочками 8. «Auto Copy & Paste» —
+              сразу за «Auto Copy»: без неё не работает. «Буфер .txt» от неё не зависит — ей пользуются и кнопки  -->
         <CheckBox
           MinWidth="0"
           MinHeight="0"
           Margin="0,0,8,0"
           Padding="0,5,0,6"
           VerticalAlignment="Center"
-          Content="авто"
+          Content="Auto Copy"
           FontSize="11"
-          IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=AutoCopyCurrent, Mode=TwoWay}"
-          ToolTip="По окончании вывод сам копируется в буфер" />
+          IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=AutoCopyOnly, Mode=TwoWay}"
+          ToolTip="По окончании вывод сам копируется в буфер. Вместе с «Auto Copy &amp; Paste» не ставится" />
         <CheckBox
           MinWidth="0"
           MinHeight="0"
           Margin="0,0,8,0"
           Padding="0,5,0,6"
-          VerticalAlignment="Center"
-          Content="+ команды"
-          FontSize="11"
-          IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=CopyWithChain, Mode=TwoWay}"
-          ToolTip="Вместе с выводом личных команд вкладки, одним отчётом"
-          Visibility="{Binding Source={x:Static services:AppState.Current}, Path=ChainCopyVisibility}" />
-        <CheckBox
-          MinWidth="0"
-          MinHeight="0"
-          Margin="0,0,4,0"
-          Padding="0,5,11,6"
-          VerticalAlignment="Center"
-          Content="*.txt"
-          FontSize="11"
-          IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=LogAsFile, Mode=TwoWay}"
-          IsEnabled="{Binding Source={x:Static services:AppState.Current}, Path=CopyPassAvailable}"
-          ToolTip="Лог длиннее 1000 строк — в буфер файлом. Без галочки середина обрезается"
-          ToolTipService.ShowOnDisabled="True" />
-        <CheckBox
-          MinWidth="0"
-          MinHeight="0"
           VerticalAlignment="Center"
           x:Name="CopyPassBox"
-          Content="CopyPass"
+          Content="Auto Copy &amp; Paste"
           Loaded="OnCopyPassLoaded"
           FontSize="11"
           IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=CopyPass, Mode=TwoWay}"
-          IsEnabled="{Binding Source={x:Static services:AppState.Current}, Path=CopyPassAvailable}"
           MouseRightButtonUp="OnCopyPassRightClick"
           Visibility="{Binding Source={x:Static services:AppState.Current}, Path=CopyPassVisibility}"
-          ToolTip="Автокопия сама вставляется в поле ввода другой программы и отправляется Enter. Терминалы и пароли пропускает. ПКМ — на один раз (×1)"
-          ToolTipService.ShowOnDisabled="True" />
+          ToolTip="Вывод сам копируется и вставляется в поле ввода другой программы с Enter. Терминалы и пароли пропускает. ПКМ — на один раз (×1)" />
+        <CheckBox
+          MinWidth="0"
+          MinHeight="0"
+          Padding="0,5,0,6"
+          VerticalAlignment="Center"
+          Content="Буфер .txt"
+          FontSize="11"
+          IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=LogAsFile, Mode=TwoWay}"
+          ToolTip="Лог длиннее 1000 строк — в буфер файлом, и кнопками, и автокопией. Без галочки середина обрезается" />
       </StackPanel>
     </Grid>
 
