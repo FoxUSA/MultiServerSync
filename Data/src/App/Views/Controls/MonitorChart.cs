@@ -54,6 +54,9 @@ public sealed class MonitorChart : FrameworkElement
         SnapsToDevicePixels = true;
         MouseMove += (_, e) => { _hoverX = e.GetPosition(this).X; InvalidateVisual(); };
         MouseLeave += (_, _) => { _hoverX = null; InvalidateVisual(); };
+
+        // цвета берутся при рисовании — после смены темы рисуем заново
+        Core.AppTheme.Follow(this, InvalidateVisual);
     }
 
     public void Show(ChartData data)

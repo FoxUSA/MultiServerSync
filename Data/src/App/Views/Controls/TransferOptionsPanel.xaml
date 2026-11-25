@@ -33,43 +33,9 @@
       <Setter Property="FontSize" Value="12" />
     </Style>
 
-    <!--  свитч «Незалитые»: включён — зелёным; галочки тронули руками — тускло-красным.
-          Тема та же, подменены только кисти включённой заливки, как у DangerSwitchStyle  -->
-    <Style
-      x:Key="UnsentSwitchStyle"
-      BasedOn="{StaticResource {x:Type ui:ToggleSwitch}}"
-      TargetType="ui:ToggleSwitch">
-      <Style.Resources>
-        <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#2E9E4A" />
-        <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#36AE54" />
-        <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#278A40" />
-        <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="Transparent" />
-        <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="Transparent" />
-        <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="Transparent" />
-      </Style.Resources>
-    </Style>
-
-    <Style
-      x:Key="UnsentStaleSwitchStyle"
-      BasedOn="{StaticResource {x:Type ui:ToggleSwitch}}"
-      TargetType="ui:ToggleSwitch">
-      <Style.Resources>
-        <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#A8463E" />
-        <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#B85048" />
-        <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#953C35" />
-        <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="Transparent" />
-        <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="Transparent" />
-        <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="Transparent" />
-      </Style.Resources>
-    </Style>
-
-    <!--  включён, а незалитых нет — обычный включённый свитч темы  -->
-    <Style
-      x:Key="UnsentNoneSwitchStyle"
-      BasedOn="{StaticResource {x:Type ui:ToggleSwitch}}"
-      TargetType="ui:ToggleSwitch" />
-
-    <SolidColorBrush x:Key="UnsentStaleTextBrush" Color="#C8645C" />
+    <!--  свитч «Незалитые»: включён — зелёным; галочки тронули руками — тускло-красным; незалитых нет — обычный.
+          Стили UnsentSwitchStyle, UnsentStaleSwitchStyle, UnsentNoneSwitchStyle и цвет подписи Unsent.StaleText —
+          в теме: Themes\Dark и Themes\Light, Palette.xaml  -->
   </UserControl.Resources>
 
   <Border
@@ -222,7 +188,7 @@
             x:Name="UnsentSwitch"
             VerticalAlignment="Center"
             Click="OnUnsent"
-            Style="{StaticResource UnsentSwitchStyle}" />
+            Style="{DynamicResource UnsentSwitchStyle}" />
         </StackPanel>
       </Grid>
       </StackPanel>

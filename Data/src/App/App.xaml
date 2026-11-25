@@ -34,18 +34,18 @@
               <Border
                 x:Name="Bd"
                 Padding="10,5"
-                Background="#26E07A1F"
-                BorderBrush="#80E07A1F"
+                Background="{DynamicResource Pick.Fill}"
+                BorderBrush="{DynamicResource Pick.Stroke}"
                 BorderThickness="1"
                 CornerRadius="6">
                 <ContentPresenter VerticalAlignment="Center" />
               </Border>
               <ControlTemplate.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                  <Setter TargetName="Bd" Property="Background" Value="#38E07A1F" />
+                  <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Pick.FillHover}" />
                 </Trigger>
                 <Trigger Property="IsPressed" Value="True">
-                  <Setter TargetName="Bd" Property="Background" Value="#4AE07A1F" />
+                  <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Pick.FillPressed}" />
                 </Trigger>
               </ControlTemplate.Triggers>
             </ControlTemplate>
@@ -93,7 +93,7 @@
                         Direction="270"
                         Opacity="0.135"
                         ShadowDepth="5"
-                        Color="#202020" />
+                        Color="{DynamicResource Tooltip.Shadow.Color}" />
                     </Border.Effect>
                   </Border>
                   <Border
@@ -164,30 +164,9 @@
       <!--  длинные и многострочные команды в выпадающих списках показываются одной короткой строкой  -->
       <core:ShortLineConverter x:Key="ShortLine" />
 
-      <!--  свитч «Везде» рядом с «Выполнить»: включён — красным, как была кнопка «Выполнить везде».
-            Тема та же, подменены только кисти включённой заливки; обводки у включённого нет  -->
-      <Style
-        x:Key="DangerSwitchStyle"
-        BasedOn="{StaticResource {x:Type ui:ToggleSwitch}}"
-        TargetType="ui:ToggleSwitch">
-        <Style.Resources>
-          <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#E5483B" />
-          <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#EE5A4D" />
-          <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#C93A2F" />
-          <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="Transparent" />
-          <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="Transparent" />
-          <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="Transparent" />
-        </Style.Resources>
-      </Style>
-
-      <!--
-        Выделение строки: полупрозрачный акцент вместо системного «Highlight».
-        Системный красит строку сплошным цветом и заодно меняет цвет текста на белый —
-        в тёмной теме строка становится нечитаемой. Полупрозрачный работает в обеих темах:
-        текст остаётся своего цвета.
-      -->
-      <SolidColorBrush x:Key="AppRowSelectedBrush" Color="#554CA6FF" />
-      <SolidColorBrush x:Key="AppRowHoverBrush" Color="#224CA6FF" />
+      <!--  Цветов здесь нет: всё, что зависит от темы, лежит в Themes\Dark и Themes\Light (см. Core\AppTheme).
+            Оттуда же — DangerSwitchStyle и кисти строк таблиц AppRowSelectedBrush, AppRowHoverBrush, AppRowAltBrush:
+            выделение строки — полупрозрачный цвет вместо системного «Highlight», текст остаётся своего цвета  -->
 
       <!--  WPF UI не оформляет шапку GridView — по умолчанию она светлая в любой теме  -->
       <Style TargetType="GridViewColumnHeader">
@@ -250,8 +229,8 @@
               </Border>
               <ControlTemplate.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                  <Setter TargetName="Bd" Property="Background" Value="#C42B1C" />
-                  <Setter TargetName="Glyph" Property="Foreground" Value="White" />
+                  <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Danger.Fill}" />
+                  <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource Danger.OnFill}" />
                 </Trigger>
               </ControlTemplate.Triggers>
             </ControlTemplate>
@@ -282,7 +261,7 @@
               <ControlTemplate.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
                   <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
-                  <Setter TargetName="Bd" Property="TextElement.Foreground" Value="White" />
+                  <Setter TargetName="Bd" Property="TextElement.Foreground" Value="{DynamicResource Accent.OnFill}" />
                 </Trigger>
               </ControlTemplate.Triggers>
             </ControlTemplate>
@@ -348,10 +327,10 @@
         <Setter Property="Background" Value="Transparent" />
         <Style.Triggers>
           <DataTrigger Binding="{Binding HasGlobalExcludes}" Value="True">
-            <Setter Property="Background" Value="#6B4FA8" />
+            <Setter Property="Background" Value="{DynamicResource Exclude.Global}" />
           </DataTrigger>
           <DataTrigger Binding="{Binding HasExcludes}" Value="True">
-            <Setter Property="Background" Value="#2E7D3E" />
+            <Setter Property="Background" Value="{DynamicResource Exclude.Own}" />
           </DataTrigger>
         </Style.Triggers>
       </Style>
@@ -361,10 +340,10 @@
         <Setter Property="Symbol" Value="Filter24" />
         <Style.Triggers>
           <DataTrigger Binding="{Binding HasGlobalExcludes}" Value="True">
-            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Foreground" Value="{DynamicResource Exclude.OnBadge}" />
           </DataTrigger>
           <DataTrigger Binding="{Binding HasExcludes}" Value="True">
-            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Foreground" Value="{DynamicResource Exclude.OnBadge}" />
           </DataTrigger>
         </Style.Triggers>
       </Style>
@@ -398,7 +377,7 @@
               <ControlTemplate.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
                   <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
-                  <Setter TargetName="Glyph" Property="Foreground" Value="White" />
+                  <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource Accent.OnFill}" />
                 </Trigger>
               </ControlTemplate.Triggers>
             </ControlTemplate>

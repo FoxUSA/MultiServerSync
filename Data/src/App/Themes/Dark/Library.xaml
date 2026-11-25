@@ -1,0 +1,8 @@
+<!--
+  ТЁМНАЯ ТЕМА — кисти библиотеки WPF UI.
+  Пусто намеренно: тёмная тема берёт кисти библиотеки как есть, без подмен. Их значения записаны
+  в .dev\THEME-STANDARD.md. Светлая тема свои значения этих кистей задаёт в Themes\Light\Library.xaml.
+-->
+<ResourceDictionary
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" />

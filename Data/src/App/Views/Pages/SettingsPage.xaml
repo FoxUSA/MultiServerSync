@@ -19,6 +19,52 @@
       <Setter Property="VerticalAlignment" Value="Stretch" />
       <!--  скругление как у карточек окна: своё у CardControl едва заметно  -->
       <Setter Property="CornerRadius" Value="8" />
+      <!--  свой шаблон: значок и текст — по середине, кнопка или список — в правом нижнем углу, как обычная кнопка
+            (у библиотеки они стояли по середине высоты и в высокой плитке висели). Фон, рамка и поля — из стиля библиотеки  -->
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ui:CardControl">
+            <Border
+              Padding="{TemplateBinding Padding}"
+              Background="{TemplateBinding Background}"
+              BorderBrush="{TemplateBinding BorderBrush}"
+              BorderThickness="{TemplateBinding BorderThickness}"
+              CornerRadius="{TemplateBinding CornerRadius}">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ContentPresenter
+                  Grid.Column="0"
+                  Margin="0,0,16,0"
+                  VerticalAlignment="Center"
+                  Content="{TemplateBinding Icon}"
+                  TextElement.FontSize="20"
+                  TextElement.Foreground="{TemplateBinding Foreground}" />
+                <ContentPresenter
+                  Grid.Column="1"
+                  VerticalAlignment="Center"
+                  Content="{TemplateBinding Header}"
+                  TextElement.Foreground="{TemplateBinding Foreground}" />
+                <ContentPresenter
+                  x:Name="Side"
+                  Grid.Column="2"
+                  Margin="16,0,0,0"
+                  HorizontalAlignment="Right"
+                  VerticalAlignment="Bottom"
+                  Content="{TemplateBinding Content}" />
+              </Grid>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="Content" Value="{x:Null}">
+                <Setter TargetName="Side" Property="Visibility" Value="Collapsed" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
 
     <Style x:Key="GroupTitleStyle" TargetType="TextBlock">
@@ -79,19 +125,40 @@
         Grid.Column="0"
         Icon="{ui:SymbolIcon Info24}"
         Style="{StaticResource SettingCardStyle}">
+        <!--  версия — в строке заголовка справа; пояснения под ними во всю ширину  -->
         <ui:CardControl.Header>
-          <StackPanel>
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
             <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="Версия программы" />
-            <TextBlock x:Name="ManifestPathText" Style="{StaticResource CardNoteStyle}" />
-          </StackPanel>
+            <TextBlock
+              x:Name="VersionText"
+              Grid.Column="1"
+              Margin="16,0,0,0"
+              FontWeight="SemiBold" />
+            <TextBlock
+              x:Name="ManifestPathText"
+              Grid.Row="1"
+              Grid.ColumnSpan="2"
+              Style="{StaticResource CardNoteStyle}" />
+            <!--  условие GeoLite2: в программе указано, что данные от MaxMind, со ссылкой  -->
+            <TextBlock
+              x:Name="GeoText"
+              Grid.Row="2"
+              Grid.ColumnSpan="2"
+              Style="{StaticResource CardNoteStyle}" />
+          </Grid>
         </ui:CardControl.Header>
-        <TextBlock
-          x:Name="VersionText"
-          VerticalAlignment="Center"
-          FontWeight="SemiBold" />
       </ui:CardControl>
 
-      <!--  обновление: само окно с шагами и полосой — то же, что открывает кнопка в шапке  -->
+      <!--  «Обновить»: есть свежее — сразу окно с ходом обновления; нет — плашка  -->
       <ui:CardControl
         Grid.Row="3"
         Grid.Column="0"
@@ -100,18 +167,19 @@
         <ui:CardControl.Header>
           <StackPanel>
             <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="Обновление программы" />
-            <TextBlock Style="{StaticResource CardNoteStyle}" Text="Проверяется при каждом запуске. Заменяются Data и лаунчер, UserData не трогается" />
+            <TextBlock Style="{StaticResource CardNoteStyle}" Text="Программа — при каждом запуске, гео-база — раз в 30 дней. UserData не трогается" />
           </StackPanel>
         </ui:CardControl.Header>
         <ui:Button
+          x:Name="UpdateButton"
           Width="200"
           Click="OnUpdateClick"
-          Content="Проверить обновления"
+          Content="Обновить"
           Icon="{ui:SymbolIcon ArrowSync24}" />
       </ui:CardControl>
 
       <ui:CardControl
-        Grid.Row="9"
+        Grid.Row="5"
         Grid.Column="0"
         Icon="{ui:SymbolIcon Globe24}"
         Style="{StaticResource SettingCardStyle}">
@@ -128,37 +196,18 @@
           Icon="{ui:SymbolIcon Open24}" />
       </ui:CardControl>
 
-      <ui:CardControl
-        Grid.Row="4"
-        Grid.Column="0"
-        Icon="{ui:SymbolIcon DarkTheme24}"
-        Style="{StaticResource SettingCardStyle}">
-        <ui:CardControl.Header>
-          <StackPanel>
-            <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="Тема оформления" />
-            <TextBlock Style="{StaticResource CardNoteStyle}" Text="Светлая, тёмная или как в системе" />
-          </StackPanel>
-        </ui:CardControl.Header>
-        <ComboBox
-          x:Name="ThemeBox"
-          Width="200"
-          SelectionChanged="OnThemeChanged">
-          <ComboBoxItem Content="Тёмная" Tag="Dark" />
-          <ComboBoxItem Content="Светлая" Tag="Light" />
-          <ComboBoxItem Content="Как в системе" Tag="System" />
-        </ComboBox>
-      </ui:CardControl>
+      <!--  тема — значком в шапке главного окна, слева от «Настроек»  -->
 
       <!--  выбор громкости сразу проигрывает звук — слышно, что выбрал  -->
       <ui:CardControl
-        Grid.Row="5"
+        Grid.Row="4"
         Grid.Column="0"
         Icon="{ui:SymbolIcon Speaker224}"
         Style="{StaticResource SettingCardStyle}">
         <ui:CardControl.Header>
           <StackPanel>
-            <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="Звук окончания команды" />
-            <TextBlock Style="{StaticResource CardNoteStyle}" Text="Звучит, когда закончилась команда или копирование, но не чаще раза в 3 секунды. 0% — без звука" />
+            <TextBlock FontWeight="SemiBold" TextWrapping="Wrap" Text="Звук уведомлений" />
+            <TextBlock Style="{StaticResource CardNoteStyle}" Text="Громкость всех звуков программы. 0% — без звука" />
           </StackPanel>
         </ui:CardControl.Header>
         <ComboBox
@@ -297,7 +346,7 @@
       <!--  пароли в servers.json всегда зашифрованы; выбирается только чем. Карточка на два ряда: поле и кнопка столбиком  -->
       <ui:CardControl
         Grid.Row="7"
-        Grid.RowSpan="3"
+        Grid.RowSpan="2"
         Grid.Column="2"
         Icon="{ui:SymbolIcon LockClosed24}"
         Style="{StaticResource SettingCardStyle}">

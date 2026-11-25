@@ -204,6 +204,16 @@ public partial class MainWindow : FluentWindow
             // «Мониторинг» читается заранее: раздел откроется сразу с графиками
             MonitorWarmup.Start();
 
+            // сигналы «Мониторинга»: раздел сервера покраснел — звук и его окно вперёд
+            MonitorAlerts.Start(this);
+
+            // гео серверов: база GeoLite2 из UserData\geo, раз в 30 дней — новая с api.byfox.dev
+            GeoBase.Start();
+
+            // значок темы в шапке: та, что сейчас; сменилась в Windows при «как в системе» — значок следом
+            ShowThemeIcon();
+            Core.AppTheme.Changed += ShowThemeIcon;
+
             // записи загрузки плашкой не показываем — только то, что сделано после открытия окна
             AppLog.Written += ShowToast;
             PreviewMouseLeftButtonUp += RememberPressedButton;
@@ -246,6 +256,25 @@ public partial class MainWindow : FluentWindow
     private void OnOpenProductPage(object sender, RoutedEventArgs e) =>
         System.Diagnostics.Process.Start(
             new System.Diagnostics.ProcessStartInfo(UpdateService.PageUrl) { UseShellExecute = true });
+
+    /// <summary>Значок темы в шапке — той, что сейчас (и при «как в системе» тоже).</summary>
+    private void ShowThemeIcon()
+    {
+        var light = Core.AppTheme.IsLight;
+        ThemeButton.Icon = new Wpf.Ui.Controls.SymbolIcon(light ? Wpf.Ui.Controls.SymbolRegular.WeatherSunny24 : Wpf.Ui.Controls.SymbolRegular.WeatherMoon24);
+        ThemeButton.ToolTip = light ? "Светлая тема. Щелчок — тёмная" : "Тёмная тема. Щелчок — светлая";
+    }
+
+    /// <summary>Щелчок по значку темы — другая тема, без меню; выбор запоминается.</summary>
+    private void OnThemeToggle(object sender, RoutedEventArgs e)
+    {
+        var theme = Core.AppTheme.IsLight ? "Dark" : "Light";
+        State.Settings.Theme = theme;
+        State.SaveSettings();
+        ApplyTheme(theme);
+        ShowThemeIcon();
+        AppLog.Hint(theme == "Light" ? "Тема: светлая." : "Тема: тёмная.");
+    }
 
     /// <summary>Страницы разделов — по одной на раздел: вкладки, выделение и прокрутка не теряются при переходах.</summary>
     private readonly Dictionary<Type, System.Windows.Controls.Page> _pages = new();
@@ -312,12 +341,7 @@ public partial class MainWindow : FluentWindow
                 State.CloseExplorerFilter();
             }
 
-            // переход в «Мониторинг» кнопкой — как правый щелчок: сервер из раздела, откуда пришли, период «Сейчас»
-            if (page == typeof(MonitorPage) && State.Section != AppSection.Monitor && State.MonitorTabs.Count > 0)
-            {
-                State.ActiveMonitorTab.SeedMonitor(State.PaneTab?.PaneServers.FirstOrDefault(c => c.IsSelected)?.Server);
-            }
-
+            // переход в «Мониторинг» кнопкой вкладку не трогает: у неё свой сервер, набор и период (25.11)
             Navigate(page);
         }
     }
@@ -325,7 +349,7 @@ public partial class MainWindow : FluentWindow
     /// <summary>
     /// Правая кнопка по «Мониторингу»: сразу отдельное окно, раздел в главном окне не меняется; окно то же, что у
     /// кнопки выноса справа от периодов. Сервер — первый отмеченный в панели открытого раздела, в том порядке, как она
-    /// показывает (в самом «Мониторинге» — его выбранный); отмеченных нет — окно без сервера. Период — всегда «Сейчас».
+    /// показывает (в самом «Мониторинге» — его выбранный); отмеченных нет — первый сервер этого списка. Период — всегда «Сейчас».
     /// Серверов нет — отказ под кнопкой.
     /// </summary>
     private void OnMonitorSectionRightClick(object sender, MouseButtonEventArgs e)
@@ -345,9 +369,12 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        var server = State.Section == AppSection.Monitor
+        // отмеченных нет — первый сервер списка панели (набор вкладки, в показанном порядке)
+        var pane = State.PaneTab?.PaneServers;
+        var server = (State.Section == AppSection.Monitor
             ? State.MonitorServer
-            : State.PaneTab?.PaneServers.FirstOrDefault(c => c.IsSelected)?.Server;
+            : pane?.FirstOrDefault(c => c.IsSelected)?.Server)
+            ?? pane?.FirstOrDefault()?.Server;
 
         MonitorWindow.Open(server, MonitorRange.Live, this);
     }
@@ -583,80 +610,8 @@ public partial class MainWindow : FluentWindow
     /// <summary>Всё общее состояние: серверы, вкладки, настройки.</summary>
     public AppState State => AppState.Current;
 
-    /// <summary>
-    /// Тема программы. Подложки нет (WindowBackdropType.None): сплошной фон держит ступени
-    /// яркости окна, карточек и таблиц одинаковыми при любых обоях и в неактивном окне.
-    /// WPF-UI без явного указания снова включает Mica, поэтому «как в системе» считаем сами.
-    /// </summary>
-    public static void ApplyTheme(string theme)
-    {
-        var target = theme switch
-        {
-            "Light" => ApplicationTheme.Light,
-            "Dark" => ApplicationTheme.Dark,
-            _ => ApplicationThemeManager.GetSystemTheme() switch
-            {
-                SystemTheme.Dark or SystemTheme.Glow or SystemTheme.CapturedMotion => ApplicationTheme.Dark,
-                SystemTheme.HC1 or SystemTheme.HC2 or SystemTheme.HCBlack or SystemTheme.HCWhite => ApplicationTheme.HighContrast,
-                _ => ApplicationTheme.Light,
-            },
-        };
-        ApplicationThemeManager.Apply(target, WindowBackdropType.None);
-
-        if (!_tuneHooked)
-        {
-            // тема сменилась сама (как в системе) — поправки следом
-            _tuneHooked = true;
-            ApplicationThemeManager.Changed += (_, _) => TuneTheme();
-        }
-
-        TuneTheme();
-    }
-
-    private static bool _tuneHooked;
-
-    /// <summary>Кисти, которые программа подменяет в светлой теме; в тёмной их нет — всё из темы.</summary>
-    private static readonly string[] LightTuned =
-        ["TextFillColorSecondaryBrush", "TextFillColorTertiaryBrush", "TextFillColorDisabledBrush"];
-
-    /// <summary>
-    /// Светлая тема WPF UI рисует вторичный и третичный текст полупрозрачным чёрным — на белом
-    /// он выходит бледнее, чем такой же белый на тёмном: подписи сливаются с фоном. В светлой
-    /// теме эти кисти темнее, а полоса строк таблиц — лёгкое затемнение вместо белого на сером.
-    /// Тёмная тема не меняется: подмены убираются, и кисти снова берутся из темы.
-    /// </summary>
-    private static void TuneTheme()
-    {
-        var resources = Application.Current.Resources;
-        var light = ApplicationThemeManager.GetAppTheme() == ApplicationTheme.Light;
-
-        foreach (var key in LightTuned)
-        {
-            resources.Remove(key);
-        }
-
-        resources.Remove("AppRowAltBrush");
-
-        if (light)
-        {
-            resources["TextFillColorSecondaryBrush"] = Frozen(0xC4, 0x00);
-            resources["TextFillColorTertiaryBrush"] = Frozen(0x9E, 0x00);
-            resources["TextFillColorDisabledBrush"] = Frozen(0x80, 0x00);
-            resources["AppRowAltBrush"] = Frozen(0x09, 0x00);
-        }
-        else
-        {
-            // тёмная — как была: полоса строк та же кисть темы, что и раньше
-            resources["AppRowAltBrush"] = Application.Current.TryFindResource("ControlFillColorDefaultBrush");
-        }
-
-        static SolidColorBrush Frozen(byte alpha, byte gray)
-        {
-            var brush = new SolidColorBrush(Color.FromArgb(alpha, gray, gray, gray));
-            brush.Freeze();
-            return brush;
-        }
-    }
+    /// <summary>Тема программы по настройке. Всё про темы — в <see cref="Core.AppTheme"/>.</summary>
+    public static void ApplyTheme(string theme) => Core.AppTheme.Apply(theme);
 
     /// <summary>Повторный запуск программы: вместо второго окна — ещё одна вкладка в этом.</summary>
     public void OpenWorkspaceFromNewInstance()
@@ -2214,6 +2169,10 @@ public partial class MainWindow : FluentWindow
     /// <summary>Запуск без отмеченных серверов: строки целевых серверов мигают тусклым оранжевым.</summary>
     public void FlashTargets()
     {
+        // цвет вспышки — из темы; начинается он же, только прозрачный
+        var peak = Core.AppTheme.Color("Flash.Peak");
+        var clear = Color.FromArgb(0, peak.R, peak.G, peak.B);
+
         foreach (var item in PaneServerList.Items)
         {
             if (PaneServerList.ItemContainerGenerator.ContainerFromItem(item) is not System.Windows.Controls.ContentPresenter presenter
@@ -2222,8 +2181,8 @@ public partial class MainWindow : FluentWindow
                 continue;
             }
 
-            var brush = new SolidColorBrush(Color.FromArgb(0, 0xE0, 0x7A, 0x1F));
-            var blink = new ColorAnimation(Color.FromArgb(0x50, 0xE0, 0x7A, 0x1F), TimeSpan.FromMilliseconds(180))
+            var brush = new SolidColorBrush(clear);
+            var blink = new ColorAnimation(peak, TimeSpan.FromMilliseconds(180))
             {
                 AutoReverse = true,
                 RepeatBehavior = new RepeatBehavior(2),

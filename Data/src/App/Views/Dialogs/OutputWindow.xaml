@@ -163,7 +163,7 @@
       x:Name="StatusHost"
       Grid.Row="5"
       Padding="12,4"
-      Background="{DynamicResource ControlFillColorDefaultBrush}"
+      Background="{DynamicResource Bar.Fill}"
       BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
       BorderThickness="0,1,0,0">
       <Grid>

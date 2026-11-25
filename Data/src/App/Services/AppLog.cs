@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -19,7 +20,7 @@ public enum LogLevel
     Debug,
 }
 
-public sealed class LogEntry
+public sealed class LogEntry : INotifyPropertyChanged
 {
     public required DateTime Time { get; init; }
 
@@ -114,13 +115,18 @@ public sealed class LogEntry
 
     public string Line => Scope is null ? Text : $"[{Scope}] {Text}";
 
-    public Brush Brush => Level switch
+    /// <summary>Цвет строки по уровню — кисть темы; сменилась тема — строки журнала извещает <see cref="AppLog"/>.</summary>
+    public Brush Brush => AppTheme.Brush(Level switch
     {
-        LogLevel.Success => Brushes.MediumSeaGreen,
-        LogLevel.Warning => Brushes.Goldenrod,
-        LogLevel.Error => Brushes.IndianRed,
-        _ => Brushes.Gainsboro,
-    };
+        LogLevel.Success => "Log.Success.Text",
+        LogLevel.Warning => "Log.Warning.Text",
+        LogLevel.Error => "Log.Error.Text",
+        _ => "Log.Info.Text",
+    });
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    internal void RaiseTheme() => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Brush)));
 }
 
 /// <summary>
@@ -138,6 +144,18 @@ public static class AppLog
     private static readonly AsyncLocal<AppSection?> Ambient = new();
 
     public static ObservableCollection<LogEntry> Entries { get; } = new();
+
+    static AppLog()
+    {
+        // сменилась тема — строки журнала перечитывают цвет. Журнал живёт, пока жива программа, — отписка не нужна
+        AppTheme.Changed += () =>
+        {
+            foreach (var entry in Entries)
+            {
+                entry.RaiseTheme();
+            }
+        };
+    }
 
     public static event Action<LogEntry>? Written;
 

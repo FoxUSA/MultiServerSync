@@ -135,7 +135,7 @@
 
     <!--  контейнер значков у адреса — тот же фон и рамка, что у самого пути  -->
     <Style x:Key="PathGroupStyle" TargetType="Border">
-      <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+      <Setter Property="Background" Value="{DynamicResource Explorer.PathGroup.Fill}" />
       <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="4" />
@@ -612,18 +612,18 @@
               <Border
                 x:Name="Bd"
                 Padding="10,5"
-                Background="#26E07A1F"
-                BorderBrush="#80E07A1F"
+                Background="{DynamicResource Pick.Fill}"
+                BorderBrush="{DynamicResource Pick.Stroke}"
                 BorderThickness="1"
                 CornerRadius="6">
                 <ContentPresenter VerticalAlignment="Center" />
               </Border>
               <ControlTemplate.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                  <Setter TargetName="Bd" Property="Background" Value="#38E07A1F" />
+                  <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Pick.FillHover}" />
                 </Trigger>
                 <Trigger Property="IsPressed" Value="True">
-                  <Setter TargetName="Bd" Property="Background" Value="#4AE07A1F" />
+                  <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Pick.FillPressed}" />
                 </Trigger>
               </ControlTemplate.Triggers>
             </ControlTemplate>

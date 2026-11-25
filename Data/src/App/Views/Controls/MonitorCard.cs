@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 
@@ -17,6 +18,9 @@ public sealed class MonitorCardData
 
     /// <summary>Мелкая приписка к названию: «· ens33», «· /».</summary>
     public string TitleNote { get; init; } = string.Empty;
+
+    /// <summary>Название в углу — выбор (у «Диска», когда хранилищ несколько): стрелка и щелчок открывают список у этого места.</summary>
+    public Action<FrameworkElement>? TitlePick { get; init; }
 
     /// <summary>Название, когда карточке тесно и оно встаёт в строку со значением.</summary>
     public required string Short { get; init; }
@@ -77,7 +81,39 @@ public sealed class MonitorCard : Border
         CornerRadius = new CornerRadius(8);
         TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);
         UseLayoutRounding = true;
-        Child = _stack = new CardStack();
+
+        // рамка сработавшего сигнала — поверх своей, в 2 точки, ничего внутри не сдвигает
+        _lit.SetResourceReference(Border.BorderBrushProperty, "Pick.Stroke");
+        var root = new Grid();
+        root.Children.Add(_stack = new CardStack());
+        root.Children.Add(_lit);
+        Child = root;
+    }
+
+    private readonly Border _lit = new()
+    {
+        BorderThickness = new Thickness(2),
+        CornerRadius = new CornerRadius(8),
+        Margin = new Thickness(-1),
+        IsHitTestVisible = false,
+        Visibility = Visibility.Collapsed,
+    };
+
+    /// <summary>Сработал сигнал этого раздела — тускло-оранжевая рамка, пока <see cref="Services.MonitorAlerts"/> её не погасит.</summary>
+    public bool Lit
+    {
+        get => _lit.Visibility == Visibility.Visible;
+        set => _lit.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Кнопка сигнала: null — у раздела её нет (у сети нет нормы); true — включён.</summary>
+    public void SetAlert(bool? on, string tip) => _stack.SetAlert(on, tip);
+
+    /// <summary>Щелчок по кнопке сигнала.</summary>
+    public event Action? AlertClicked
+    {
+        add => _stack.AlertClicked += value;
+        remove => _stack.AlertClicked -= value;
     }
 
     /// <summary>Наименьший размер, при котором видно хотя бы значение с названием.</summary>
@@ -108,6 +144,11 @@ public sealed class MonitorCard : Border
         private readonly TextBlock _title = Text(13, FontWeights.Medium, "TextFillColorSecondaryBrush");
         private readonly TextBlock _titleNote = Text(12, FontWeights.Normal, "TextFillColorTertiaryBrush");
         private readonly TextBlock _status = Text(12, FontWeights.Normal, "TextFillColorTertiaryBrush");
+
+        /// <summary>Название с припиской — щёлкается, когда в карточке есть выбор (<see cref="MonitorCardData.TitlePick"/>).</summary>
+        private readonly Border _pick = new() { CornerRadius = new CornerRadius(4), Padding = new Thickness(4, 1, 4, 1), Margin = new Thickness(-4, -1, -4, -1), Background = Brushes.Transparent };
+        private readonly Wpf.Ui.Controls.SymbolIcon _pickArrow = new() { Symbol = Wpf.Ui.Controls.SymbolRegular.ChevronDown24, FontSize = 11, Margin = new Thickness(4, 1, 0, 0), VerticalAlignment = VerticalAlignment.Center, Visibility = Visibility.Collapsed };
+        private Action<FrameworkElement>? _titlePick;
         private readonly Ellipse _statusDot = new() { Width = 7, Height = 7, Margin = new Thickness(12, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center };
         private readonly FitPanel _big = new() { Gap = 10, Baseline = true };
         private readonly FitPanel _bigTight = new() { Gap = 8, Baseline = true };
@@ -119,6 +160,15 @@ public sealed class MonitorCard : Border
         private readonly Border _foot = new() { BorderThickness = new Thickness(0, 1, 0, 0), Padding = new Thickness(0, 8, 0, 0) };
 
         private UIElement[] Rows => [_top, _bigTight, _use, _sub, _chart, _empty, _foot];
+
+        /// <summary>Кнопка сигнала: в правом нижнем углу, а на тесной ступени — в конце строки со значением.</summary>
+        private readonly Border _alert = new() { CornerRadius = new CornerRadius(4), Cursor = Cursors.Hand, Visibility = Visibility.Collapsed };
+        private readonly Wpf.Ui.Controls.SymbolIcon _alertIcon = new() { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        private bool _hasAlert;
+        private bool _alertOn;
+
+        /// <summary>Размер кнопки и значка — обычно и на тесной ступени; отступ от края карточки и зазор до текста.</summary>
+        private const double AlertSize = 22, AlertTightSize = 18, AlertIcon = 13, AlertTightIcon = 12, AlertInset = 5, AlertGap = 4;
 
         private bool _hasUse;
         private bool _noHistory;
@@ -133,8 +183,23 @@ public sealed class MonitorCard : Border
             ClipToBounds = true;
 
             _titleNote.Margin = new Thickness(4, 0, 0, 0);
-            _corner.Children.Add(_title);
-            _corner.Children.Add(_titleNote);
+            var titleRow = new StackPanel { Orientation = Orientation.Horizontal };
+            titleRow.Children.Add(_title);
+            titleRow.Children.Add(_titleNote);
+            titleRow.Children.Add(_pickArrow);
+            _pick.Child = titleRow;
+            _pickArrow.SetResourceReference(Control.ForegroundProperty, "TextFillColorSecondaryBrush");
+            _pick.MouseEnter += (_, _) => PaintPick();
+            _pick.MouseLeave += (_, _) => PaintPick();
+            _pick.MouseLeftButtonUp += (_, e) =>
+            {
+                if (_titlePick is { } pick)
+                {
+                    e.Handled = true;
+                    pick(_pick);
+                }
+            };
+            _corner.Children.Add(_pick);
             _corner.Children.Add(_statusDot);
             _corner.Children.Add(_status);
             DockPanel.SetDock(_corner, Dock.Right);
@@ -149,9 +214,65 @@ public sealed class MonitorCard : Border
             {
                 Children.Add(row);
             }
+
+            _alert.Child = _alertIcon;
+            _alert.MouseEnter += (_, _) => PaintAlert();
+            _alert.MouseLeave += (_, _) => PaintAlert();
+            _alert.MouseLeftButtonUp += (_, e) =>
+            {
+                e.Handled = true;
+                AlertClicked?.Invoke();
+            };
+            Children.Add(_alert);
         }
 
         public event Action? NeedChanged;
+
+        public event Action? AlertClicked;
+
+        /// <summary>Под мышью выбор подсвечивается, как кнопка без рамки.</summary>
+        private void PaintPick()
+        {
+            if (_titlePick is not null && _pick.IsMouseOver)
+            {
+                _pick.SetResourceReference(Border.BackgroundProperty, "SubtleFillColorSecondaryBrush");
+            }
+            else
+            {
+                _pick.Background = Brushes.Transparent;
+            }
+        }
+
+        public void SetAlert(bool? on, string tip)
+        {
+            var had = _hasAlert;
+            _hasAlert = on is not null;
+            _alertOn = on == true;
+            _alert.Visibility = _hasAlert ? Visibility.Visible : Visibility.Collapsed;
+            _alert.ToolTip = _hasAlert ? tip : null;
+            _alertIcon.Symbol = _alertOn ? Wpf.Ui.Controls.SymbolRegular.AlertOn24 : Wpf.Ui.Controls.SymbolRegular.AlertOff24;
+            PaintAlert();
+
+            if (had != _hasAlert)
+            {
+                InvalidateMeasure();
+            }
+        }
+
+        /// <summary>Спокойная — фон страницы, тонкие белые рамка и значок; включена — тускло-оранжевая, как «выбранное».</summary>
+        private void PaintAlert()
+        {
+            var hover = _alert.IsMouseOver;
+            _alert.SetResourceReference(Border.BackgroundProperty, _alertOn
+                ? hover ? "Pick.FillHover" : "Pick.Fill"
+                : hover ? "SubtleFillColorSecondaryBrush" : "SolidBackgroundFillColorQuarternaryBrush");
+            _alert.SetResourceReference(Border.BorderBrushProperty, _alertOn ? "Pick.Stroke" : "TextFillColorPrimaryBrush");
+            _alertIcon.SetResourceReference(Control.ForegroundProperty, _alertOn ? "Pick.Text" : "TextFillColorPrimaryBrush");
+        }
+
+        /// <summary>Сколько ширины нижняя строка ступени отдаёт кнопке сигнала.</summary>
+        private double AlertReserve(int level) =>
+            _hasAlert ? Math.Max(0, AlertInset + (level >= 5 ? AlertTightSize : AlertSize) + AlertGap - PaddingOf(level).Right) : 0;
 
         /// <summary>Самое нужное: значение с названием в одну строку. Держится наибольшим за время работы, чтобы окно не дёргалось.</summary>
         public Size MinNeed { get; private set; }
@@ -167,6 +288,11 @@ public sealed class MonitorCard : Border
         {
             _title.Text = data.Title;
             _titleNote.Text = data.TitleNote;
+            _titlePick = data.TitlePick;
+            _pickArrow.Visibility = _titlePick is null ? Visibility.Collapsed : Visibility.Visible;
+            _pick.Cursor = _titlePick is null ? null : Cursors.Hand;
+            _pick.ToolTip = _titlePick is null ? null : "Что показывать: у сервера несколько хранилищ";
+            PaintPick();
             _titleNote.Visibility = data.TitleNote.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             _status.Text = data.Status;
             _statusDot.Fill = data.StatusColor;
@@ -240,9 +366,20 @@ public sealed class MonitorCard : Border
         {
             panel.Children.Clear();
 
+            // в тесной строке нет ни статуса, ни шкалы — огонёк статуса перед названием, а при «высоко» число цветом статуса
             if (tight)
             {
-                panel.Children.Add(Text(12, FontWeights.Medium, "TextFillColorSecondaryBrush", data.Short));
+                var name = Text(12, FontWeights.Medium, "TextFillColorSecondaryBrush");
+
+                if (data.Status.Length > 0)
+                {
+                    var dot = new Ellipse { Width = 7, Height = 7, Margin = new Thickness(0, 0, 6, 0), Fill = data.StatusColor };
+                    name.Inlines.Add(new InlineUIContainer(dot) { BaselineAlignment = BaselineAlignment.Center });
+                }
+
+                name.Inlines.Add(new Run(data.Short));
+                panel.Children.Add(name);
+                panel.ToolTip = data.Status.Length > 0 ? data.Status : null;
             }
 
             foreach (var (text, main) in data.Big)
@@ -250,6 +387,12 @@ public sealed class MonitorCard : Border
                 var block = main
                     ? Text(tight ? 15 : 28, FontWeights.SemiBold, "TextFillColorPrimaryBrush", text)
                     : Text(13, FontWeights.Normal, "TextFillColorSecondaryBrush", text);
+
+                if (tight && main && data.StatusLoud)
+                {
+                    block.Foreground = data.StatusColor;
+                }
+
                 panel.Children.Add(block);
             }
         }
@@ -453,7 +596,7 @@ public sealed class MonitorCard : Border
 
             for (var level = 0; level <= 5; level++)
             {
-                if (level <= 2 && !_noHistory && _foot.Child is not null && _footNeed > inner + slack)
+                if (level <= 2 && !_noHistory && _foot.Child is not null && _footNeed + AlertReserve(level) > inner + slack)
                 {
                     continue;
                 }
@@ -470,23 +613,28 @@ public sealed class MonitorCard : Border
             var pad = PaddingOf(_level);
             var w = Math.Max(0, width - pad.Left - pad.Right);
 
+            var last = Visible(_level).LastOrDefault();
+
             foreach (var row in Rows)
             {
                 if (visible.Contains(row))
                 {
-                    row.Measure(new Size(w, double.PositiveInfinity));
+                    row.Measure(new Size(row == last ? Math.Max(0, w - AlertReserve(_level)) : w, double.PositiveInfinity));
                 }
             }
 
+            var alertSize = _level >= 5 ? AlertTightSize : AlertSize;
+            _alert.Measure(new Size(alertSize, alertSize));
+
             // меньше строки «название, значение и подписи к нему» карточка не бывает: окно не сужается так, чтобы она не влезла
             _bigTight.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            var essential = _bigTight.FullWidth + slack;
+            var essential = _bigTight.FullWidth + slack + AlertReserve(5);
 
             // замер без предела выше затёр раскладку — у тесной ступени строка снова меряется по своей ширине,
             // иначе она показывала все куски и обрезалась краем карточки («свободно 15.6» без «ГБ»)
             if (visible.Contains(_bigTight))
             {
-                _bigTight.Measure(new Size(w, double.PositiveInfinity));
+                _bigTight.Measure(new Size(Math.Max(0, w - (_bigTight == last ? AlertReserve(_level) : 0)), double.PositiveInfinity));
             }
             var need = new Size(
                 Math.Max(MinNeed.Width, Tight.Left + Tight.Right + essential),
@@ -519,19 +667,22 @@ public sealed class MonitorCard : Border
                 }
             }
 
+            var last = visible.LastOrDefault();
+
             foreach (var row in visible)
             {
                 var h = row == _chart || row == _empty ? flexible : row.DesiredSize.Height;
+                var rw = row == last ? Math.Max(0, w - AlertReserve(_level)) : w;
 
                 if (row == _empty)
                 {
                     // строка вместо графика — посередине оставшегося места
                     var text = _empty.DesiredSize.Height;
-                    row.Arrange(new Rect(pad.Left, y + Math.Max(0, (h - text) / 2), w, Math.Min(h, text)));
+                    row.Arrange(new Rect(pad.Left, y + Math.Max(0, (h - text) / 2), rw, Math.Min(h, text)));
                 }
                 else
                 {
-                    row.Arrange(new Rect(pad.Left, y, w, h));
+                    row.Arrange(new Rect(pad.Left, y, rw, h));
                 }
 
                 if (row == _use && w * ((double)(_useFill.Tag ?? 0.0) / 100) is var fill && !(Math.Abs(_useFill.Width - fill) < 0.1))
@@ -542,6 +693,24 @@ public sealed class MonitorCard : Border
                 y += h + Gap;
             }
 
+            // кнопка сигнала: в правом нижнем углу; на тесной ступени — в конце строки со значением, по её середине
+            if (_hasAlert)
+            {
+                var tight = _level >= 5;
+                var size = tight ? AlertTightSize : AlertSize;
+                var top = tight
+                    ? pad.Top + Math.Max(0, (_bigTight.DesiredSize.Height - size) / 2)
+                    : finalSize.Height - AlertInset - size;
+                _alert.BorderThickness = new Thickness(Core.DevicePixel.Of(this));
+                _alert.Width = _alert.Height = size;
+                _alertIcon.FontSize = tight ? AlertTightIcon : AlertIcon;
+                _alert.Arrange(new Rect(Math.Max(0, finalSize.Width - AlertInset - size), Math.Max(0, top), size, size));
+            }
+            else
+            {
+                _alert.Arrange(new Rect(-100000, 0, 0, 0));
+            }
+
             return finalSize;
         }
     }
@@ -550,33 +719,18 @@ public sealed class MonitorCard : Border
 /// <summary>
 /// Цвета графиков и стрелок «Мониторинга» — как в макете. Линии — синяя и оранжевая; стрелки: рост — жёлтый,
 /// спад — зелёный; огоньки статуса — зелёный, жёлтый, красный, как у статусов программы.
+/// Значения — в теме (Themes\…\Monitor.xaml); кисть берётся в момент рисования, после смены темы вид рисуется заново.
 /// </summary>
 public static class Palette
 {
-    private static SolidColorBrush Frozen(uint argb)
-    {
-        var brush = new SolidColorBrush(Color.FromArgb((byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb));
-        brush.Freeze();
-        return brush;
-    }
+    public static Brush Series1 => Core.AppTheme.Brush("Monitor.Series1");
+    public static Brush Series2 => Core.AppTheme.Brush("Monitor.Series2");
 
-    public static readonly Brush Series1 = Frozen(0xFF5B8DEF);
-    public static readonly Brush Series2 = Frozen(0xFFE0A040);
+    public static Brush Up => Core.AppTheme.Brush("Monitor.Up");
+    public static Brush Down => Core.AppTheme.Brush("Monitor.Down");
 
-    private static bool Light => Wpf.Ui.Appearance.ApplicationThemeManager.GetAppTheme() == Wpf.Ui.Appearance.ApplicationTheme.Light;
-
-    /// <summary>В светлой теме — темнее: светлые жёлтый и зелёный на белом не читаются.</summary>
-    public static Brush Up => Light ? UpLight : UpDark;
-
-    public static Brush Down => Light ? DownLight : DownDark;
-
-    private static readonly Brush UpDark = Frozen(0xFFE0A43C);
-    private static readonly Brush UpLight = Frozen(0xFFA86A00);
-    private static readonly Brush DownDark = Frozen(0xFF4FC06A);
-    private static readonly Brush DownLight = Frozen(0xFF1E7B34);
-
-    public static readonly Brush Ok = Frozen(0xFF1FA33F);
-    public static readonly Brush Warn = Frozen(0xFFE0A43C);
-    public static readonly Brush Bad = Frozen(0xFFE5483B);
-    public static readonly Brush Unknown = Frozen(0xFF8A8A8A);
+    public static Brush Ok => Core.AppTheme.Brush("Monitor.Ok");
+    public static Brush Warn => Core.AppTheme.Brush("Monitor.Warn");
+    public static Brush Bad => Core.AppTheme.Brush("Monitor.Bad");
+    public static Brush Unknown => Core.AppTheme.Brush("Monitor.Unknown");
 }

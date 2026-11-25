@@ -54,8 +54,8 @@
         MinWidth="34"
         Margin="0,0,4,0"
         Padding="7,0"
-        Background="#26E07A1F"
-        BorderBrush="#80E07A1F"
+        Background="{DynamicResource Pick.Fill}"
+        BorderBrush="{DynamicResource Pick.Stroke}"
         BorderThickness="1"
         CornerRadius="4"
         ToolTip="Кнопки, сводка и параметры — этого окна. Другое — щелчок по номеру"
@@ -179,7 +179,7 @@
                     <!--  свитч «Отмечать нескачанные» нашёл строку нескачанной — зелёная галочка в пустом квадрате  -->
                     <DataTemplate.Triggers>
                       <DataTrigger Binding="{Binding IsUnsent}" Value="True">
-                        <Setter TargetName="Box" Property="Style" Value="{StaticResource UnsentCheckStyle}" />
+                        <Setter TargetName="Box" Property="Style" Value="{DynamicResource UnsentCheckStyle}" />
                       </DataTrigger>
                     </DataTemplate.Triggers>
                   </DataTemplate>
@@ -340,8 +340,8 @@
               MinWidth="34"
               Margin="0,0,4,0"
               Padding="7,0"
-              Background="#26E07A1F"
-              BorderBrush="#80E07A1F"
+              Background="{DynamicResource Pick.Fill}"
+              BorderBrush="{DynamicResource Pick.Stroke}"
               BorderThickness="1"
               CornerRadius="4"
               ToolTip="Путь окна в фокусе. Другое окно — щелчок по его номеру в таблице"
@@ -454,7 +454,7 @@
         VerticalAlignment="Center"
         Content="Везде"
         IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=Everywhere, Mode=TwoWay}"
-        Style="{StaticResource DangerSwitchStyle}"
+        Style="{DynamicResource DangerSwitchStyle}"
         ToolTip="«Выполнить» и «Сравнить» — сразу на всех вкладках, после вопроса" />
 
       <controls:RetryFailedButton Margin="12,0,0,0" VerticalAlignment="Center" />

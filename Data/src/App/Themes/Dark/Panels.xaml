@@ -1,0 +1,16 @@
+﻿<!--  ТЁМНАЯ ТЕМА — панели, проводник, меню серверов, окно исключений. Те же имена, что в соседней папке; значения свои.  -->
+<ResourceDictionary
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!--  «Проводник», вкладка-фильтр: рамка выбранного режима «Что копируется / Что не копируется»  -->
+  <SolidColorBrush x:Key="Explorer.FilterRing" Color="#80E07A1F" />
+
+  <!--  окно исключений, разбор масок: маска сработала — зелёным, ничего не задела — оранжевым  -->
+  <SolidColorBrush x:Key="Exclude.HitText" Color="#3FA35A" />
+  <SolidColorBrush x:Key="Exclude.MissText" Color="#E07A1F" />
+
+  <!--  значки у адреса в «Проводнике» — фон как у поля пути (в тёмной — ControlFillColorSecondary библиотеки)  -->
+  <SolidColorBrush x:Key="Explorer.PathGroup.Fill" Color="#15FFFFFF" />
+
+</ResourceDictionary>

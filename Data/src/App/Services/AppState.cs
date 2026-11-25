@@ -354,7 +354,7 @@ public sealed class AppState : ObservableObject
         }
 
         PaneOwner?.RaiseSection();
-        RaiseMany(nameof(PaneTab), nameof(PaneSet),nameof(PaneAllSets), nameof(PaneSetTitle), nameof(PaneShowIp), nameof(PaneShowUser), nameof(CommandLocalPc));
+        RaiseMany(nameof(PaneTab), nameof(PaneSet),nameof(PaneAllSets), nameof(PaneSetTitle), nameof(PaneShowIp), nameof(PaneShowUser), nameof(PaneShowNote), nameof(PaneShowGeo), nameof(CommandLocalPc));
         RaiseTerminalChecks();
         RaiseSingleSelect();
     }
@@ -567,6 +567,40 @@ public sealed class AppState : ObservableObject
             owner.SetShowUser(value);
             Raise();
             AppLog.Hint(value ? "Под целевыми серверами показывается имя пользователя." : "Имя пользователя под целевыми серверами скрыто.");
+        }
+    }
+
+    /// <summary>Кнопка «Note» в шапке панели серверов: под каждым сервером — его заметка. Своя у вкладки.</summary>
+    public bool PaneShowNote
+    {
+        get => PaneOwner?.PaneShowNote ?? false;
+        set
+        {
+            if (PaneOwner is not { } owner || owner.PaneShowNote == value)
+            {
+                return;
+            }
+
+            owner.SetShowNote(value);
+            Raise();
+            AppLog.Hint(value ? "Под целевыми серверами показываются заметки." : "Заметки под целевыми серверами скрыты.");
+        }
+    }
+
+    /// <summary>Кнопка «Geo» в шапке панели серверов: под каждым сервером — страна и город. Своя у вкладки.</summary>
+    public bool PaneShowGeo
+    {
+        get => PaneOwner?.PaneShowGeo ?? false;
+        set
+        {
+            if (PaneOwner is not { } owner || owner.PaneShowGeo == value)
+            {
+                return;
+            }
+
+            owner.SetShowGeo(value);
+            Raise();
+            AppLog.Hint(value ? "Под целевыми серверами показываются страна и город." : "Страна и город под целевыми серверами скрыты.");
         }
     }
 
@@ -1131,7 +1165,7 @@ public sealed class AppState : ObservableObject
             RaiseMany(nameof(Section), nameof(Tabs), nameof(ShowsWorkspaceTabs), nameof(ShowsServerSetTabs), nameof(ShowsTabStrip),
                 nameof(AutoCopyCurrent), nameof(AutoCopyOnly), nameof(CopyPass), nameof(CopyPassAvailable), nameof(CopyPassVisibility), nameof(LogAsFile), nameof(CommandFlipVisibility), nameof(PaneHighlightsPicks),
                 nameof(Everywhere), nameof(TerminalOwner),
-                nameof(PaneShowIp), nameof(PaneShowUser));
+                nameof(PaneShowIp), nameof(PaneShowUser), nameof(PaneShowNote), nameof(PaneShowGeo));
             RaisePane();
             EnforceSingleSelect();
 
@@ -2519,7 +2553,10 @@ public sealed class AppState : ObservableObject
                     isMain: i == 0);
 
                 tab.SyncServers(Servers);
-                tab.SelectServers((state.SelectedServerIds ?? []).Take(1));
+                // все отмеченные, как у других разделов: у каждого набора вкладки свой выбранный, а сервер вкладки —
+                // отмеченный в открытом наборе. Брался только первый из файла — им бывал выбранный в другом наборе,
+                // и сервер открытого набора терялся при каждом перезапуске (24.11)
+                tab.SelectServers(state.SelectedServerIds ?? []);
                 tab.Restore(state);
 
                 if (legacyMonitor && file?.MonitorTab is null)

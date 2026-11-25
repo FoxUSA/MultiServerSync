@@ -415,7 +415,8 @@ public sealed partial class MonitorFeed
             // Меньше нуля — сервер перезагрузился, счётчики начались заново: этот снимок только база
             if (before is not null && last.Uptime - before.Uptime is var seconds && seconds > 0)
             {
-                var sample = MonitorProbe.Sample(before, last, seconds, t, reading.DiskUsed, reading.DiskTotal);
+                var disk = MonitorDisks.Pick(Server, reading.Disks);
+                var sample = MonitorProbe.Sample(before, last, seconds, t, disk?.Used ?? 0, disk?.Total ?? 0);
                 Now = sample;
                 _live.Add(MonitorPoint.Of(sample));
                 _live.RemoveAll(p => p.T <= t - LiveKeep);
@@ -424,7 +425,7 @@ public sealed partial class MonitorFeed
             _lastRaw = last;
             _blocks = reading.Blocks;
             _devNames = reading.DevNames;
-            Info = new MonitorInfo(last.Cores, last.Iface, reading.UptimeSec);
+            Info = new MonitorInfo(last.Cores, last.Iface, reading.UptimeSec, reading.Disks);
             Collector = reading.Collector;
             UpdatedAt = DateTime.Now;
             _serverNow = t;

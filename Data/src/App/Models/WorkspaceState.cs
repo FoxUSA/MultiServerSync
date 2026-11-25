@@ -175,6 +175,15 @@ public sealed class WorkspaceState
     public bool? PaneShowUser { get; set; }
 
     /// <summary>
+    /// Кнопка «Note» в шапке панели серверов; по умолчанию выключена. Имя «…Notes», а не «PaneShowNote»: под тем
+    /// у всех вкладок успело сохраниться «включено», а все четыре кнопки по умолчанию выключены (24.11).
+    /// </summary>
+    public bool? PaneShowNotes { get; set; }
+
+    /// <summary>Кнопка «Geo» в шапке панели серверов: страна и город под сервером.</summary>
+    public bool? PaneShowGeo { get; set; }
+
+    /// <summary>
     /// Версия 2.0.8: один одиночный выбор на все наборы вкладки и его память. Только на чтение
     /// для переноса в <see cref="PaneScopes"/>; getter'ов нет, чтобы поля не попадали обратно в json.
     /// </summary>

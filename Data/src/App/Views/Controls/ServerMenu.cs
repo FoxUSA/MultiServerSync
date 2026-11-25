@@ -191,14 +191,26 @@ public static class ServerMenu
         return null;
     }
 
-    private static readonly Brush PickFill = Frozen(0x26);
-    private static readonly Brush PickStroke = Frozen(0x80);
-
-    private static Brush Frozen(byte alpha)
+    /// <summary>Рамка строки: у выбранного — оранжевая плашка по именам темы, у прочих — прозрачная.</summary>
+    private static Border Frame(UIElement child, bool current)
     {
-        var brush = new SolidColorBrush(Color.FromArgb(alpha, 0xE0, 0x7A, 0x1F));
-        brush.Freeze();
-        return brush;
+        var frame = new Border
+        {
+            Child = child,
+            Padding = new Thickness(6, 3, 8, 3),
+            CornerRadius = new CornerRadius(4),
+            BorderThickness = new Thickness(1),
+            Background = Brushes.Transparent,
+            BorderBrush = Brushes.Transparent,
+        };
+
+        if (current)
+        {
+            frame.SetResourceReference(Border.BackgroundProperty, "Pick.Fill");
+            frame.SetResourceReference(Border.BorderBrushProperty, "Pick.Stroke");
+        }
+
+        return frame;
     }
 
     /// <summary>Строка: значок, название и логин, адрес, замок. Рамка есть у всех, у выбранного — видимая.</summary>
@@ -275,15 +287,7 @@ public static class ServerMenu
             }
         }
 
-        return new Border
-        {
-            Child = grid,
-            Padding = new Thickness(6, 3, 8, 3),
-            CornerRadius = new CornerRadius(4),
-            BorderThickness = new Thickness(1),
-            Background = current ? PickFill : Brushes.Transparent,
-            BorderBrush = current ? PickStroke : Brushes.Transparent,
-        };
+        return Frame(grid, current);
     }
 
     /// <summary>Строка «Этот компьютер» — тем же видом, что у сервера: значок, название, пустой адрес, место под замок.</summary>
@@ -323,15 +327,7 @@ public static class ServerMenu
             grid.Children.Add(slot);
         }
 
-        return new Border
-        {
-            Child = grid,
-            Padding = new Thickness(6, 3, 8, 3),
-            CornerRadius = new CornerRadius(4),
-            BorderThickness = new Thickness(1),
-            Background = current ? PickFill : Brushes.Transparent,
-            BorderBrush = current ? PickStroke : Brushes.Transparent,
-        };
+        return Frame(grid, current);
     }
 
     /// <summary>

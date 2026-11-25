@@ -93,6 +93,50 @@ if (Test-Path $srcStage) { Remove-Item $srcStage -Recurse -Force }
 robocopy (Join-Path $dataDir 'src') $srcStage /MIR /XD bin obj .vs /XF '*_wpftmp.csproj' /NFL /NDL /NJH /NJS /NP | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "Исходники не скопировались во временную папку (robocopy $LASTEXITCODE)." }
 
+# ── темы ─────────────────────────────────────────────────────────────────────
+# Тёмная и светлая темы живут отдельно (App\Themes\Dark и App\Themes\Light), но имена у них общие:
+# имя, заведённое только в одной теме, в другой молча не нарисуется. И цвет, вписанный прямо в разметку,
+# попал бы в обе темы сразу — его место в файлах тем. Стандарт цветов — .dev\THEME-STANDARD.md.
+Write-Host "Проверка тем..."
+$themeDir = Join-Path $srcStage 'App\Themes'
+
+function Get-ThemeKeys([string]$folder) {
+    $keys = @{}
+    foreach ($file in Get-ChildItem (Join-Path $themeDir $folder) -Filter *.xaml) {
+        # Library.xaml — подмены кистей библиотеки: в тёмной их нет намеренно
+        if ($file.Name -eq 'Library.xaml') { continue }
+        $doc = New-Object System.Xml.XmlDocument
+        $doc.Load($file.FullName)
+        foreach ($node in $doc.DocumentElement.ChildNodes) {
+            if ($node.NodeType -ne [System.Xml.XmlNodeType]::Element) { continue }
+            $key = $node.GetAttribute('Key', 'http://schemas.microsoft.com/winfx/2006/xaml')
+            if (-not $key) { continue }
+            if ($keys.ContainsKey($key)) { throw "Тема ${folder}: имя «$key» задано дважды ($($keys[$key]) и $($file.Name))." }
+            $keys[$key] = $file.Name
+        }
+    }
+    return $keys
+}
+
+$darkKeys = Get-ThemeKeys 'Dark'
+$lightKeys = Get-ThemeKeys 'Light'
+$onlyDark = @($darkKeys.Keys | Where-Object { -not $lightKeys.ContainsKey($_) } | Sort-Object)
+$onlyLight = @($lightKeys.Keys | Where-Object { -not $darkKeys.ContainsKey($_) } | Sort-Object)
+if ($onlyDark.Count -or $onlyLight.Count) {
+    throw "Темы разошлись. Нет в светлой: $($onlyDark -join ', '). Нет в тёмной: $($onlyLight -join ', ')."
+}
+$moved = @($darkKeys.Keys | Where-Object { $darkKeys[$_] -ne $lightKeys[$_] } | Sort-Object)
+if ($moved.Count) { throw "Имена лежат в разных файлах тёмной и светлой темы: $($moved -join ', ')." }
+
+$stray = @(Get-ChildItem (Join-Path $srcStage 'App') -Recurse -Filter *.xaml |
+    Where-Object { $_.FullName -notlike "$themeDir\Dark\*" -and $_.FullName -notlike "$themeDir\Light\*" } |
+    Select-String -Pattern '="#[0-9A-Fa-f]{6,8}"' |
+    ForEach-Object { "$($_.Filename):$($_.LineNumber)" })
+if ($stray.Count) {
+    throw "В разметке остался вписанный цвет — завести имя в обеих темах (App\Themes\Dark и Light): $($stray -join ', ')."
+}
+Write-Host "  имён в каждой теме: $($darkKeys.Count)"
+
 Write-Host "Публикация программы..."
 if (Test-Path $appOut) { Remove-Item $appOut -Recurse -Force }
 dotnet publish $appProj -c $Configuration -o $appOut --nologo -p:Version=$Version

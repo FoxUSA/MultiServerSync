@@ -217,13 +217,13 @@
           <Border
             Grid.Row="0"
             Height="{StaticResource IconButtonSize}"
-            Background="{DynamicResource ControlFillColorDefaultBrush}"
+            Background="{DynamicResource Table.Header.Fill}"
             BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
             BorderThickness="0,0,0,1"
             CornerRadius="3,3,0,0">
             <Border
               Padding="8,0"
-              Background="{DynamicResource ControlFillColorDefaultBrush}"
+              Background="{DynamicResource Table.Header.Fill}"
               CornerRadius="3,3,0,0">
               <Grid>
                 <Grid.ColumnDefinitions>

@@ -44,6 +44,11 @@ public partial class MonitorView : UserControl
             card.NeedChanged += RaiseNeed;
         }
 
+        // колокольчик раздела: покраснеет — сигнал и окно сервера вперёд (у сети нормы нет — и колокольчика нет)
+        _cpu.AlertClicked += () => ToggleAlert("cpu");
+        _mem.AlertClicked += () => ToggleAlert("mem");
+        _disk.AlertClicked += () => ToggleAlert("disk");
+
         Cards.ColumnsChanged += RaiseNeed;
 
         // у каждого вида своя группа: периоды главного окна и вынесенных не переключают друг друга
@@ -92,23 +97,27 @@ public partial class MonitorView : UserControl
         SizeChanged += (_, _) => FitLabels();
         IsVisibleChanged += (_, _) => Follow();
 
-        // тема сменилась — стрелки и подписи берут свои цвета для неё. Подписка — пока вид в окне: закрытое
-        // вынесенное окно общее событие темы держать не должно
         Loaded += (_, _) =>
         {
-            Wpf.Ui.Appearance.ApplicationThemeManager.Changed += OnThemeChanged;
             Follow();
+            MonitorAlerts.Changed -= Render;
+            MonitorAlerts.Changed += Render;
+            MonitorDisks.Changed -= OnDiskPicked;
+            MonitorDisks.Changed += OnDiskPicked;
         };
         Unloaded += (_, _) =>
         {
-            Wpf.Ui.Appearance.ApplicationThemeManager.Changed -= OnThemeChanged;
             Follow();
+            MonitorAlerts.Changed -= Render;
+            MonitorDisks.Changed -= OnDiskPicked;
         };
+
+        // тема сменилась — огоньки, шкалы и графики берут свои цвета для неё. Подписка — пока вид в окне: закрытое
+        // вынесенное окно общее событие темы держать не должно
+        Core.AppTheme.Follow(this, Render);
 
         Render();
     }
-
-    private void OnThemeChanged(Wpf.Ui.Appearance.ApplicationTheme theme, Color accent) => Dispatcher.BeginInvoke(Render);
 
     /// <summary>Вид в вынесенном окне: кнопки «вынести» у него нет.</summary>
     public bool IsDetached
@@ -146,6 +155,12 @@ public partial class MonitorView : UserControl
         if (serverChanged)
         {
             _server = server;
+
+            // рамка сигнала — про прежний сервер
+            foreach (var card in new[] { _cpu, _mem, _disk, _net })
+            {
+                MonitorAlerts.Off(card);
+            }
         }
 
         Follow(force: serverChanged);
@@ -155,6 +170,36 @@ public partial class MonitorView : UserControl
     }
 
     private bool _showing;
+
+    /// <summary>У сервера выбрали другое хранилище — «Диск» сразу его.</summary>
+    private void OnDiskPicked(ServerEntry server)
+    {
+        if (ReferenceEquals(server, _server))
+        {
+            Render();
+        }
+    }
+
+    /// <summary>Сработал сигнал раздела — его карточка в тускло-оранжевой рамке.</summary>
+    public void Light(string key)
+    {
+        var card = key switch
+        {
+            "cpu" => _cpu,
+            "mem" => _mem,
+            _ => _disk,
+        };
+
+        MonitorAlerts.LightUp(card);
+    }
+
+    private void ToggleAlert(string key)
+    {
+        if (_server is { } server)
+        {
+            MonitorAlerts.Toggle(server, key);
+        }
+    }
 
     private void OnRangeChecked(object sender, RoutedEventArgs e)
     {
@@ -395,9 +440,9 @@ public partial class MonitorView : UserControl
             var offers = !busy && collector!.Systemd && source is HistorySource.None or HistorySource.OwnStopped;
             InstallButton.Content = source == HistorySource.OwnStopped ? "Запустить сбор" : "Включить сбор";
             InstallButton.Visibility = offers ? Visibility.Visible : Visibility.Collapsed;
-            Notice.Background = busy ? (Brush)FindResource("SubtleFillColorSecondaryBrush") : Frozen(0x26E07A1F);
-            Notice.BorderBrush = busy ? (Brush)FindResource("AccentFillColorDefaultBrush") : Frozen(0x80E07A1F);
-            NoticeIcon.Foreground = busy ? (Brush)FindResource("AccentTextFillColorPrimaryBrush") : Frozen(0xFFE07A1F);
+            Notice.SetResourceReference(Border.BackgroundProperty, busy ? "SubtleFillColorSecondaryBrush" : "Pick.Fill");
+            Notice.SetResourceReference(Border.BorderBrushProperty, busy ? "AccentFillColorDefaultBrush" : "Pick.Stroke");
+            NoticeIcon.SetResourceReference(Control.ForegroundProperty, busy ? "AccentTextFillColorPrimaryBrush" : "Pick.Text");
         }
 
         if (noticeWas != noticeShown)
@@ -435,15 +480,18 @@ public partial class MonitorView : UserControl
 
         _cpu.Show(CpuCard(now, info, report, live, noHistory || Lacks("cpu"), Lacks("cpu") ? lacks : empty, trouble));
         _mem.Show(MemCard(now, report, live, noHistory || Lacks("mem"), Lacks("mem") ? lacks : empty, trouble));
-        _disk.Show(DiskCard(now, report, live, noHistory || Lacks("disk"), Lacks("disk") ? "в истории sysstat диска нет" : empty, trouble));
+        var disks = info?.Disks ?? [];
+        var disk = MonitorDisks.Pick(server, disks);
+        _disk.Show(DiskCard(now, disk, disks.Count > 1, anchor => PickDisk(anchor, server, disks, disk), report, live, noHistory || Lacks("disk"), Lacks("disk") ? "в истории sysstat диска нет" : empty, trouble));
         _net.Show(NetCard(now, info, report, live, noHistory || Lacks("net"), Lacks("net") ? lacks : empty, trouble));
-    }
 
-    private static SolidColorBrush Frozen(uint argb)
-    {
-        var brush = new SolidColorBrush(Color.FromArgb((byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb));
-        brush.Freeze();
-        return brush;
+        foreach (var (card, key) in new[] { (_cpu, "cpu"), (_mem, "mem"), (_disk, "disk") })
+        {
+            var on = MonitorAlerts.IsOn(server, key);
+            card.SetAlert(on, MonitorAlerts.Tip(key, on));
+        }
+
+        _net.SetAlert(null, string.Empty);
     }
 
     private static TextBlock Piece(string text, string brush)
@@ -561,7 +609,8 @@ public partial class MonitorView : UserControl
             cur is { } c ? fmt(c.Avg) : "—",
             Shift(cur, prev, pct),
             cur is { } m ? fmt(m.Max) : "—",
-            cur is { } t ? MonitorFormat.Time(t.MaxT, range) : string.Empty,
+            // пика не было (всё время ноль) — и момента нет: иначе «02:00:00» от нулевой отметки
+            cur is { Max: > 0 } t ? MonitorFormat.Time(t.MaxT, range) : string.Empty,
             prev is { } p ? $"{Prev(range)}: среднее {fmt(p.Avg)}, пик {fmt(p.Max)}" : "сравнить пока не с чем — история короче двух периодов");
 
     /// <summary>График карточки; точек ещё нет — линия лежит на нуле. Истории нет — вместо графика строка.</summary>
@@ -592,7 +641,7 @@ public partial class MonitorView : UserControl
 
     private static MonitorCardData CpuCard(MonitorSample? now, MonitorInfo? info, MonitorReport? r, bool live, bool noHistory, string empty, string? trouble)
     {
-        var status = StatusOf(now, trouble, n => Level(n.Cpu, 75, 90, "высокая загрузка", "перегружен"));
+        var status = StatusOf(now, trouble, n => Level(n.Cpu, 75, MonitorAlerts.CpuBad, "высокая загрузка", "перегружен"));
         var cur = r?.Cur.Of("cpu");
         var range = r?.Range ?? MonitorRange.Live;
         var big = new List<(string, bool)> { (now is null ? "—" : MonitorFormat.Pct(now.Cpu), true) };
@@ -625,7 +674,7 @@ public partial class MonitorView : UserControl
     private static MonitorCardData MemCard(MonitorSample? now, MonitorReport? r, bool live, bool noHistory, string empty, string? trouble)
     {
         var pct = now is { MemTotal: > 0 } n ? n.MemUsed * 100.0 / n.MemTotal : 0;
-        var status = StatusOf(now, trouble, _ => Level(pct, 80, 90, "мало свободной", "почти кончилась"));
+        var status = StatusOf(now, trouble, _ => Level(pct, 80, MonitorAlerts.MemBad, "мало свободной", "почти кончилась"));
         var cur = r?.Cur.Of("mem");
         var range = r?.Range ?? MonitorRange.Live;
         var total = now?.MemTotal ?? 0;
@@ -656,14 +705,53 @@ public partial class MonitorView : UserControl
         };
     }
 
-    private static MonitorCardData DiskCard(MonitorSample? now, MonitorReport? r, bool live, bool noHistory, string empty, string? trouble)
+    /// <summary>Выбор носителя для «Диска»: что это, занято из всего; выбранное — с галочкой; в подсказке — из чего складывается.</summary>
+    private static void PickDisk(FrameworkElement anchor, ServerEntry server, IReadOnlyList<MonitorDisk> disks, MonitorDisk? current)
     {
-        var pct = now is { DiskTotal: > 0 } n ? n.DiskUsed * 100.0 / n.DiskTotal : 0;
-        var status = StatusOf(now, trouble, _ => Level(pct, 75, 90, "мало места", "место кончается"));
+        var menu = new ContextMenu { PlacementTarget = anchor, Placement = PlacementMode.Bottom };
+
+        foreach (var disk in disks)
+        {
+            var item = new MenuItem
+            {
+                Header = $"{disk.Label} — {MonitorFormat.Bytes(disk.Used)} из {MonitorFormat.Bytes(disk.Total)}",
+                IsCheckable = true,
+                IsChecked = disk.Id == current?.Id,
+                ToolTip = string.Join(" · ", new[] { disk.Name, disk.Usb ? "подключена по USB" : string.Empty }.Where(x => x.Length > 0)
+                    .Concat(disk.Parts.Select(fs => $"{fs.Mount} — {fs.Device}, {fs.Type}"))),
+            };
+            item.Click += (_, _) => MonitorDisks.Set(server, disk);
+            menu.Items.Add(item);
+        }
+
+        menu.IsOpen = true;
+    }
+
+    /// <summary>
+    /// «Диск»: выбранный носитель целиком (<see cref="MonitorDisks"/>) — занято из всего устройства, строкой ниже из чего
+    /// это складывается; статус — по самому заполненному записываемому разделу (прошивка роутера всегда занимает больше
+    /// половины чипа — по всему носителю он горел бы всегда). Скорость чтения и записи — всего сервера. Носителей
+    /// несколько — заголовок в углу открывает выбор; записываемых разделов нет (только прошивка) — без тревоги.
+    /// </summary>
+    private static MonitorCardData DiskCard(MonitorSample? now, MonitorDisk? disk, bool many, Action<FrameworkElement>? pick,
+        MonitorReport? r, bool live, bool noHistory, string empty, string? trouble)
+    {
+        var has = now is not null && disk is { Total: > 0 };
+        var pct = has ? disk!.Pct : 0;
+        var worst = disk?.Worst;
+        var status = StatusOf(now, trouble, _ => worst is null
+            ? ("только чтение", Palette.Unknown, false)
+            : Level(worst.Pct, 75, MonitorAlerts.DiskBad, "мало места", "место кончается"));
         var rd = r?.Cur.Of("rd");
         var wr = r?.Cur.Of("wr");
         var range = r?.Range ?? MonitorRange.Live;
         var sub = new List<IReadOnlyList<string>>();
+
+        // из чего складывается носитель — первой строкой: по ней видно, что всё определено верно
+        if (has)
+        {
+            sub.Add(disk!.Pieces());
+        }
 
         if (now is not null)
         {
@@ -679,17 +767,18 @@ public partial class MonitorView : UserControl
 
         return new MonitorCardData
         {
-            Title = "Диск",
-            TitleNote = "· /",
-            Short = "Диск",
+            Title = disk?.Kind ?? "Диск",
+            TitleNote = disk is { Note.Length: > 0 } ? "· " + disk.Note : string.Empty,
+            TitlePick = many ? pick : null,
+            Short = disk?.Kind ?? "Диск",
             Status = status.Text,
             StatusColor = status.Color,
             StatusLoud = status.Loud,
-            Big = now is not { DiskTotal: > 0 }
+            Big = !has
                 ? [("—", true)]
-                : [(MonitorFormat.Bytes(now.DiskUsed), true),
-                   ($"из {MonitorFormat.Bytes(now.DiskTotal)} · {MonitorFormat.Pct(pct)} · свободно {MonitorFormat.Bytes(Math.Max(0, now.DiskTotal - now.DiskUsed))}", false)],
-            Use = now is { DiskTotal: > 0 } ? pct : null,
+                : [(MonitorFormat.Bytes(disk!.Used), true),
+                   ($"из {MonitorFormat.Bytes(disk.Total)} · {MonitorFormat.Pct(pct)} · свободно {MonitorFormat.Bytes(disk.Free)}", false)],
+            Use = has ? pct : null,
             UseColor = UseColor(status),
             Sub = sub,
             Period = Per(range),

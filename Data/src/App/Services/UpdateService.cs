@@ -585,6 +585,9 @@ public static class UpdateService
         _ => $"{bytes} Б",
     };
 
+    /// <summary>Тот же клиент (User-Agent MultiServerSync/версия) — и для гео-базы с api.byfox.dev.</summary>
+    internal static HttpClient Client => Http;
+
     private static HttpClient CreateClient()
     {
         var client = new HttpClient

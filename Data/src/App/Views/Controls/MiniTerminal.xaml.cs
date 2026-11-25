@@ -116,7 +116,8 @@ public partial class MiniTerminal : UserControl
         StepsScroll.SizeChanged += (_, _) => FitSteps();
         ((INotifyCollectionChanged)StepsList.Items).CollectionChanged += (_, _) => FitSteps();
 
-        Wpf.Ui.Appearance.ApplicationThemeManager.Changed += (_, _) => PaintBoxes();
+        // фон окон — после того, как тема загрузила свой набор: раньше он ещё прежний
+        Core.AppTheme.Follow(this, PaintBoxes);
 
         _clock.Tick += (_, _) =>
         {
@@ -178,16 +179,21 @@ public partial class MiniTerminal : UserControl
     }
 
     /// <summary>Плашка как у сервера в «Проводнике», только не нажимается.</summary>
-    private static Border Plate(UIElement content) => new()
+    private static Border Plate(UIElement content)
     {
-        Margin = new Thickness(0, 0, 4, 0),
-        Padding = new Thickness(10, 5, 10, 5),
-        Background = new SolidColorBrush(Color.FromArgb(0x26, 0xE0, 0x7A, 0x1F)),
-        BorderBrush = new SolidColorBrush(Color.FromArgb(0x80, 0xE0, 0x7A, 0x1F)),
-        BorderThickness = new Thickness(1),
-        CornerRadius = new CornerRadius(6),
-        Child = content,
-    };
+        var plate = new Border
+        {
+            Margin = new Thickness(0, 0, 4, 0),
+            Padding = new Thickness(10, 5, 10, 5),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(6),
+            Child = content,
+        };
+
+        plate.SetResourceReference(Border.BackgroundProperty, "Pick.Fill");
+        plate.SetResourceReference(Border.BorderBrushProperty, "Pick.Stroke");
+        return plate;
+    }
 
     private static Border ServerPlate(string label)
     {

@@ -37,7 +37,62 @@ public sealed class RowMemory
     /// </summary>
     public List<string>? Servers { get; set; }
 
-    public RowMemory Copy() => new() { Date = Date, Before = Before, Marked = Marked, Servers = Servers?.ToList() };
+    /// <summary>
+    /// Строка «Копирования» по серверам: Id сервера → дата строки, когда на нём всё сошлось (заливка или «Сравнить»).
+    /// Нет сервера — на нём строка не залита или не проверена. null — память старой версии: <see cref="Date"/> и <see cref="Servers"/>.
+    /// </summary>
+    public Dictionary<string, string>? OnServers { get; set; }
+
+    /// <summary>Дата строки, при которой она сошлась на этом сервере; null — не залита там или не проверена.</summary>
+    public string? DateOn(string serverId)
+    {
+        if (OnServers is not null)
+        {
+            return OnServers.GetValueOrDefault(serverId);
+        }
+
+        // память старой версии: Servers нет — дата была общей для всех серверов того захода
+        return Servers is null || Servers.Contains(serverId) ? Date : null;
+    }
+
+    /// <summary>Итог захода на одном сервере: сошлось при этой дате, или null — разошлось.</summary>
+    public void SetOn(string serverId, string? date)
+    {
+        if (OnServers is null)
+        {
+            // старую память — в новую, чтобы другие серверы не потеряли своё
+            OnServers = new Dictionary<string, string>(StringComparer.Ordinal);
+
+            if (Date is not null && Servers is not null)
+            {
+                foreach (var id in Servers)
+                {
+                    OnServers[id] = Date;
+                }
+            }
+
+            Date = null;
+            Servers = null;
+        }
+
+        if (date is null)
+        {
+            OnServers.Remove(serverId);
+        }
+        else
+        {
+            OnServers[serverId] = date;
+        }
+    }
+
+    public RowMemory Copy() => new()
+    {
+        Date = Date,
+        Before = Before,
+        Marked = Marked,
+        Servers = Servers?.ToList(),
+        OnServers = OnServers is null ? null : new Dictionary<string, string>(OnServers, StringComparer.Ordinal),
+    };
 }
 
 /// <summary>Локальный файл или папка, выбранные для отправки на серверы.</summary>
@@ -55,6 +110,7 @@ public sealed class TransferItem : ObservableObject, IRowCheck
     {
         FullPath = path;
         IsDirectory = Directory.Exists(path);
+        _kindUnknown = !IsDirectory && !File.Exists(path);
         Name = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar));
 
         if (string.IsNullOrEmpty(Name))
@@ -86,32 +142,56 @@ public sealed class TransferItem : ObservableObject, IRowCheck
 
     public string Name { get; }
 
-    public bool IsDirectory { get; }
+    public bool IsDirectory { get; private set; }
+
+    /// <summary>
+    /// Строку подняли из файла вкладки, когда пути на диске не было (архив удалили перед пересборкой):
+    /// файл это или папка, станет ясно, когда он появится.
+    /// </summary>
+    private bool _kindUnknown;
+
+    /// <summary>Известно, файл это или папка: путь хоть раз был на диске.</summary>
+    public bool KindKnown => !_kindUnknown;
 
     public string Kind => IsDirectory ? "Папка" : "Файл";
 
     /// <summary>Файл или папка ещё на месте. Удалённое локально из списка убирается.</summary>
-    public bool ExistsOnDisk => IsDirectory ? Directory.Exists(FullPath) : File.Exists(FullPath);
+    public bool ExistsOnDisk => _kindUnknown
+        ? File.Exists(FullPath) || Directory.Exists(FullPath)
+        : IsDirectory ? Directory.Exists(FullPath) : File.Exists(FullPath);
 
-    private int? _goneIn;
+    /// <summary>Путь появился на диске: запомнить, файл это или папка. Вызывать до заведения наблюдателя.</summary>
+    public void DetectKind()
+    {
+        if (!_kindUnknown || !ExistsOnDisk)
+        {
+            return;
+        }
+
+        _kindUnknown = false;
+        IsDirectory = Directory.Exists(FullPath);
+        RaiseMany(nameof(IsDirectory), nameof(Kind));
+    }
+
+    private DateTime? _missingSince;
 
     /// <summary>
-    /// Файла на диске нет: через сколько секунд строка уйдёт из списка. Показывается вместо галочки;
-    /// null — файл на месте.
+    /// Файла на диске нет с этого времени (UTC): строка тусклая и не копируется, через сутки уходит из списка.
+    /// Хранится в файле вкладки, чтобы перезапуск не начинал срок заново. null — файл на месте.
     /// </summary>
-    public int? GoneIn
+    public DateTime? MissingSince
     {
-        get => _goneIn;
+        get => _missingSince;
         set
         {
-            if (Set(ref _goneIn, value))
+            if (Set(ref _missingSince, value))
             {
                 Raise(nameof(IsGone));
             }
         }
     }
 
-    public bool IsGone => _goneIn is not null;
+    public bool IsGone => _missingSince is not null;
 
     public string SizeText => _sizeBytes < 0 ? "—" : Format(_sizeBytes);
 
@@ -148,7 +228,25 @@ public sealed class TransferItem : ObservableObject, IRowCheck
         }
     }
 
-    public string ModifiedText => Modified == default ? "—" : Modified.ToString("dd.MM.yyyy HH:mm");
+    /// <summary>Файла нет: в столбце даты — сколько строке осталось до ухода из списка, чч:мм:сс.</summary>
+    public string ModifiedText => _goneLeft is { } left
+        ? $"{(int)left.TotalHours:00}:{left.Minutes:00}:{left.Seconds:00}"
+        : Modified == default ? "—" : Modified.ToString("dd.MM.yyyy HH:mm");
+
+    private TimeSpan? _goneLeft;
+
+    /// <summary>Сколько строке без файла осталось до ухода из списка; ставит таймер вкладки раз в секунду.</summary>
+    public TimeSpan? GoneLeft
+    {
+        get => _goneLeft;
+        set
+        {
+            if (Set(ref _goneLeft, value))
+            {
+                Raise(nameof(ModifiedText));
+            }
+        }
+    }
 
     /// <summary>
     /// Перечитывает размер и дату с диска. Файл мог измениться уже после добавления в список,
@@ -158,6 +256,8 @@ public sealed class TransferItem : ObservableObject, IRowCheck
     /// <param name="filter">Исключения окна; нет — «Размер*» и «Файлов*» равны полным.</param>
     public void Refresh(ExcludeFilter? filter = null)
     {
+        DetectKind();
+
         var measured = Measure(filter);
 
         _sizeBytes = measured.Bytes;

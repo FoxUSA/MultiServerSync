@@ -17,7 +17,7 @@ public sealed class ServerEntry : ObservableObject
     private bool _isSelected;
     private string _lastStatus = string.Empty;
     private string _notes = string.Empty;
-    private bool _showNotesInPane = true;
+    private string _geo = string.Empty;
 
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
 
@@ -181,19 +181,19 @@ public sealed class ServerEntry : ObservableObject
     public string Notes
     {
         get => _notes;
-        set { if (Set(ref _notes, value ?? string.Empty)) { RaiseMany(nameof(NotesLine), nameof(HasNotes), nameof(PaneNotesVisible)); } }
+        set { if (Set(ref _notes, value ?? string.Empty)) { RaiseMany(nameof(NotesLine), nameof(HasNotes)); } }
     }
 
-    /// <summary>Показывать заметку под именем в панели слева. По умолчанию — да.</summary>
-    public bool ShowNotesInPane
-    {
-        get => _showNotesInPane;
-        set { if (Set(ref _showNotesInPane, value)) { Raise(nameof(PaneNotesVisible)); } }
-    }
-
-    /// <summary>Строка заметки в панели слева: есть что показать и показ не выключен.</summary>
+    /// <summary>Страна и город по адресу (GeoLite2, <see cref="Services.GeoBase"/>); пусто — не известно. Не сохраняется.</summary>
     [JsonIgnore]
-    public bool PaneNotesVisible => ShowNotesInPane && HasNotes;
+    public string Geo
+    {
+        get => _geo;
+        set { if (Set(ref _geo, value ?? string.Empty)) { Raise(nameof(HasGeo)); } }
+    }
+
+    [JsonIgnore]
+    public bool HasGeo => !string.IsNullOrWhiteSpace(Geo);
 
     /// <summary>Заметки одной строкой — для таблицы и боковой панели, где места на абзацы нет.</summary>
     [JsonIgnore]
@@ -256,7 +256,6 @@ public sealed class ServerEntry : ObservableObject
         KeyPassphrase = KeyPassphrase,
         JumpServerId = JumpServerId,
         Notes = Notes,
-        ShowNotesInPane = ShowNotesInPane,
         IsSelected = IsSelected,
     };
 
@@ -285,11 +284,10 @@ public sealed class ServerEntry : ObservableObject
         _storedKeyPassphrase = saved._storedKeyPassphrase;
         JumpServerId = saved.JumpServerId;
         Notes = saved.Notes;
-        ShowNotesInPane = saved.ShowNotesInPane;
     }
 
     /// <summary>Для сравнения снимков. Отметка и статус проверки сюда не входят: сами по себе это не правка сервера.</summary>
     public string Signature() => string.Join(
         '\u241E', Id, SetId, Name, Host, Port, User, Password, _stored ?? string.Empty, KeyPath, KeyPassphrase,
-        _storedKeyPassphrase ?? string.Empty, JumpServerId, Notes, ShowNotesInPane);
+        _storedKeyPassphrase ?? string.Empty, JumpServerId, Notes);
 }

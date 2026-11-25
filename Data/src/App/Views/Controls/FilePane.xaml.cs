@@ -466,9 +466,21 @@ public partial class FilePane : UserControl
     /// <summary>Выбранный режим фильтра — в оранжевой рамке.</summary>
     public void MarkFilterMode(bool copied)
     {
-        var ring = new SolidColorBrush(Color.FromArgb(0x80, 0xE0, 0x7A, 0x1F));
-        FilterCopiedRing.BorderBrush = copied ? ring : Brushes.Transparent;
-        FilterSkippedRing.BorderBrush = copied ? Brushes.Transparent : ring;
+        Ring(copied ? FilterCopiedRing : FilterSkippedRing, true);
+        Ring(copied ? FilterSkippedRing : FilterCopiedRing, false);
+
+        // рамка — по имени из темы: следует за сменой темы сама
+        static void Ring(Border border, bool on)
+        {
+            if (on)
+            {
+                border.SetResourceReference(Border.BorderBrushProperty, "Explorer.FilterRing");
+            }
+            else
+            {
+                border.BorderBrush = Brushes.Transparent;
+            }
+        }
     }
 
     /// <summary>Панель — вкладка-фильтр: только переходы по папкам, галочки, маска и поиск.</summary>
@@ -812,9 +824,7 @@ public partial class FilePane : UserControl
     /// <summary>Рамка цветом акцента — у той панели, куда пойдут клавиши.</summary>
     public void SetActive(bool active)
     {
-        Frame.BorderBrush = active
-            ? (Brush)FindResource("AccentFillColorDefaultBrush")
-            : (Brush)FindResource("ControlStrokeColorDefaultBrush");
+        Frame.SetResourceReference(Border.BorderBrushProperty, active ? "AccentFillColorDefaultBrush" : "ControlStrokeColorDefaultBrush");
     }
 
     /// <summary>Клавиши — в список, на строку под курсором. Выделение не трогается.</summary>
@@ -1939,8 +1949,8 @@ public partial class FilePane : UserControl
                     Text = "›",
                     Margin = new Thickness(1, 0, 1, 0),
                     VerticalAlignment = VerticalAlignment.Center,
-                    Foreground = (Brush)FindResource("TextFillColorTertiaryBrush"),
                 };
+                arrow.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorTertiaryBrush");
 
                 // промах мимо кнопки на разделителе — не повод открывать ввод
                 arrow.MouseLeftButtonDown += (_, e) => e.Handled = true;
@@ -3620,7 +3630,14 @@ public partial class FilePane : UserControl
         TreeSplitter.Visibility = TreeHost.Visibility;
         TreeColumn.Width = show ? new GridLength(TreeWidth) : new GridLength(0);
         TreeSplitColumn.Width = show ? new GridLength(4) : new GridLength(0);
-        TreeButton.Background = show ? (Brush)FindResource("SubtleFillColorSecondaryBrush") : Brushes.Transparent;
+        if (show)
+        {
+            TreeButton.SetResourceReference(BackgroundProperty, "SubtleFillColorSecondaryBrush");
+        }
+        else
+        {
+            TreeButton.Background = Brushes.Transparent;
+        }
 
         if (save && _state.ShowTree != show)
         {

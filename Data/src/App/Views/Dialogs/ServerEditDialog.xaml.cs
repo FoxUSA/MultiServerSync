@@ -52,8 +52,8 @@ public partial class ServerEditDialog : FluentWindow
             .Select(s => new JumpOption(s.Id, s.Display)));
         JumpBox.ItemsSource = jumps;
         JumpBox.SelectedItem = jumps.FirstOrDefault(j => j.Id == entry.JumpServerId) ?? jumps[0];
-        NotesBox.Text = entry.Notes;
-        ShowNotesBox.IsChecked = entry.ShowNotesInPane;
+        // поле в одну строку: заметка прежних версий в несколько строк встаёт одной
+        NotesBox.Text = entry.NotesLine;
 
         Loaded += (_, _) =>
         {
@@ -73,7 +73,7 @@ public partial class ServerEditDialog : FluentWindow
     private string Fingerprint() => string.Join('\u0001',
         NameBox.Text.Trim(), HostBox.Text.Trim(), PortBox.Value ?? 0, UserBox.Text.Trim(), PasswordBox.Password,
         KeyBox.Text.Trim(), KeyPassBox.Password, (JumpBox.SelectedItem as JumpOption)?.Id ?? string.Empty,
-        NotesBox.Text.Trim(), ShowNotesBox.IsChecked == true);
+        NotesBox.Text.Trim());
 
     private ServerEntry Snapshot() => new()
     {
@@ -361,8 +361,11 @@ public partial class ServerEditDialog : FluentWindow
         _target.KeyPath = KeyBox.Text.Trim();
         _target.KeyPassphrase = KeyPassBox.Password;
         _target.JumpServerId = (JumpBox.SelectedItem as JumpOption)?.Id ?? string.Empty;
-        _target.Notes = NotesBox.Text.Trim();
-        _target.ShowNotesInPane = ShowNotesBox.IsChecked == true;
+        // заметку не трогали — многострочная прежних версий остаётся как была
+        if (NotesBox.Text.Trim() != _target.NotesLine)
+        {
+            _target.Notes = NotesBox.Text.Trim();
+        }
 
         DialogResult = true;
         Close();

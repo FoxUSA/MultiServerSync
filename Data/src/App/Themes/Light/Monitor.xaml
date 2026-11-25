@@ -1,0 +1,20 @@
+﻿<!--  СВЕТЛАЯ ТЕМА — мониторинг. Те же имена, что в соседней папке; значения свои.  -->
+<ResourceDictionary
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!--  линии графиков: синяя и оранжевая; заливка под линией — тот же цвет, тающий к нулю  -->
+  <SolidColorBrush x:Key="Monitor.Series1" Color="#2F6FDB" />
+  <SolidColorBrush x:Key="Monitor.Series2" Color="#B7791F" />
+
+  <!--  стрелки сдвига: на белом темнее — светлые жёлтый и зелёный не читаются  -->
+  <SolidColorBrush x:Key="Monitor.Up" Color="#A86A00" />
+  <SolidColorBrush x:Key="Monitor.Down" Color="#1E7B34" />
+
+  <!--  огонёк статуса; жёлтый и красный бывают ещё словом статуса — они с запасом для текста  -->
+  <SolidColorBrush x:Key="Monitor.Ok" Color="#2DA44E" />
+  <SolidColorBrush x:Key="Monitor.Warn" Color="#9A6700" />
+  <SolidColorBrush x:Key="Monitor.Bad" Color="#C4291C" />
+  <SolidColorBrush x:Key="Monitor.Unknown" Color="#6E7781" />
+
+</ResourceDictionary>

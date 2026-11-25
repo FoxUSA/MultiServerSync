@@ -139,7 +139,7 @@
           <TextBlock
             VerticalAlignment="Center"
             FontSize="12"
-            Foreground="#4E9A5B"
+            Foreground="{DynamicResource Ok.TextMuted}"
             Text="Сессия открыта — набранное уходит в неё, а не запускает новую команду"
             TextTrimming="CharacterEllipsis" />
           <CheckBox
@@ -175,7 +175,7 @@
         <Border
           x:Name="SessionRing"
           Grid.Row="1"
-          BorderBrush="#3FB950"
+          BorderBrush="{DynamicResource Ok.Ring}"
           BorderThickness="2"
           CornerRadius="4"
           IsHitTestVisible="False" />
@@ -214,7 +214,7 @@
               ToolTip="Остановить команду — сессия закончится, окно вернётся к командам">
               <ui:SymbolIcon
                 FontSize="{StaticResource IconGlyphSize}"
-                Foreground="#E0574A"
+                Foreground="{DynamicResource Bad.Text}"
                 Symbol="Stop24" />
             </Button>
             <Button
@@ -289,16 +289,6 @@
                   VerticalContentAlignment="Top"
                   VerticalScrollBarVisibility="Auto" />
 
-                <!--  личные команды вкладки копирования — окно в тусклой оранжевой рамке, как и её ярлык:
-                      видно, что правишь команды после копирования, а не обычную команду  -->
-                <Border
-                  x:Name="PersonalRing"
-                  BorderBrush="#80E07A1F"
-                  BorderThickness="2"
-                  CornerRadius="4"
-                  IsHitTestVisible="False"
-                  Visibility="Collapsed" />
-
                 <!--  окно в фокусе при нескольких окнах — вся рамка цвета нижней линии поля, как на «Копировании» и «Скачивании»  -->
                 <Border
                   x:Name="FocusRing"
@@ -311,8 +301,8 @@
                 <!--  мигает тусклым оранжевым, когда жмут кнопку, которой нечего делать  -->
                 <Border
                   x:Name="Flash"
-                  Background="#14E07A1F"
-                  BorderBrush="#A0E07A1F"
+                  Background="{DynamicResource Pick.FillFaint}"
+                  BorderBrush="{DynamicResource Pick.StrokeStrong}"
                   BorderThickness="2"
                   CornerRadius="4"
                   IsHitTestVisible="False"
@@ -362,7 +352,7 @@
                       Visibility="{Binding RunBatch.IsRunning, RelativeSource={RelativeSource AncestorType=Page}, Converter={StaticResource BoolToVis}}">
                       <ui:SymbolIcon
                         FontSize="{StaticResource IconGlyphSize}"
-                        Foreground="#E0574A"
+                        Foreground="{DynamicResource Bad.Text}"
                         Symbol="Stop24" />
                     </Button>
                     <Button
@@ -450,8 +440,8 @@
                     Margin="0,0,10,0"
                     Padding="7,1,7,2"
                     VerticalAlignment="Center"
-                    Background="#38E07A1F"
-                    BorderBrush="#80E07A1F"
+                    Background="{DynamicResource Pick.FillStrong}"
+                    BorderBrush="{DynamicResource Pick.Stroke}"
                     BorderThickness="1"
                     CornerRadius="4"
                     Visibility="{Binding IsMulti, Converter={StaticResource BoolToVis}}">
@@ -472,9 +462,6 @@
               </Grid>
 
               <DataTemplate.Triggers>
-                <DataTrigger Binding="{Binding DataContext.IsPersonal, RelativeSource={RelativeSource AncestorType=Page}}" Value="True">
-                  <Setter TargetName="PersonalRing" Property="Visibility" Value="Visible" />
-                </DataTrigger>
                 <MultiDataTrigger>
                   <MultiDataTrigger.Conditions>
                     <Condition Binding="{Binding IsMulti}" Value="True" />
@@ -561,7 +548,7 @@
           VerticalAlignment="Center"
           Content="Везде"
           IsChecked="{Binding Source={x:Static services:AppState.Current}, Path=Everywhere, Mode=TwoWay}"
-          Style="{StaticResource DangerSwitchStyle}"
+          Style="{DynamicResource DangerSwitchStyle}"
           ToolTip="«Выполнить» — во всех командных вкладках сразу, после вопроса" />
 
         <controls:RetryFailedButton x:Name="RetryButton" Margin="12,0,0,0" VerticalAlignment="Center" />

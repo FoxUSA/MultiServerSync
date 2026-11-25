@@ -59,7 +59,7 @@
                     Пока видна, рамку выделения прячет — иначе та просвечивала бы в такт миганию  -->
               <Border
                 x:Name="StatusRing"
-                BorderBrush="#3FB950"
+                BorderBrush="{DynamicResource Ok.Ring}"
                 BorderThickness="2"
                 CornerRadius="6"
                 IsHitTestVisible="False"
@@ -77,7 +77,7 @@
               <!--  личные команды вкладки копирования — рамка тусклая оранжевая, как у поля команды:
                     видно, что правится не обычная команда, а та, что идёт после копирования  -->
               <DataTrigger Binding="{Binding IsPersonal}" Value="True">
-                <Setter TargetName="Ring" Property="BorderBrush" Value="#80E07A1F" />
+                <Setter TargetName="Ring" Property="BorderBrush" Value="{DynamicResource Pick.Stroke}" />
               </DataTrigger>
               <DataTrigger Binding="{Binding Status}" Value="Running">
                 <Setter TargetName="StatusRing" Property="Visibility" Value="Visible" />
@@ -86,18 +86,18 @@
               </DataTrigger>
               <DataTrigger Binding="{Binding Status}" Value="Failed">
                 <Setter TargetName="StatusRing" Property="Visibility" Value="Visible" />
-                <Setter TargetName="StatusRing" Property="BorderBrush" Value="#E85C5C" />
+                <Setter TargetName="StatusRing" Property="BorderBrush" Value="{DynamicResource Bad.Ring}" />
                 <Setter TargetName="Ring" Property="Visibility" Value="Collapsed" />
               </DataTrigger>
               <DataTrigger Binding="{Binding Status}" Value="Partial">
                 <Setter TargetName="StatusRing" Property="Visibility" Value="Visible" />
-                <Setter TargetName="StatusRing" Property="BorderBrush" Value="#E85C5C" />
+                <Setter TargetName="StatusRing" Property="BorderBrush" Value="{DynamicResource Bad.Ring}" />
                 <Setter TargetName="Ring" Property="Visibility" Value="Collapsed" />
               </DataTrigger>
               <!--  предупреждение — оранжевая, как рамка плашки: не начато или остановлено человеком  -->
               <DataTrigger Binding="{Binding Status}" Value="Warning">
                 <Setter TargetName="StatusRing" Property="Visibility" Value="Visible" />
-                <Setter TargetName="StatusRing" Property="BorderBrush" Value="#E07A1F" />
+                <Setter TargetName="StatusRing" Property="BorderBrush" Value="{DynamicResource Pick.Ring}" />
                 <Setter TargetName="Ring" Property="Visibility" Value="Collapsed" />
               </DataTrigger>
             </ControlTemplate.Triggers>
@@ -112,7 +112,7 @@
       BasedOn="{StaticResource WorkspaceTabStyle}"
       TargetType="ListBoxItem">
       <!--  выбранный набор — в тусклой оранжевой рамке, а выбранная таблица на «Серверах» — в синей  -->
-      <Setter Property="BorderBrush" Value="#80E07A1F" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Pick.Stroke}" />
       <Setter Property="Opacity" Value="1" />
       <Setter Property="IsHitTestVisible" Value="True" />
     </Style>
@@ -155,6 +155,7 @@
                   BorderBrush="{DynamicResource TextFillColorTertiaryBrush}"
                   BorderThickness="1"
                   CornerRadius="3">
+                  <Grid>
                   <TextBlock
                     x:Name="Mark"
                     Margin="0,-1,0,0"
@@ -165,6 +166,17 @@
                     Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
                     Text="&#x2713;"
                     Visibility="Collapsed" />
+                  <!--  точка одиночного выбора — кругом, а не символом «●»: у символа свои поля шрифта,
+                        и он сидел не по центру кружка (23.11)  -->
+                  <Ellipse
+                    x:Name="Dot"
+                    Width="5"
+                    Height="5"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Fill="{DynamicResource AccentTextFillColorPrimaryBrush}"
+                    Visibility="Collapsed" />
+                  </Grid>
                 </Border>
                 <ContentPresenter
                   Grid.Column="1"
@@ -200,6 +212,15 @@
                 </MultiTrigger.Conditions>
                 <Setter TargetName="Row" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
               </MultiTrigger>
+              <MultiDataTrigger>
+                <MultiDataTrigger.Conditions>
+                  <Condition Binding="{Binding DataContext.State.PaneSingleSelect, RelativeSource={RelativeSource AncestorType=Window}}" Value="True" />
+                  <!--  в условиях триггера шаблона «свой элемент» — Self, не TemplatedParent: с ним условие молча не срабатывало  -->
+                  <Condition Binding="{Binding IsChecked, RelativeSource={RelativeSource Self}}" Value="True" />
+                </MultiDataTrigger.Conditions>
+                <Setter TargetName="Mark" Property="Visibility" Value="Collapsed" />
+                <Setter TargetName="Dot" Property="Visibility" Value="Visible" />
+              </MultiDataTrigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -307,10 +328,10 @@
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="#2F7FD6" />
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Blue.FillHover}" />
               </Trigger>
               <Trigger Property="IsPressed" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="#256BB8" />
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Blue.FillPressed}" />
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -342,7 +363,7 @@
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
                 <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
-                <Setter TargetName="Glyph" Property="TextElement.Foreground" Value="White" />
+                <Setter TargetName="Glyph" Property="TextElement.Foreground" Value="{DynamicResource Accent.OnFill}" />
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -428,8 +449,8 @@
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
                 <Setter Property="Opacity" Value="1" />
-                <Setter TargetName="Bd" Property="Background" Value="#C42B1C" />
-                <Setter TargetName="Glyph" Property="Foreground" Value="White" />
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Danger.Fill}" />
+                <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource Danger.OnFill}" />
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -469,7 +490,7 @@
               <Trigger Property="IsMouseOver" Value="True">
                 <Setter Property="Opacity" Value="1" />
                 <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
-                <Setter TargetName="Glyph" Property="Foreground" Value="White" />
+                <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource Accent.OnFill}" />
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -544,7 +565,7 @@
                     красная стоит, если кончилось ошибкой  -->
               <Border
                 x:Name="StatusRing"
-                BorderBrush="#3FB950"
+                BorderBrush="{DynamicResource Ok.Ring}"
                 BorderThickness="2"
                 CornerRadius="6"
                 IsHitTestVisible="False"
@@ -567,11 +588,11 @@
               </Trigger>
               <Trigger Property="controls:SectionMark.Status" Value="Failed">
                 <Setter TargetName="StatusRing" Property="Visibility" Value="Visible" />
-                <Setter TargetName="StatusRing" Property="BorderBrush" Value="#E85C5C" />
+                <Setter TargetName="StatusRing" Property="BorderBrush" Value="{DynamicResource Bad.Ring}" />
               </Trigger>
               <Trigger Property="controls:SectionMark.Status" Value="Warning">
                 <Setter TargetName="StatusRing" Property="Visibility" Value="Visible" />
-                <Setter TargetName="StatusRing" Property="BorderBrush" Value="#E07A1F" />
+                <Setter TargetName="StatusRing" Property="BorderBrush" Value="{DynamicResource Pick.Ring}" />
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -717,14 +738,14 @@
           Padding="3,0,3,1"
           HorizontalAlignment="Right"
           VerticalAlignment="Top"
-          Background="#E5483B"
+          Background="{DynamicResource Badge.Ps.Fill}"
           CornerRadius="3"
           IsHitTestVisible="False"
           Visibility="Collapsed">
           <TextBlock
             FontSize="9"
             FontWeight="SemiBold"
-            Foreground="White"
+            Foreground="{DynamicResource Badge.Ps.Text}"
             Text="PS" />
         </Border>
       </Grid>
@@ -844,6 +865,17 @@
             Icon="{ui:SymbolIcon Globe24}"
             ToolTip="https://byfox.dev/multiserversync/ — страница утилиты" />
 
+          <!--  тема: значок той, что сейчас; щелчок — другая, без меню  -->
+          <ui:Button
+            x:Name="ThemeButton"
+            Width="28"
+            Height="28"
+            Margin="8,0,0,0"
+            Padding="0"
+            HorizontalContentAlignment="Center"
+            Appearance="Transparent"
+            Click="OnThemeToggle" />
+
           <!--  настройки и выход — с рамкой, но без фона, как шарик: фон только под мышью  -->
           <ui:Button
             Height="28"
@@ -890,13 +922,13 @@
                 </Border>
                 <ControlTemplate.Triggers>
                   <Trigger Property="IsMouseOver" Value="True">
-                    <Setter TargetName="Bd" Property="Background" Value="#C42B1C" />
-                    <Setter TargetName="Bd" Property="BorderBrush" Value="#C42B1C" />
-                    <Setter TargetName="Glyph" Property="Foreground" Value="White" />
-                    <Setter TargetName="Caption" Property="Foreground" Value="White" />
+                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Danger.Fill}" />
+                    <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Danger.Fill}" />
+                    <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource Danger.OnFill}" />
+                    <Setter TargetName="Caption" Property="Foreground" Value="{DynamicResource Danger.OnFill}" />
                   </Trigger>
                   <Trigger Property="IsPressed" Value="True">
-                    <Setter TargetName="Bd" Property="Background" Value="#A32417" />
+                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Danger.FillPressed}" />
                   </Trigger>
                 </ControlTemplate.Triggers>
               </ControlTemplate>
@@ -999,7 +1031,7 @@
               <Border.Style>
                 <Style TargetType="Border">
                   <Setter Property="Visibility" Value="Collapsed" />
-                  <Setter Property="BorderBrush" Value="#3FB950" />
+                  <Setter Property="BorderBrush" Value="{DynamicResource Ok.Ring}" />
                   <Style.Triggers>
                     <Trigger Property="controls:SectionMark.Status" Value="Running">
                       <Setter Property="Visibility" Value="Visible" />
@@ -1007,11 +1039,11 @@
                     </Trigger>
                     <Trigger Property="controls:SectionMark.Status" Value="Failed">
                       <Setter Property="Visibility" Value="Visible" />
-                      <Setter Property="BorderBrush" Value="#E85C5C" />
+                      <Setter Property="BorderBrush" Value="{DynamicResource Bad.Ring}" />
                     </Trigger>
                     <Trigger Property="controls:SectionMark.Status" Value="Warning">
                       <Setter Property="Visibility" Value="Visible" />
-                      <Setter Property="BorderBrush" Value="#E07A1F" />
+                      <Setter Property="BorderBrush" Value="{DynamicResource Pick.Ring}" />
                     </Trigger>
                   </Style.Triggers>
                 </Style>
@@ -1063,11 +1095,11 @@
             <!--  под мышью и в фокусе — тусклая оранжевая рамка, как у ярлыка личной вкладки рядом  -->
             <ui:Button.Style>
               <Style BasedOn="{StaticResource {x:Type ui:Button}}" TargetType="ui:Button">
-                <Setter Property="MouseOverBorderBrush" Value="#80E07A1F" />
-                <Setter Property="PressedBorderBrush" Value="#80E07A1F" />
+                <Setter Property="MouseOverBorderBrush" Value="{DynamicResource Pick.Stroke}" />
+                <Setter Property="PressedBorderBrush" Value="{DynamicResource Pick.Stroke}" />
                 <Style.Triggers>
                   <Trigger Property="IsKeyboardFocused" Value="True">
-                    <Setter Property="BorderBrush" Value="#80E07A1F" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource Pick.Stroke}" />
                   </Trigger>
                 </Style.Triggers>
               </Style>
@@ -1108,7 +1140,7 @@
       CornerRadius="8">
       <Border
         Padding="6,4"
-        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+        Background="{DynamicResource Sections.Bar.Fill}"
         CornerRadius="7"
         PreviewMouseLeftButtonDown="OnSectionRowDown">
       <DockPanel>
@@ -1159,7 +1191,7 @@
             <ui:SymbolIcon
               x:Name="ExplorerServerLockIcon"
               FontSize="13"
-              Foreground="White"
+              Foreground="{DynamicResource Pick.Glyph}"
               Symbol="LockOpen24" />
           </Button>
         </StackPanel>
@@ -1273,7 +1305,7 @@
             <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
 
-          <!--  что это и из какого набора; справа — что подписывать под каждым сервером  -->
+          <!--  что это и из какого набора; под ним — что подписывать под каждым сервером  -->
           <StackPanel Grid.Row="0" Margin="0,0,0,4">
             <!--  в «Мониторинге» сервер один — и подпись в единственном числе, как в макете  -->
             <TextBlock>
@@ -1288,27 +1320,33 @@
                 </Style>
               </TextBlock.Style>
             </TextBlock>
-            <Grid Margin="0,2,0,0">
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-              </Grid.ColumnDefinitions>
+            <TextBlock
+              Margin="0,2,0,0"
+              FontSize="15"
+              FontWeight="SemiBold"
+              Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+              Text="{Binding State.PaneSetTitle}"
+              TextTrimming="CharacterEllipsis"
+              ToolTip="Набор серверов этой вкладки — у каждой вкладки свой" />
 
-              <TextBlock
-                Grid.Column="0"
-                VerticalAlignment="Center"
-                FontSize="15"
-                FontWeight="SemiBold"
-                Foreground="{DynamicResource TextFillColorPrimaryBrush}"
-                Text="{Binding State.PaneSetTitle}"
-                TextTrimming="CharacterEllipsis"
-                ToolTip="Набор серверов этой вкладки — у каждой вкладки свой" />
-
+            <!--  что подписывать под каждым сервером — строкой под названием набора  -->
+            <StackPanel>
               <StackPanel
-                Grid.Column="1"
-                VerticalAlignment="Center"
+                Margin="0,4,0,0"
                 Orientation="Horizontal">
                 <ToggleButton
+                  Content="Note"
+                  IsChecked="{Binding State.PaneShowNote, Mode=TwoWay}"
+                  Style="{StaticResource PaneChipStyle}"
+                  ToolTip="Под каждым сервером — его заметка (правится в окне сервера)" />
+                <ToggleButton
+                  Margin="4,0,0,0"
+                  Content="Geo"
+                  IsChecked="{Binding State.PaneShowGeo, Mode=TwoWay}"
+                  Style="{StaticResource PaneChipStyle}"
+                  ToolTip="Под каждым сервером — страна и город по его адресу (GeoLite2 от MaxMind)" />
+                <ToggleButton
+                  Margin="4,0,0,0"
                   Content="IP"
                   IsChecked="{Binding State.PaneShowIp, Mode=TwoWay}"
                   Style="{StaticResource PaneChipStyle}"
@@ -1320,7 +1358,7 @@
                   Style="{StaticResource PaneChipStyle}"
                   ToolTip="Под каждым сервером — имя пользователя, под которым идёт подключение" />
               </StackPanel>
-            </Grid>
+            </StackPanel>
           </StackPanel>
 
           <!--  на «Команде» и «Копировании»: один сервер за раз, чтобы случайно не запустить
@@ -1423,8 +1461,8 @@
                               <Setter TargetName="Box" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
                             </Trigger>
                             <DataTrigger Binding="{Binding IsFocused}" Value="True">
-                              <Setter TargetName="Box" Property="Background" Value="#26E07A1F" />
-                              <Setter TargetName="Box" Property="BorderBrush" Value="#80E07A1F" />
+                              <Setter TargetName="Box" Property="Background" Value="{DynamicResource Pick.Fill}" />
+                              <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Pick.Stroke}" />
                             </DataTrigger>
                           </ControlTemplate.Triggers>
                         </ControlTemplate>
@@ -1513,13 +1551,50 @@
                                 </Style>
                               </TextBlock.Style>
                             </TextBlock>
+                            <!--  страна и город — второй строкой под «root@адрес», кнопкой «Geo»  -->
+                            <TextBlock
+                              Margin="-21,1,0,0"
+                              FontSize="11"
+                              Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                              Text="{Binding Server.Geo}"
+                              TextTrimming="CharacterEllipsis">
+                              <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                  <Setter Property="Visibility" Value="Collapsed" />
+                                  <Style.Triggers>
+                                    <MultiDataTrigger>
+                                      <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding DataContext.State.PaneShowGeo, RelativeSource={RelativeSource AncestorType=Window}}" Value="True" />
+                                        <Condition Binding="{Binding Server.HasGeo}" Value="True" />
+                                      </MultiDataTrigger.Conditions>
+                                      <Setter Property="Visibility" Value="Visible" />
+                                    </MultiDataTrigger>
+                                  </Style.Triggers>
+                                </Style>
+                              </TextBlock.Style>
+                            </TextBlock>
+                            <!--  заметка — кнопкой «Note»  -->
                             <TextBlock
                               Margin="-21,1,0,0"
                               FontSize="11"
                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                               Text="{Binding Server.NotesLine}"
-                              TextTrimming="CharacterEllipsis"
-                              Visibility="{Binding Server.PaneNotesVisible, Converter={StaticResource BoolToVis}}" />
+                              TextTrimming="CharacterEllipsis">
+                              <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                  <Setter Property="Visibility" Value="Collapsed" />
+                                  <Style.Triggers>
+                                    <MultiDataTrigger>
+                                      <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding DataContext.State.PaneShowNote, RelativeSource={RelativeSource AncestorType=Window}}" Value="True" />
+                                        <Condition Binding="{Binding Server.HasNotes}" Value="True" />
+                                      </MultiDataTrigger.Conditions>
+                                      <Setter Property="Visibility" Value="Visible" />
+                                    </MultiDataTrigger>
+                                  </Style.Triggers>
+                                </Style>
+                              </TextBlock.Style>
+                            </TextBlock>
                           </StackPanel>
                         </CheckBox>
                         </DockPanel>
@@ -1573,8 +1648,8 @@
                             <Condition Binding="{Binding IsSelected}" Value="True" />
                             <Condition Binding="{Binding DataContext.State.PaneHighlightsPicks, RelativeSource={RelativeSource AncestorType=Window}}" Value="True" />
                           </MultiDataTrigger.Conditions>
-                          <Setter TargetName="Pick" Property="Background" Value="#26E07A1F" />
-                          <Setter TargetName="Pick" Property="BorderBrush" Value="#80E07A1F" />
+                          <Setter TargetName="Pick" Property="Background" Value="{DynamicResource Pick.Fill}" />
+                          <Setter TargetName="Pick" Property="BorderBrush" Value="{DynamicResource Pick.Stroke}" />
                           <Setter TargetName="Pick" Property="Margin" Value="-4,2,-4,2" />
                           <Setter TargetName="Pick" Property="Padding" Value="3,3,3,3" />
                           <Setter TargetName="Check" Property="FontSize" Value="14" />
@@ -1587,7 +1662,7 @@
                             <Condition Binding="{Binding IsMouseOver, ElementName=Item}" Value="True" />
                             <Condition Binding="{Binding DataContext.State.PaneTab.IsPaneLocked, RelativeSource={RelativeSource AncestorType=Window}}" Value="False" />
                           </MultiDataTrigger.Conditions>
-                          <Setter TargetName="Pick" Property="Background" Value="#38E07A1F" />
+                          <Setter TargetName="Pick" Property="Background" Value="{DynamicResource Pick.FillHover}" />
                         </MultiDataTrigger>
                         <DataTrigger Binding="{Binding RelativeSource={RelativeSource PreviousData}}" Value="{x:Null}">
                           <Setter TargetName="Item" Property="Margin" Value="0" />
@@ -1713,14 +1788,13 @@
                 <StackPanel>
                   <!--  справа от подписи — свитч режима, красный при включении, как «Везде»: команды идут не на серверы  -->
                   <DockPanel>
-                  <ui:ToggleSwitch
+                  <!--  стиль свитча — из темы, ссылкой (от него нельзя наследовать на месте), поэтому приглушение под замком — на обёртке  -->
+                  <Border
                     Margin="6,0,0,0"
                     VerticalAlignment="Center"
-                    DockPanel.Dock="Right"
-                    IsChecked="{Binding State.CommandLocalPc, Mode=TwoWay}"
-                    ToolTip="Команды — в PowerShell на этом ПК, а не на серверах">
-                    <ui:ToggleSwitch.Style>
-                      <Style BasedOn="{StaticResource DangerSwitchStyle}" TargetType="ui:ToggleSwitch">
+                    DockPanel.Dock="Right">
+                    <Border.Style>
+                      <Style TargetType="Border">
                         <Style.Triggers>
                           <DataTrigger Binding="{Binding State.ActiveWorkspace.IsPaneLocked}" Value="True">
                             <Setter Property="Opacity" Value="0.5" />
@@ -1728,8 +1802,12 @@
                           </DataTrigger>
                         </Style.Triggers>
                       </Style>
-                    </ui:ToggleSwitch.Style>
-                  </ui:ToggleSwitch>
+                    </Border.Style>
+                    <ui:ToggleSwitch
+                      IsChecked="{Binding State.CommandLocalPc, Mode=TwoWay}"
+                      Style="{DynamicResource DangerSwitchStyle}"
+                      ToolTip="Команды — в PowerShell на этом ПК, а не на серверах" />
+                  </Border>
                   <!--  PowerShell на «Команде»: свой ряд вкладок, команды — на этот компьютер. Набор или сервер — назад к серверам.
                         Подпись от самого края, как у свитчей; щелчок по ней включает и выключает режим, как свитч справа  -->
                   <Button

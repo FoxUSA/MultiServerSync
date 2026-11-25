@@ -97,10 +97,16 @@ public partial class UpdateWindow : FluentWindow
         }
     }
 
-    /// <summary>Открыть окно поверх главного.</summary>
-    public static void Open(Window? owner)
+    /// <summary>Открыть окно поверх главного. <paramref name="start"/> — свежая версия уже найдена: обновление идёт сразу.</summary>
+    public static void Open(Window? owner, bool start = false)
     {
         var window = new UpdateWindow { Owner = owner };
+
+        if (start && UpdateService.Available is not null)
+        {
+            window.Loaded += (_, _) => window.OnUpdate(window, new RoutedEventArgs());
+        }
+
         window.ShowDialog();
     }
 

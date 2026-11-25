@@ -6,8 +6,8 @@ namespace MultiServerSync.Services;
 
 /// <summary>
 /// Звук об окончании команды или копирования — и на открытой вкладке (с 14.11). Чтобы не частил:
-/// после звука 3 секунды тишины (что закончилось в них — один повтор в конце), мгновенный запуск
-/// на вкладке перед глазами молчит, остановленный человеком — тоже. Громкость — в «Настройках», 0% выключает.
+/// после звука 3 секунды тишины (что закончилось в них — один повтор в конце). Короткий запуск на открытой
+/// вкладке тоже звучит (с 23.11, по просьбе); молчит только остановленный человеком. Громкость — в «Настройках», 0% выключает.
 /// </summary>
 public static class FinishSound
 {
@@ -22,9 +22,6 @@ public static class FinishSound
 
     /// <summary>После звука — тишина: окончания в эти секунды копятся в один повтор в её конце.</summary>
     private static readonly TimeSpan Quiet = TimeSpan.FromSeconds(3);
-
-    /// <summary>Запуск короче этого на открытой вкладке молчит: итог появился, пока на него смотрели.</summary>
-    private static readonly TimeSpan Instant = TimeSpan.FromSeconds(3);
 
     private static DateTime _quietUntil;
     private static bool _owed;
@@ -49,13 +46,6 @@ public static class FinishSound
         if (batch.RunStopped > 0)
         {
             AppLog.Debug($"Звук: молчит — «{owner.Title}» остановлена вручную.");
-            return;
-        }
-
-        // мгновенная команда на вкладке перед глазами — итог и так виден
-        if (batch.StartedAt is { } started && DateTime.Now - started < Instant && IsInView(owner))
-        {
-            AppLog.Debug($"Звук: молчит — «{owner.Title}» шла {(DateTime.Now - started).TotalSeconds:0.0} с на открытой вкладке.");
             return;
         }
 
@@ -94,30 +84,23 @@ public static class FinishSound
         }
     }
 
-    /// <summary>Вкладка открыта в своём разделе, а окно на экране и в фокусе.</summary>
-    private static bool IsInView(Workspace owner)
-    {
-        var state = AppState.Current;
-        var window = Application.Current?.MainWindow;
-
-        return window is { IsActive: true }
-            && window.WindowState != WindowState.Minimized
-            && state.ShowsWorkspaceTabs
-            && state.Tabs.Contains(owner)
-            && ReferenceEquals(state.ActiveWorkspace, owner);
-    }
-
     /// <summary>Проба после выбора громкости в «Настройках» — играет всегда, кроме 0%.</summary>
     public static void Preview() => Play();
 
+    private static readonly string AlertPath = Path.Combine(AppContext.BaseDirectory, "Assets", "signal.mp3");
 
-    private static void Play()
+    /// <summary>Сигнал «Мониторинга»: раздел сервера покраснел. Громкость та же, что у звука окончания.</summary>
+    public static void Alert() => Play(AlertPath);
+
+    private static void Play() => Play(FilePath);
+
+    private static void Play(string path)
     {
         var volume = Math.Clamp(AppState.Current.Settings.FinishSoundVolume, 0, 100);
 
-        if (volume == 0 || !File.Exists(FilePath))
+        if (volume == 0 || !File.Exists(path))
         {
-            AppLog.Debug(volume == 0 ? "Звук: громкость 0% — выключен." : "Звук: нет файла " + FilePath);
+            AppLog.Debug(volume == 0 ? "Звук: громкость 0% — выключен." : "Звук: нет файла " + path);
             return;
         }
 
@@ -148,7 +131,7 @@ public static class FinishSound
                 Done();
             };
 
-            player.Open(new Uri(FilePath, UriKind.Absolute));
+            player.Open(new Uri(path, UriKind.Absolute));
             player.Volume = volume / 100.0;
             player.Play();
 

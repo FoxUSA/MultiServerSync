@@ -151,24 +151,24 @@ public partial class ActionToast : UserControl
             : entry.Text;
 
         Message.Text = NumberWithWord.Replace(text, "\u00A0");
-        Dot.Fill = DotBrush(entry.Level);
+        Dot.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, DotKey(entry.Level));
 
         // рамка тусклая оранжевая — рамкой темы плашку было плохо видно; удача — в зелёной; ошибка — на тусклом
         // красном и в красной рамке. Фон полупрозрачный поверх плашки под ним, поэтому тема остаётся видна
         switch (entry.Level)
         {
             case LogLevel.Error:
-                Body.BorderBrush = ErrorStroke;
-                Body.Background = ErrorFill;
+                Body.SetResourceReference(Border.BorderBrushProperty, "Toast.Error.Stroke");
+                Body.SetResourceReference(Border.BackgroundProperty, "Toast.Error.Fill");
                 break;
 
             case LogLevel.Success:
-                Body.BorderBrush = SuccessStroke;
+                Body.SetResourceReference(Border.BorderBrushProperty, "Toast.Success.Stroke");
                 Body.SetResourceReference(Border.BackgroundProperty, "SolidBackgroundFillColorTertiaryBrush");
                 break;
 
             default:
-                Body.BorderBrush = WarningStroke;
+                Body.SetResourceReference(Border.BorderBrushProperty, "Pick.Stroke");
                 Body.SetResourceReference(Border.BackgroundProperty, "SolidBackgroundFillColorTertiaryBrush");
                 break;
         }
@@ -254,27 +254,12 @@ public partial class ActionToast : UserControl
         BeginAnimation(OpacityProperty, fade);
     }
 
-    private static readonly Brush WarningStroke = Freeze(new SolidColorBrush(Color.FromArgb(0x80, 0xE0, 0x7A, 0x1F)));
-    private static readonly Brush SuccessStroke = Freeze(new SolidColorBrush(Color.FromArgb(0x80, 0x6C, 0xCB, 0x5F)));
-    private static readonly Brush ErrorStroke =Freeze(new SolidColorBrush(Color.FromArgb(0x80, 0xE8, 0x5C, 0x5C)));
-    private static readonly Brush ErrorFill = Freeze(new SolidColorBrush(Color.FromArgb(0x38, 0xE8, 0x5C, 0x5C)));
-
-    private static Brush Freeze(Brush brush)
+    /// <summary>Кисть точки — ссылкой на тему: сменили тему при открытой плашке — точка перекрашивается.</summary>
+    private static string DotKey(LogLevel level) => level switch
     {
-        brush.Freeze();
-        return brush;
-    }
-
-    private Brush DotBrush(LogLevel level)
-    {
-        var key = level switch
-        {
-            LogLevel.Success => "SystemFillColorSuccessBrush",
-            LogLevel.Warning => "SystemFillColorCautionBrush",
-            LogLevel.Error => "SystemFillColorCriticalBrush",
-            _ => "AccentTextFillColorPrimaryBrush",
-        };
-
-        return TryFindResource(key) as Brush ?? Brushes.Gray;
-    }
+        LogLevel.Success => "SystemFillColorSuccessBrush",
+        LogLevel.Warning => "SystemFillColorCautionBrush",
+        LogLevel.Error => "SystemFillColorCriticalBrush",
+        _ => "AccentTextFillColorPrimaryBrush",
+    };
 }

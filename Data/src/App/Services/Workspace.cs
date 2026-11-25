@@ -210,6 +210,8 @@ public sealed partial class Workspace : ObservableObject
     private bool _paneAllSets;
     private bool _paneShowIp;
     private bool _paneShowUser;
+    private bool _paneShowNote;
+    private bool _paneShowGeo;
 
     /// <summary>Ключ «Всех» в <see cref="_scopes"/>; у наборов ключ — их Id.</summary>
     private const string AllScope = "*";
@@ -242,6 +244,12 @@ public sealed partial class Workspace : ObservableObject
 
     /// <summary>Галочка «User»: под серверами в панели — имя пользователя. Своя у вкладки.</summary>
     public bool PaneShowUser => _paneShowUser;
+
+    /// <summary>Кнопка «Note»: под сервером — его заметка. Своя у вкладки; по умолчанию выключена, как Geo, IP и User.</summary>
+    public bool PaneShowNote => _paneShowNote;
+
+    /// <summary>Кнопка «Geo»: под сервером — страна и город по адресу. Своя у вкладки.</summary>
+    public bool PaneShowGeo => _paneShowGeo;
 
     /// <summary>Одиночный выбор в наборе, который сейчас стоит у вкладки (или на «Всех»).</summary>
     public bool SingleSelect => Scope.SingleSelect;
@@ -441,6 +449,18 @@ public sealed partial class Workspace : ObservableObject
         Save();
     }
 
+    public void SetShowNote(bool value)
+    {
+        _paneShowNote = value;
+        Save();
+    }
+
+    public void SetShowGeo(bool value)
+    {
+        _paneShowGeo = value;
+        Save();
+    }
+
     /// <summary>Галочка «Весь журнал»: без неё журнал показывает только эту вкладку. Память своя у каждой вкладки, новая — без галочки.</summary>
     public bool JournalWhole { get; private set; }
 
@@ -612,6 +632,8 @@ public sealed partial class Workspace : ObservableObject
         _paneAllSets = source._paneAllSets;
         _paneShowIp = source._paneShowIp;
         _paneShowUser = source._paneShowUser;
+        _paneShowNote = source._paneShowNote;
+        _paneShowGeo = source._paneShowGeo;
         _scopes.Clear();
 
         foreach (var (key, scope) in source._scopes)
@@ -2631,9 +2653,11 @@ public sealed partial class Workspace : ObservableObject
                     + "или на вкладке «Серверы» (галочки копирования и команды разные).";
             }
 
-            var picked = Items.Count(i => i.IsSelected);
+            var picked = Items.Count(i => i.IsSelected && !i.IsGone);
+            var gone = Items.Count(i => i.IsGone);
             var window = CopyWindows.Count > 1 ? $"Окно {_focusedWindow.NumberText} · " : string.Empty;
-            return $"{window}Будет скопировано отмеченных объектов: {picked} из {Items.Count} · на серверов: {servers}.";
+            return $"{window}Будет скопировано отмеченных объектов: {picked} из {Items.Count} · на серверов: {servers}."
+                + (gone > 0 ? $" Нет на диске: {gone}." : string.Empty);
         }
     }
 
@@ -3258,24 +3282,34 @@ public sealed partial class Workspace : ObservableObject
         }));
 
     /// <summary>
-    /// Строки, о которых известно, что они на всех серверах: залиты, какими были до захода.
-    /// Копирование отвечает за окно целиком, сравнение — за каждую строку.
+    /// Итог захода по каждому серверу отдельно: строка сошлась на сервере — помнит там свою дату до захода,
+    /// разошлась — забывает. Сервер, где заход не закончился удачно, не трогается.
+    /// Копирование отвечает за окно на сервере целиком, сравнение — за каждую строку.
     /// </summary>
-    /// <param name="targets">Серверы захода: строка запоминает те, куда шло её окно, — на них её файлы проверены.</param>
+    /// <param name="outcome">Строка на сервере: true — сошлась, false — разошлась, null — не известно.</param>
     private void RememberSent(
         IReadOnlyList<UploadJob> jobs,
         Dictionary<UploadJob, Lazy<List<string?>>> dates,
-        Func<UploadJob, TransferItem, bool> sent,
-        IReadOnlyList<ServerEntry> targets)
+        IReadOnlyList<ServerEntry> targets,
+        Func<UploadJob, TransferItem, ServerEntry, bool?> outcome)
     {
         foreach (var job in jobs.Where(j => j.Window is not null))
         {
-            for (var i = 0; i < job.Payload.Count; i++)
+            foreach (var server in targets.Where(s => Goes(job, s)))
             {
-                if (sent(job, job.Payload[i]) && dates[job].Value[i] is { } date)
+                for (var i = 0; i < job.Payload.Count; i++)
                 {
-                    job.Payload[i].Memory.Date = date;
-                    job.Payload[i].Memory.Servers = targets.Where(s => Goes(job, s)).Select(s => s.Id).ToList();
+                    var item = job.Payload[i];
+
+                    switch (outcome(job, item, server))
+                    {
+                        case true when dates[job].Value[i] is { } date:
+                            item.Memory.SetOn(server.Id, date);
+                            break;
+                        case false:
+                            item.Memory.SetOn(server.Id, null);
+                            break;
+                    }
                 }
             }
         }
@@ -3297,8 +3331,9 @@ public sealed partial class Workspace : ObservableObject
 
         foreach (var item in job.Payload)
         {
-            if (item.Memory.Servers?.Contains(server.Id) == true
-                && DateTime.TryParse(item.Memory.Date, null, System.Globalization.DateTimeStyles.RoundtripKind, out var date))
+            // память старой версии без серверов не в счёт: где проверено — не известно
+            if ((item.Memory.OnServers is not null || item.Memory.Servers is not null)
+                && DateTime.TryParse(item.Memory.DateOn(server.Id), null, System.Globalization.DateTimeStyles.RoundtripKind, out var date))
             {
                 roots.Add((item.FullPath.TrimEnd(Path.DirectorySeparatorChar), date.ToUniversalTime()));
             }
@@ -3358,24 +3393,55 @@ public sealed partial class Workspace : ObservableObject
         stats.MissingFiles.Concat(stats.MissingDirs).Concat(stats.Different.Select(d => d.Path))
             .Any(p => p == top || p.StartsWith(top + "/", StringComparison.Ordinal));
 
-    /// <summary>Незалитое: дата есть и не та, что запомнена при последнем удачном заходе.</summary>
+    /// <summary>
+    /// Незалитое. Строка «Копирования» — хотя бы на одном из серверов, отмеченных у её окна сейчас, она не сошлась
+    /// при нынешней дате: сняли сервер — его память больше не держит галочку, отметили новый — строка незалитая,
+    /// пока туда не зальют или «Сравнить» не подтвердит. Серверов не отмечено — незалитая, если не сошлась нигде.
+    /// Строка «Скачивания» — дата не та, что запомнена при последнем удачном заходе (сервер у неё один).
+    /// </summary>
     private async Task<(List<IRowCheck> Rows, HashSet<IRowCheck> Unsent)> FindUnsentAsync()
     {
-        // у каждого окна свои исключения; читаются здесь, в потоке окна
+        // у каждого окна свои исключения и свои серверы; читаются здесь, в потоке окна
         var items = CopyWindows.SelectMany(w =>
         {
             var filter = ExcludesOf(w);
-            return w.Items.Select(i => (Item: i, Filter: filter));
+            var servers = TargetsOf(w).Select(s => s.Id).ToList();
+            return w.Items.Select(i => (Item: i, Filter: filter, Servers: servers));
         }).ToList();
 
         var itemDates = await Task.Run(() => items.Select(r => r.Item.ChangeDate(r.Filter)).ToList());
-        var dated = items.Select((r, i) => ((IRowCheck)r.Item, itemDates[i]))
-            .Concat(AllDownloads.Select(d => ((IRowCheck)d, d.Server is null ? null : d.ChangeDate)))
-            .ToList();
 
-        return (
-            dated.Select(r => r.Item1).ToList(),
-            dated.Where(r => r.Item2 is not null && r.Item2 != r.Item1.Memory.Date).Select(r => r.Item1).ToHashSet());
+        var unsent = new HashSet<IRowCheck>();
+
+        for (var i = 0; i < items.Count; i++)
+        {
+            var (item, _, servers) = items[i];
+
+            if (itemDates[i] is not { } date)
+            {
+                continue;
+            }
+
+            var memory = item.Memory;
+            var sent = servers.Count > 0
+                ? servers.All(id => memory.DateOn(id) == date)
+                : memory.OnServers is { } on ? on.Values.Contains(date) : memory.Date == date;
+
+            if (!sent)
+            {
+                unsent.Add(item);
+            }
+        }
+
+        foreach (var download in AllDownloads)
+        {
+            if (download.Server is not null && download.ChangeDate is { } date && date != download.Memory.Date)
+            {
+                unsent.Add(download);
+            }
+        }
+
+        return (items.Select(r => (IRowCheck)r.Item).Concat(AllDownloads).ToList(), unsent);
     }
 
     private void MarkUnsent(List<IRowCheck> rows, HashSet<IRowCheck> unsent)
@@ -3392,12 +3458,13 @@ public sealed partial class Workspace : ObservableObject
     }
 
     /// <summary>
-    /// Зелёным — то, что свитч нашёл незалитым: галочка строки и рамка номера её окна. Зелёный значит «всё чётко»:
-    /// только пока свитч зелёный. Выключен или покраснел (галочки тронули руками) — зелёного нигде нет.
+    /// Зелёным — то, что свитч нашёл незалитым: галочка строки и рамка номера её окна. Горит, пока свитч включён,
+    /// и когда он покраснел (руками отметили и залитое): незалитое остаётся незалитым (24.11 — гасить было ошибкой).
+    /// Выключен — зелёного нигде нет.
     /// </summary>
     private void ShowUnsent()
     {
-        var on = UnsentOn;
+        var on = UnsentHeld;
 
         foreach (var window in CopyWindows)
         {
@@ -3534,14 +3601,17 @@ public sealed partial class Workspace : ObservableObject
     /// <param name="verb">Глагол для причины: «копировать нечего», «сравнивать нечего».</param>
     private (List<UploadJob> Jobs, IReadOnlyList<ServerEntry> Targets)? CopyInputs(string what, string verb)
     {
-        // окна без отмеченных файлов просто пропускаются, как пустые окна команд
-        var windows = CopyWindows.Where(w => w.Items.Any(i => i.IsSelected)).ToList();
+        // окна без отмеченных файлов просто пропускаются, как пустые окна команд;
+        // строки, чьих файлов сейчас нет на диске, не копируются
+        var windows = CopyWindows.Where(w => w.Items.Any(i => i.IsSelected && !i.IsGone)).ToList();
 
         if (windows.Count == 0)
         {
             Refuse(what, !AllItems.Any()
                 ? $"Список файлов пуст — {verb} нечего."
-                : $"Ни один объект не отмечен галочкой — {verb} нечего.");
+                : AllItems.Any(i => i.IsSelected)
+                    ? $"Отмеченных объектов нет на диске — {verb} нечего."
+                    : $"Ни один объект не отмечен галочкой — {verb} нечего.");
             return null;
         }
 
@@ -3560,7 +3630,7 @@ public sealed partial class Workspace : ObservableObject
 
             jobs.Add(new UploadJob(
                 window,
-                window.Items.Where(i => i.IsSelected).ToList(),
+                window.Items.Where(i => i.IsSelected && !i.IsGone).ToList(),
                 remotePath,
                 UploadOptionsOf(window),
                 OptionsOf(window).VerifyChecksums));
@@ -3697,8 +3767,9 @@ public sealed partial class Workspace : ObservableObject
 
         // сошлось на всех серверах — файл и так там, отмечать его незалитым незачем
         var dates = RowDates(jobs);
-        var matched = new System.Collections.Concurrent.ConcurrentDictionary<TransferItem, int>();
-        var differs = new System.Collections.Concurrent.ConcurrentDictionary<TransferItem, bool>();
+
+        // итог по строке на каждом сервере: true — сошлась, false — разошлась; сервер не ответил — нет записи
+        var outcomes = new System.Collections.Concurrent.ConcurrentDictionary<(TransferItem Item, string ServerId), bool>();
 
         // свитч включён — сверяется только незалитое внутри строк, как и при копировании; всё — со свитчем выключенным
         var trustSent = UnsentHeld;
@@ -3739,11 +3810,11 @@ public sealed partial class Workspace : ObservableObject
                 {
                     if (Touched(stats, SshService.CombineRemote(root, item.Name)))
                     {
-                        differs[item] = true;
+                        outcomes[(item, server.Id)] = false;
                     }
                     else if (job.Options.CompareConfirms)
                     {
-                        matched.AddOrUpdate(item, 1, (_, count) => count + 1);
+                        outcomes[(item, server.Id)] = true;
                     }
                 }
 
@@ -3752,13 +3823,9 @@ public sealed partial class Workspace : ObservableObject
             "на сервере",
             WindowRows(rows, j => j.Window, null, chained: false));
 
-        // сверка нашла разницу — строка незалитая, что бы ни помнила дата
-        foreach (var item in differs.Keys)
-        {
-            item.Memory.Date = null;
-        }
-
-        RememberSent(jobs, dates, (job, item) => matched.GetValueOrDefault(item) == targets.Count(s => Goes(job, s)), targets);
+        // сверка нашла разницу на сервере — там строка незалитая, что бы ни помнила дата
+        RememberSent(jobs, dates, targets,
+            (_, item, server) => outcomes.TryGetValue((item, server.Id), out var ok) ? ok : null);
         await RemarkUnsentAsync();
 
         if (notify)
@@ -4107,7 +4174,7 @@ public sealed partial class Workspace : ObservableObject
         // для «Незалитых»: дата строк до отправки — правка по ходу копирования останется незалитой.
         // Запоминается, только если окно дошло до всех серверов целиком
         var dates = RowDates(jobs);
-        var delivered = new System.Collections.Concurrent.ConcurrentDictionary<UploadJob, int>();
+        var delivered = new System.Collections.Concurrent.ConcurrentDictionary<(UploadJob Job, string ServerId), bool>();
 
         // свитч включён — проверенное прошлой заливкой сервер не перечитывает; всё сверить — свитч выключить
         var trustSent = UnsentHeld;
@@ -4283,14 +4350,15 @@ public sealed partial class Workspace : ObservableObject
                 // «файл уже есть, не заменён» — на сервер ушло не всё
                 if (stats.FilesSkipped == 0)
                 {
-                    delivered.AddOrUpdate(job, 1, (_, count) => count + 1);
+                    delivered[(job, server.Id)] = true;
                 }
             },
             settings.MaxParallel,
             concurrent: concurrent,
             prepare: WindowRows(rows, j => j.Window, prepare, chained: true));
 
-        RememberSent(jobs, dates, (job, _) => delivered.GetValueOrDefault(job) == targets.Count(s => Goes(job, s)), targets);
+        // окно дошло до сервера целиком — там его строки залиты; не дошло — память сервера не трогаем
+        RememberSent(jobs, dates, targets, (job, _, server) => delivered.ContainsKey((job, server.Id)) ? true : null);
 
         // запуски «Проводника» идут рядом — итог на ярлыке, когда закончился последний
         if (CopyBatch.IsRunning)
@@ -4494,7 +4562,7 @@ public sealed partial class Workspace : ObservableObject
     {
         var targets = CopyTargets;
 
-        return !AllItems.Any(i => i.IsSelected) || targets.Count == 0 || CopyBatch.IsRunning
+        return !AllItems.Any(i => i.IsSelected && !i.IsGone) || targets.Count == 0 || CopyBatch.IsRunning
             ? null
             : RunHistory.CheckCopy(this, targets).With(ChainCheck(targets));
     }
@@ -5389,6 +5457,8 @@ public sealed partial class Workspace : ObservableObject
         PaneScopes = PaneOf(CopyWindows[0]).Scopes,
         PaneShowIp = _paneShowIp,
         PaneShowUser = _paneShowUser,
+        PaneShowNotes = _paneShowNote,
+        PaneShowGeo = _paneShowGeo,
         LockedServerIds = _lockedIds?.ToList(),
         JournalWhole = JournalWhole,
         BookGroup = BookGroup,
@@ -5540,11 +5610,15 @@ public sealed partial class Workspace : ObservableObject
         RaiseCopyInfo();
         RaiseDownloadInfo();
         _ = RefreshItemsInfoAsync();
+
+        // строки снимка, чьих файлов сейчас нет, — на тот же минутный отсчёт
+        _missingAtStart = null;
+        DropMissing(AllItems);
         Save();
     }
 
     private static List<SavedTransferItem> SavedItems(CopyWindow window) =>
-        window.Items.Select(i => new SavedTransferItem { Path = i.FullPath, IsSelected = i.IsSelected, Smart = i.Memory.Copy() }).ToList();
+        window.Items.Select(i => new SavedTransferItem { Path = i.FullPath, IsSelected = i.IsSelected, Smart = i.Memory.Copy(), MissingSince = i.MissingSince }).ToList();
 
     private SavedCopyWindow SaveCopyWindow(CopyWindow window)
     {
@@ -5573,22 +5647,25 @@ public sealed partial class Workspace : ObservableObject
         };
     }
 
-    /// <summary>Строки списка из файла. Пропавшие локальные пути отбрасываются. Вернёт, сколько пропало.</summary>
+    /// <summary>
+    /// Строки списка из файла. Пропавшие локальные пути не отбрасываются: программу часто открывают как раз
+    /// между удалением архива и его пересборкой. Они ждут, как и при работе (<see cref="DropMissing"/>), —
+    /// срок считается от времени пропажи из файла вкладки. Вернёт, сколько пропало.
+    /// </summary>
     private int RestoreItems(CopyWindow window, IEnumerable<SavedTransferItem> saved)
     {
         var missing = 0;
 
         foreach (var item in saved)
         {
-            if (File.Exists(item.Path) || Directory.Exists(item.Path))
+            var row = new TransferItem(item.Path) { IsSelected = item.IsSelected, Memory = item.Smart?.Copy() ?? new() };
+            window.Items.Add(row);
+
+            if (!row.ExistsOnDisk)
             {
-                window.Items.Add(new TransferItem(item.Path) { IsSelected = item.IsSelected, Memory = item.Smart?.Copy() ?? new() });
-            }
-            else
-            {
-                // одной строкой на всю вкладку, когда она загрузится: ReportMissingAtStart
+                row.MissingSince = item.MissingSince;
                 missing++;
-                (_missingAtStart ??= []).Add((item.Path, null));
+                (_missingAtStart ??= []).Add(row);
             }
         }
 
@@ -5648,6 +5725,8 @@ public sealed partial class Workspace : ObservableObject
         _paneAllSets = state.PaneAllSets;
         _paneShowIp = state.PaneShowIp ?? false;
         _paneShowUser = state.PaneShowUser ?? false;
+        _paneShowNote = state.PaneShowNotes ?? false;
+        _paneShowGeo = state.PaneShowGeo ?? false;
         JournalWhole = state.JournalWhole;
         BookGroup = state.BookGroup;
         BookScroll = state.BookScroll;
@@ -5919,7 +5998,14 @@ public sealed partial class Workspace : ObservableObject
 
     /// <summary>Вкладку закрыли — следить за её файлами больше незачем.</summary>
     /// <summary>Вкладку вернули: снова следить за файлами списка.</summary>
-    public void ResumeWatching() => SyncWatchers();
+    public void ResumeWatching()
+    {
+        SyncWatchers();
+
+        // вкладка, поднятая из памяти отмены, хранит строки без файлов как были — отсчёт с возврата
+        _missingAtStart = null;
+        DropMissing(AllItems);
+    }
 
     public void StopWatching()
     {
@@ -5967,37 +6053,52 @@ public sealed partial class Workspace : ObservableObject
         Application.Current?.Dispatcher.BeginInvoke(new Action(() => _ = FollowUnsentAsync()));
     }
 
-    /// <summary>Сколько строка ждёт свой пропавший файл: архив удалили перед пересборкой — через секунды он снова на месте.</summary>
-    private static readonly TimeSpan MissingGrace = TimeSpan.FromMinutes(1);
+    /// <summary>
+    /// Сколько строка ждёт свой пропавший файл. Архив, удалённый перед пересборкой, возвращается за секунды,
+    /// а отключённый диск или папка, которую ещё тянет Dropbox, — за часы.
+    /// </summary>
+    private static readonly TimeSpan MissingGrace = TimeSpan.FromDays(1);
 
-    /// <summary>Строки, чьих файлов сейчас нет на диске, и с какого времени.</summary>
-    private readonly Dictionary<TransferItem, DateTime> _missingSince = new();
+    /// <summary>Строки, чьих файлов сейчас нет на диске; с какого времени — в самой строке.</summary>
+    private readonly HashSet<TransferItem> _missing = new();
 
     private System.Windows.Threading.DispatcherTimer? _missingTimer;
 
     /// <summary>
-    /// Строки, чьих файлов и папок на диске больше нет, уходят из списка не сразу, а через минуту:
-    /// файл, удалённый перед пересборкой, появляется снова, и строка остаётся сама. Не появился —
-    /// строка убирается: копировать нечего, а висящая с прочерками только путает.
+    /// Строки, чьих файлов и папок на диске нет, не уходят из списка сразу: строка тусклая и не копируется,
+    /// файл появился — она снова обычная, на своём месте и с прежней галочкой. Не появился за сутки —
+    /// строка убирается сама, с записью в журнал.
     /// </summary>
     private void DropMissing(IEnumerable<TransferItem> candidates)
     {
         var now = DateTime.UtcNow;
+        var marked = false;
 
-        foreach (var item in candidates.Where(i => !i.ExistsOnDisk && AllItems.Contains(i)))
+        foreach (var item in candidates.Where(i => !i.ExistsOnDisk && AllItems.Contains(i)).ToList())
         {
-            if (_missingSince.TryAdd(item, now))
+            _missing.Add(item);
+
+            if (item.MissingSince is null)
             {
-                item.GoneIn = (int)MissingGrace.TotalSeconds;
+                item.MissingSince = now;
+                marked = true;
             }
         }
 
-        // раз в секунду: на месте галочки идёт отсчёт до ухода строки
-        if (_missingSince.Count > 0 && _missingTimer is null)
+        // время пропажи — в файл вкладки: перезапуск не должен начинать срок заново
+        if (marked)
         {
+            RaiseCopyInfo();
+            Save();
+        }
+
+        if (_missing.Count > 0 && _missingTimer is null)
+        {
+            // раз в секунду: в столбце даты идёт отсчёт до ухода строки
             _missingTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _missingTimer.Tick += (_, _) => CheckMissing();
             _missingTimer.Start();
+            CheckMissing();
         }
     }
 
@@ -6006,19 +6107,23 @@ public sealed partial class Workspace : ObservableObject
         var now = DateTime.UtcNow;
         var back = false;
 
-        foreach (var item in _missingSince.Keys.ToList())
+        foreach (var item in _missing.ToList())
         {
             if (!AllItems.Contains(item))
             {
-                _missingSince.Remove(item);
-                item.GoneIn = null;
+                _missing.Remove(item);
+                item.GoneLeft = null;
             }
             else if (item.ExistsOnDisk)
             {
                 // файл вернулся: за удалённой папкой наблюдатель умер вместе с ней — заводим заново
-                _missingSince.Remove(item);
-                item.GoneIn = null;
+                _missing.Remove(item);
+                item.MissingSince = null;
+                item.GoneLeft = null;
                 back = true;
+
+                // строка из файла вкладки, поднятая без пути: теперь видно, файл это или папка
+                item.DetectKind();
 
                 if (_watchers.Remove(item, out var dead))
                 {
@@ -6028,19 +6133,20 @@ public sealed partial class Workspace : ObservableObject
             }
         }
 
-        foreach (var (item, since) in _missingSince)
+        foreach (var item in _missing)
         {
-            item.GoneIn = Math.Max(0, (int)Math.Ceiling((MissingGrace - (now - since)).TotalSeconds));
+            var left = MissingGrace - (now - (item.MissingSince ?? now));
+            item.GoneLeft = left > TimeSpan.Zero ? TimeSpan.FromSeconds(Math.Ceiling(left.TotalSeconds)) : TimeSpan.Zero;
         }
 
-        var gone = _missingSince.Where(p => now - p.Value >= MissingGrace).Select(p => p.Key).ToList();
+        var gone = _missing.Where(i => now - (i.MissingSince ?? now) >= MissingGrace).ToList();
 
         foreach (var item in gone)
         {
-            _missingSince.Remove(item);
+            _missing.Remove(item);
         }
 
-        if (_missingSince.Count == 0 && _missingTimer is not null)
+        if (_missing.Count == 0 && _missingTimer is not null)
         {
             _missingTimer.Stop();
             _missingTimer = null;
@@ -6048,6 +6154,8 @@ public sealed partial class Workspace : ObservableObject
 
         if (back)
         {
+            RaiseCopyInfo();
+            Save();
             _ = RefreshItemsInfoAsync();
         }
 
@@ -6057,11 +6165,11 @@ public sealed partial class Workspace : ObservableObject
         }
 
         RemoveItems(gone);
-        ReportMissing(gone.Select(i => (i.FullPath, (bool?)i.IsDirectory)).ToList(), atStart: false);
+        ReportMissing(gone.Select(i => (i.FullPath, i.KindKnown ? (bool?)i.IsDirectory : null)).ToList());
     }
 
-    /// <summary>Пропавшее при открытии вкладки: пишется, когда вкладки загружены и терминалу есть куда лечь.</summary>
-    private List<(string Path, bool? IsDirectory)>? _missingAtStart;
+    /// <summary>Строки без файла при открытии вкладки: встают на отсчёт, когда вкладки загружены и терминалу есть куда лечь.</summary>
+    private List<TransferItem>? _missingAtStart;
 
     private System.Windows.Threading.DispatcherTimer? _missingAtStartTimer;
 
@@ -6070,8 +6178,7 @@ public sealed partial class Workspace : ObservableObject
     /// на всё событие, сколько бы ни ушло. До пяти — имена в самой строке, больше — только число; полный
     /// список путей — в выводе строки.
     /// </summary>
-    /// <param name="atStart">Удалили, пока программа была закрыта: заметили при открытии вкладки.</param>
-    private void ReportMissing(IReadOnlyList<(string Path, bool? IsDirectory)> gone, bool atStart)
+    private void ReportMissing(IReadOnlyList<(string Path, bool? IsDirectory)> gone)
     {
         if (gone.Count == 0)
         {
@@ -6082,13 +6189,11 @@ public sealed partial class Workspace : ObservableObject
             ? string.Join(", ", gone.Select(g => Path.GetFileName(g.Path.TrimEnd(Path.DirectorySeparatorChar)) is { Length: > 0 } name ? name : g.Path))
             : $"{gone.Count} {Plural(gone.Count, "объект", "объекта", "объектов")}";
 
-        var summary = (atStart ? "Убрано из списка при открытии — нет на диске: " : "Убрано из списка — нет на диске: ") + what;
+        var summary = "Убрано из списка — нет на диске: " + what;
 
         var details = new List<string>
         {
-            atStart
-                ? "Удалено с диска, пока программа была закрыта."
-                : $"Пропало с диска и не вернулось за {(int)MissingGrace.TotalSeconds} с.",
+            "Нет на диске и не появилось за сутки.",
         };
 
         details.AddRange(gone.Select(g => g.IsDirectory switch
@@ -6109,7 +6214,10 @@ public sealed partial class Workspace : ObservableObject
             _ => many,
         };
 
-    /// <summary>Пропавшее при открытии — в журнал, как только вкладки загружены (до этого строке некуда лечь).</summary>
+    /// <summary>
+    /// Строки без файла при открытии — на минутный отсчёт, как только вкладки загружены: уход строки пишется
+    /// в журнал, а до загрузки ему некуда лечь (терминал читается из файла позже и затёр бы строку).
+    /// </summary>
     private void ReportMissingAtStart()
     {
         if (_missingAtStart is not { Count: > 0 } || _missingAtStartTimer is not null)
@@ -6129,13 +6237,14 @@ public sealed partial class Workspace : ObservableObject
             _missingAtStartTimer.Stop();
             _missingAtStartTimer = null;
 
-            var gone = _missingAtStart;
+            var gone = _missingAtStart ?? [];
             _missingAtStart = null;
 
-            // вкладка, поднятая только для памяти отмены, в лентах не стоит — её терминал никто не видит
+            // вкладка, поднятая только для памяти отмены, в лентах не стоит — за её файлами никто не следит,
+            // её строки остаются как есть до возврата вкладки
             if (AppState.Current.LiveTab(Id) is not null)
             {
-                ReportMissing(gone ?? [], atStart: true);
+                DropMissing(gone);
             }
         };
         _missingAtStartTimer.Start();
@@ -6201,6 +6310,12 @@ public sealed partial class Workspace : ObservableObject
 
             RaiseSelectionInfo();
             Save();
+
+            // «Незалитое» считается по отмеченным серверам: сняли или отметили сервер — галочки строк пересчитываются
+            if (sender is ServerCheck copyCheck && CopyServers.Contains(copyCheck))
+            {
+                _ = FollowUnsentAsync();
+            }
         }
     }
 

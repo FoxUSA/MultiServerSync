@@ -10,6 +10,9 @@ public sealed class SavedTransferItem
     public bool IsSelected { get; set; } = true;
 
     public RowMemory? Smart { get; set; }
+
+    /// <summary>С какого времени (UTC) файла нет на диске; null — на месте.</summary>
+    public DateTime? MissingSince { get; set; }
 }
 
 /// <summary>Окно «Копирования» или «Скачивания» в файле вкладки: свой список, путь или папка, параметры.</summary>
@@ -97,8 +100,8 @@ public sealed class MonitorWindowState
 
 public sealed class AppSettings
 {
-    /// <summary>Light | Dark | System</summary>
-    public string Theme { get; set; } = "Dark";
+    /// <summary>Light | Dark | System. Новая установка — как в Windows; у кого настройка уже сохранена, остаётся своя.</summary>
+    public string Theme { get; set; } = "System";
 
     /// <summary>Сколько серверов обрабатывать одновременно.</summary>
     public int MaxParallel { get; set; } = 8;
@@ -382,6 +385,15 @@ public sealed class AppSettings
     /// Закрыл окно сам — его записи нет.
     /// </summary>
     public List<MonitorWindowState> MonitorWindows { get; set; } = new();
+
+    /// <summary>
+    /// Сигналы «Мониторинга»: «id сервера:раздел» (cpu, mem, disk). Раздел покраснел — звук, окно сервера вперёд.
+    /// По умолчанию пусто — у всех выключено.
+    /// </summary>
+    public List<string> MonitorAlerts { get; set; } = new();
+
+    /// <summary>«Мониторинг»: какое хранилище показывает «Диск» — id сервера → раздел («/», «/jffs», «/tmp/mnt/ENTWARE»).</summary>
+    public Dictionary<string, string> MonitorDisks { get; set; } = new();
 
     public void PushHistory(ObservableCollection<string> list, string value, int limit = 25)
     {

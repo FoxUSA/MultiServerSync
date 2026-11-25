@@ -51,23 +51,23 @@
       <Setter Property="FontWeight" Value="SemiBold" />
       <Setter Property="Cursor" Value="Hand" />
       <Setter Property="Focusable" Value="False" />
-      <Setter Property="Foreground" Value="#241503" />
+      <Setter Property="Foreground" Value="{DynamicResource Pick.OnSolid}" />
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
             <Border
               x:Name="Bd"
               Padding="{TemplateBinding Padding}"
-              Background="#E07A1F"
+              Background="{DynamicResource Pick.Solid}"
               CornerRadius="4">
               <ContentPresenter VerticalAlignment="Center" TextBlock.Foreground="{TemplateBinding Foreground}" />
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="#EB8A33" />
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Pick.SolidHover}" />
               </Trigger>
               <Trigger Property="IsPressed" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="#C96A14" />
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Pick.SolidPressed}" />
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -160,8 +160,8 @@
       Height="30"
       Margin="0,4,0,0"
       Padding="10,0,3,0"
-      Background="#26E07A1F"
-      BorderBrush="#80E07A1F"
+      Background="{DynamicResource Pick.Fill}"
+      BorderBrush="{DynamicResource Pick.Stroke}"
       BorderThickness="1"
       CornerRadius="4"
       Visibility="Collapsed">
@@ -172,7 +172,7 @@
           VerticalAlignment="Center"
           DockPanel.Dock="Left"
           FontSize="16"
-          Foreground="#E07A1F"
+          Foreground="{DynamicResource Pick.Text}"
           Symbol="Warning24" />
         <Button
           x:Name="InstallButton"

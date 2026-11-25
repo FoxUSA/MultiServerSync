@@ -65,8 +65,8 @@
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="#C42B1C" />
-                <Setter TargetName="Glyph" Property="Foreground" Value="White" />
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Danger.Fill}" />
+                <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource Danger.OnFill}" />
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -80,6 +80,52 @@
       BasedOn="{StaticResource FirstColumnCellStyle}"
       TargetType="DataGridCell">
       <Setter Property="Padding" Value="0" />
+    </Style>
+
+    <!--  столбец стопа у правого края: слева черту даёт «Статус», справа — рамка таблицы.
+          Свои черты здесь ложились рядом с ними и граница двоилась (23.11)  -->
+    <Style
+      x:Key="LastIconCellStyle"
+      BasedOn="{StaticResource AppDataGridCellStyle}"
+      TargetType="DataGridCell">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="DataGridCell">
+            <Border
+              Padding="{TemplateBinding Padding}"
+              Background="{TemplateBinding Background}"
+              BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+              BorderThickness="0,0,0,1">
+              <ContentPresenter VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!--  заголовок стопа лежит под кнопкой «в отдельное окно»: черты у него нет,
+          иначе она проходит сквозь кнопку (23.11)  -->
+    <Style
+      x:Key="UnderButtonsHeaderStyle"
+      BasedOn="{StaticResource AppColumnHeaderStyle}"
+      TargetType="DataGridColumnHeader">
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="DataGridColumnHeader">
+            <Border
+              Padding="{TemplateBinding Padding}"
+              Background="{TemplateBinding Background}"
+              BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+              BorderThickness="0">
+              <ContentPresenter
+                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                RecognizesAccessKey="True" />
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
   </UserControl.Resources>
 
@@ -366,7 +412,7 @@
               Header="Прошло">
               <DataGridTextColumn.ElementStyle>
                 <Style TargetType="TextBlock">
-                  <Setter Property="ToolTip" Value="Сколько времени назад сервер закончил, чч:мм:сс" />
+                  <Setter Property="ToolTip" Value="Сколько времени назад сервер закончил: чч:мм:сс, дальше дни и часы" />
                 </Style>
               </DataGridTextColumn.ElementStyle>
             </DataGridTextColumn>
@@ -398,7 +444,11 @@
             </DataGridTextColumn>
 
             <!--  стоп одной строки: только у ждущих и идущих; общий «Остановить» — всё сразу  -->
-            <DataGridTemplateColumn Width="30" MinWidth="30" CellStyle="{StaticResource IconCellStyle}">
+            <DataGridTemplateColumn
+              Width="36"
+              MinWidth="{StaticResource IconButtonSize}"
+              CellStyle="{StaticResource LastIconCellStyle}"
+              HeaderStyle="{StaticResource UnderButtonsHeaderStyle}">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate>
                   <Button
@@ -424,9 +474,9 @@
           Visibility="Collapsed" />
 
         <!--  кнопки в шапке таблицы, как над выводом справа: поверх правого края заголовков  -->
+        <!--  без отступа справа: кнопка окна стоит ровно над столбцом стопа той же ширины  -->
         <StackPanel
           Height="{StaticResource IconButtonSize}"
-          Margin="0,0,8,0"
           HorizontalAlignment="Right"
           VerticalAlignment="Top"
           Orientation="Horizontal">
@@ -485,7 +535,7 @@
           <Border
             Grid.Row="0"
             Height="{StaticResource IconButtonSize}"
-            Background="{DynamicResource ControlFillColorDefaultBrush}"
+            Background="{DynamicResource Table.Header.Fill}"
             BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
             BorderThickness="0,0,0,1"
             CornerRadius="3,3,0,0">
@@ -494,7 +544,7 @@
                   Копирование этого вывода переехало в строку кнопок над таблицей  -->
             <Border
               Padding="8,0"
-              Background="{DynamicResource ControlFillColorDefaultBrush}"
+              Background="{DynamicResource Table.Header.Fill}"
               CornerRadius="3,3,0,0">
               <Grid>
                 <Grid.ColumnDefinitions>

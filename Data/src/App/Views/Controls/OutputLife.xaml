@@ -79,8 +79,8 @@
           <Style.Triggers>
             <DataTrigger Binding="{Binding LifeExpired}" Value="True">
               <!--  приглушённо: уведомление не тревожное  -->
-              <Setter Property="Background" Value="#38E07A1F" />
-              <Setter Property="BorderBrush" Value="#80E07A1F" />
+              <Setter Property="Background" Value="{DynamicResource Pick.FillStrong}" />
+              <Setter Property="BorderBrush" Value="{DynamicResource Pick.Stroke}" />
               <Setter Property="ToolTip" Value="Следующий запуск начнёт журнал заново. Задайте срок заново — отсчёт пойдёт снова" />
             </DataTrigger>
           </Style.Triggers>

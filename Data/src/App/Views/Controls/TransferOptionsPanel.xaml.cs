@@ -129,14 +129,15 @@ public partial class TransferOptionsPanel : UserControl
             : (download ? "нескачанные" : "незалитые");
 
         UnsentSwitch.IsChecked = held;
-        UnsentSwitch.Style = (Style)Resources[stale ? "UnsentStaleSwitchStyle" : none ? "UnsentNoneSwitchStyle" : "UnsentSwitchStyle"];
+        // стиль — из темы, ссылкой: при смене темы свитч перекрашивается сам
+        UnsentSwitch.SetResourceReference(StyleProperty, stale ? "UnsentStaleSwitchStyle" : none ? "UnsentNoneSwitchStyle" : "UnsentSwitchStyle");
         UnsentText.Text = none
             ? (download ? "Нескачанных нет" : "Незалитых нет")
             : (held ? "Отмечены " : "Отмечать ") + what;
 
         if (stale)
         {
-            UnsentText.Foreground = (Brush)Resources["UnsentStaleTextBrush"];
+            UnsentText.SetResourceReference(TextBlock.ForegroundProperty, "Unsent.StaleText");
         }
         else
         {

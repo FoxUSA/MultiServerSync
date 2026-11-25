@@ -456,7 +456,48 @@ public static class CopyWindowLayout
                 FlowDirection.LeftToRight, face, 11, Brushes.Black, null, TextFormattingMode.Display, dpi);
 
             // поля шапки 8+8, граница 1, стрелка сортировки 6+8
-            column.MinWidth = Math.Ceiling(text.WidthIncludingTrailingWhitespace) + 31;
+            HeaderWidths[column] = Math.Ceiling(text.WidthIncludingTrailingWhitespace) + 31;
+        }
+
+        ContentFloor(grid);
+    }
+
+    /// <summary>Ширина заголовка каждого столбца «по содержимому» — нижняя граница, ниже которой не ужимать.</summary>
+    private static readonly Dictionary<DataGridColumn, double> HeaderWidths = new();
+
+    /// <summary>
+    /// WPF мерит столбец «по содержимому» только по строкам на виду: окна свёрнуты — строк нет, столбцы
+    /// сжимаются до заголовков, и при раскрытии окна всё съезжает. Нижняя граница — самое длинное значение
+    /// среди всех строк, и свёрнутых тоже (23.11, пользователь: «читай значение сквозь свёрнутые разделы»).
+    /// </summary>
+    private static void ContentFloor(DataGrid grid)
+    {
+        var face = new Typeface(grid.FontFamily, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+        var dpi = VisualTreeHelper.GetDpi(grid).PixelsPerDip;
+        var culture = System.Globalization.CultureInfo.CurrentCulture;
+
+        foreach (var column in grid.Columns.Where(c => c.Width.IsAuto))
+        {
+            var floor = HeaderWidths.TryGetValue(column, out var header) ? header : 0;
+
+            if (column is DataGridTextColumn { Binding: Binding { Path.Path: { Length: > 0 } path } })
+            {
+                foreach (var item in grid.Items)
+                {
+                    if (item?.GetType().GetProperty(path)?.GetValue(item) is not { } value || value.ToString() is not { Length: > 0 } text)
+                    {
+                        continue;
+                    }
+
+                    var formatted = new FormattedText(text, culture, FlowDirection.LeftToRight, face, 12, Brushes.Black, null,
+                        TextFormattingMode.Display, dpi);
+
+                    // поля ячейки 8+8, граница 1, запас на округление 1
+                    floor = Math.Max(floor, Math.Ceiling(formatted.WidthIncludingTrailingWhitespace) + 18);
+                }
+            }
+
+            column.MinWidth = Math.Min(floor, column.MaxWidth);
         }
     }
 
@@ -468,6 +509,9 @@ public static class CopyWindowLayout
     /// </summary>
     private static void RefitColumns(DataGrid grid)
     {
+        // строки добавили или убрали — граница по значениям всех строк считается заново
+        ContentFloor(grid);
+
         if (!grid.IsVisible)
         {
             if (WaitingRefit.Add(grid))
@@ -514,11 +558,57 @@ public static class CopyWindowLayout
     /// страница была скрыта (другой раздел, другая вкладка), или сжались столбцы «по содержимому» — и справа от
     /// строк пустая полоса, а путь обрезан. Таблица показалась или сменила размер — остаток считается заново.
     /// </summary>
+    /// <remarks>
+    /// 23.11: встроенный «остаток» (Width="*") при свёрнутых окнах WPF не раздавал вовсе — путь стоял на своём
+    /// минимуме 150 из 1142, и не помогали ни «по содержимому → остаток» с UpdateLayout, ни скрыть-показать
+    /// таблицу. Поэтому ширину пути считает программа сама, в пикселях: видимая ширина минус остальные столбцы.
+    /// </remarks>
     public static void KeepFilled(DataGrid grid)
     {
+        var fill = grid.Columns.Where(c => c.Width.IsStar).ToList();
+
+        if (fill.Count == 0)
+        {
+            return;
+        }
+
+        FillColumns[grid] = fill;
+
+        foreach (var column in fill)
+        {
+            column.Width = new DataGridLength(column.MinWidth);
+        }
+
         grid.SizeChanged += (_, _) => FillLater(grid);
         grid.IsVisibleChanged += (_, _) => FillLater(grid);
+
+        // появилась или пропала вертикальная прокрутка — таблица того же размера, а видимая часть уже другая
+        if (FindChild<ScrollViewer>(grid) is { } scroll)
+        {
+            scroll.ScrollChanged += (_, e) =>
+            {
+                if (e.ViewportWidthChange != 0)
+                {
+                    FillLater(grid);
+                }
+            };
+        }
+
+        // столбец «по содержимому» вырос или сжался, «Размер*» показали или спрятали — остаток другой
+        var actual = System.ComponentModel.DependencyPropertyDescriptor.FromProperty(DataGridColumn.ActualWidthProperty, typeof(DataGridColumn));
+        var shown = System.ComponentModel.DependencyPropertyDescriptor.FromProperty(DataGridColumn.VisibilityProperty, typeof(DataGridColumn));
+
+        foreach (var column in grid.Columns.Except(fill))
+        {
+            actual.AddValueChanged(column, (_, _) => FillLater(grid));
+            shown.AddValueChanged(column, (_, _) => FillLater(grid));
+        }
+
+        FillLater(grid);
     }
+
+    /// <summary>Столбцы, которым отдаётся остаток ширины (путь), — у каждой таблицы свои.</summary>
+    private static readonly Dictionary<DataGrid, List<DataGridColumn>> FillColumns = new();
 
     private static readonly HashSet<DataGrid> WaitingFill = new();
 
@@ -544,34 +634,57 @@ public static class CopyWindowLayout
             return;
         }
 
-        var shown = grid.Columns.Where(c => c.Visibility == Visibility.Visible).ToList();
-        var stars = shown.Where(c => c.Width.IsStar).ToList();
+        // значения строк могли смениться («Обновить» перечитал размеры) — граница по всем строкам заново
+        ContentFloor(grid);
 
-        if (stars.Count == 0)
+        if (!FillColumns.TryGetValue(grid, out var fill))
         {
             return;
         }
 
-        var total = shown.Sum(c => c.ActualWidth);
-        var gap = scroll.ViewportWidth - total;
+        var shownFill = fill.Where(c => c.Visibility == Visibility.Visible).ToList();
 
-        // сошлось — трогать нечего; столбцы шире таблицы из-за наименьшей ширины пути — тоже не наш случай
-        if (Math.Abs(gap) <= 1 || (gap < 0 && stars.All(c => c.ActualWidth <= c.MinWidth + 0.5)))
+        if (shownFill.Count == 0)
         {
             return;
         }
 
-        // в лог: если полоса появится снова, по этой строке видно, когда и на сколько разошлось
-        AppLog.Debug($"Таблица: столбец пути пересчитан — столбцы {total:0}, видно {scroll.ViewportWidth:0}, разница {gap:0}");
+        var others = grid.Columns.Where(c => c.Visibility == Visibility.Visible && !fill.Contains(c)).Sum(c => c.ActualWidth);
+        var share = Math.Floor((scroll.ViewportWidth - others) / shownFill.Count);
 
-        foreach (var column in stars)
+        foreach (var column in shownFill)
         {
-            var share = column.Width.Value;
+            var width = Math.Max(column.MinWidth, share);
 
-            // то же значение свойство не заметило бы: через «по содержимому» остаток делится заново
-            column.Width = DataGridLength.Auto;
-            column.Width = new DataGridLength(share, DataGridLengthUnitType.Star);
+            // то же значение не ставится заново — иначе лишняя разметка на каждый вызов
+            if (!column.Width.IsAbsolute || Math.Abs(column.Width.Value - width) > 0.5)
+            {
+                column.Width = new DataGridLength(width);
+            }
         }
+
+        // проверка после разметки: если не сошлось и так — в логе видно, какой столбец сколько занял
+        grid.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            var total = grid.Columns.Where(c => c.Visibility == Visibility.Visible).Sum(c => c.ActualWidth);
+
+            if (grid.IsVisible && total < scroll.ViewportWidth - 1)
+            {
+                LogColumns(grid, scroll, "не дотянулась до края");
+            }
+        }), DispatcherPriority.ContextIdle);
+    }
+
+    /// <summary>Каждый видимый столбец в лог: заданная ширина, фактическая, наименьшая.</summary>
+    private static void LogColumns(DataGrid grid, ScrollViewer scroll, string when)
+    {
+        var columns = string.Join(" | ", grid.Columns
+            .Where(c => c.Visibility == Visibility.Visible)
+            .Select(c => $"{(c.Header as string ?? "☐")}: {c.Width} факт {c.ActualWidth:0} мин {c.MinWidth:0} показ {c.Width.DisplayValue:0}"));
+        var headers = FindChild<System.Windows.Controls.Primitives.DataGridColumnHeadersPresenter>(grid);
+
+        AppLog.Debug($"Таблица {when}: таблица {grid.ActualWidth:0}, видно {scroll.ViewportWidth:0} (скролл «{scroll.Name}»), "
+            + $"шапка {headers?.ActualWidth ?? -1:0}, отступ ячеек {grid.CellsPanelHorizontalOffset:0}, строк {grid.Items.Count} · {columns}");
     }
 
     /// <summary>Нижняя полоса страницы открывается такой, какой её оставили.</summary>

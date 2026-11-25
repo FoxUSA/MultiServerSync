@@ -13,20 +13,7 @@
 
   <BooleanToVisibilityConverter x:Key="WindowBoolToVis" />
 
-  <!--  Строку свитч «Отмечать незалитые» нашёл незалитой — квадрат как у пустой галочки, галочка и рамка зелёные.
-        Кисти — те, что шаблон галочки WPF UI берёт в отмеченном виде; ставит шаблон ячейки по IsUnsent строки  -->
-  <Style
-    x:Key="UnsentCheckStyle"
-    BasedOn="{StaticResource {x:Type CheckBox}}"
-    TargetType="CheckBox">
-    <Style.Resources>
-      <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillChecked" Color="{DynamicResource ControlAltFillColorSecondary}" />
-      <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillCheckedPointerOver" Color="{DynamicResource ControlAltFillColorTertiary}" />
-      <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillCheckedPressed" Color="{DynamicResource ControlAltFillColorQuarternary}" />
-      <SolidColorBrush x:Key="CheckBoxCheckBorderBrush" Color="#3DB85E" />
-      <SolidColorBrush x:Key="CheckBoxCheckGlyphForeground" Color="#3DB85E" />
-    </Style.Resources>
-  </Style>
+  <!--  UnsentCheckStyle (зелёная галочка незалитой строки) — стиль темы: Themes\Dark и Themes\Light, Palette.xaml  -->
 
   <!--  Номер окна — как кнопка, без оранжевого. Окно в фокусе — оба его номера (на разделителе и в строке пути)
         на тусклой оранжевой плашке; встало на суммах — красная рамка. Окно в Tag  -->
@@ -60,17 +47,17 @@
       </Trigger>
       <!--  после наведения: у окна в фокусе плашка оранжевая и под мышью  -->
       <DataTrigger Binding="{Binding Tag.IsFocused, RelativeSource={RelativeSource Self}}" Value="True">
-        <Setter Property="Background" Value="#26E07A1F" />
-        <Setter Property="BorderBrush" Value="#80E07A1F" />
+        <Setter Property="Background" Value="{DynamicResource Pick.Fill}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Pick.Stroke}" />
         <Setter Property="Cursor" Value="Arrow" />
         <Setter Property="ToolTip" Value="Это окно в фокусе: кнопки сверху, сводка и параметры — для него" />
       </DataTrigger>
       <!--  свитч «Отмечать незалитые» нашёл в окне незалитое — только рамка зелёная, и у окна в фокусе тоже  -->
       <DataTrigger Binding="{Binding Tag.HasUnsent, RelativeSource={RelativeSource Self}}" Value="True">
-        <Setter Property="BorderBrush" Value="#3DB85E" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Unsent.Ring}" />
       </DataTrigger>
       <DataTrigger Binding="{Binding Tag.IsFailed, RelativeSource={RelativeSource Self}}" Value="True">
-        <Setter Property="BorderBrush" Value="#E85C5C" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Bad.Ring}" />
       </DataTrigger>
     </Style.Triggers>
   </Style>
@@ -89,7 +76,7 @@
               x:Name="Divider"
               Height="26"
               Margin="0,4,0,0"
-              Background="{DynamicResource ControlFillColorDefaultBrush}"
+              Background="{DynamicResource Table.Band.Fill}"
               Cursor="Hand"
               ToolTip="Щелчок — свернуть строки окна и перейти в него. Двойной по адресу — «Обзор»">
               <!--  номер, название и черта — общей ширины у всех окон (Grid.IsSharedSizeScope у таблицы):
@@ -267,4 +254,22 @@
     x:Key="WindowRowSelector"
     Empty="{StaticResource EmptyWindowRowStyle}"
     Row="{StaticResource AppDataGridRowStyle}" />
+
+  <!--  Строка «Копирования», чьего файла сейчас нет на диске: тусклая и не копируется, файл вернулся — снова обычная  -->
+  <Style
+    x:Key="CopyItemRowStyle"
+    BasedOn="{StaticResource AppDataGridRowStyle}"
+    TargetType="DataGridRow">
+    <Style.Triggers>
+      <DataTrigger Binding="{Binding IsGone}" Value="True">
+        <Setter Property="Opacity" Value="0.4" />
+        <Setter Property="ToolTip" Value="Нет на диске — не копируется. Появится — строка оживёт, не появится за сутки — уйдёт из списка." />
+      </DataTrigger>
+    </Style.Triggers>
+  </Style>
+
+  <controls:WindowRowStyleSelector
+    x:Key="CopyItemRowSelector"
+    Empty="{StaticResource EmptyWindowRowStyle}"
+    Row="{StaticResource CopyItemRowStyle}" />
 </ResourceDictionary>

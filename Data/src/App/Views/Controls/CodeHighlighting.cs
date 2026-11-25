@@ -82,16 +82,19 @@ public static class CodeHighlighting
         };
     }
 
-    /// <summary>Цвета всех описаний — под текущую тему. Зовётся при каждом открытии редактора.</summary>
-    public static void ApplyTheme(bool dark)
+    /// <summary>Цвета всех описаний — под текущую тему. Зовётся при открытии редактора и при смене темы.</summary>
+    public static void ApplyTheme()
     {
         Load();
+
+        // насколько осветлять безымянные: доля из темы, 0 — как есть
+        var lift = System.Windows.Application.Current?.TryFindResource("Code.UnnamedLift") is double value ? value : 0;
 
         foreach (var definition in HighlightingManager.Instance.HighlightingDefinitions)
         {
             foreach (var color in Colors(definition))
             {
-                Paint(color, dark);
+                Paint(color, lift);
             }
         }
     }
@@ -168,7 +171,7 @@ public static class CodeHighlighting
         }
     }
 
-    private static void Paint(HighlightingColor color, bool dark)
+    private static void Paint(HighlightingColor color, double lift)
     {
         if (color.IsFrozen)
         {
@@ -183,8 +186,8 @@ public static class CodeHighlighting
 
         var role = Role(color.Name);
         var value = role is null
-            ? original is { } own && dark ? Lighten(own) : original
-            : Palette(role, dark);
+            ? original is { } own ? Lighten(own, lift) : original
+            : Palette(role);
 
         color.Foreground = value is { } c ? new SimpleHighlightingBrush(c) : null;
     }
@@ -220,50 +223,37 @@ public static class CodeHighlighting
         };
     }
 
-    /// <summary>Тёмная — как Dark+, светлая — как Light+ в VS Code.</summary>
-    private static Color? Palette(string role, bool dark) => (role, dark) switch
+    /// <summary>Цвет роли — из темы (Themes\…\Editor.xaml): тёмная как Dark+, светлая как Light+ в VS Code.</summary>
+    private static Color? Palette(string role) => role switch
     {
-        ("comment", true) => Hex(0x6A9955),
-        ("comment", false) => Hex(0x008000),
-        ("string", true) => Hex(0xCE9178),
-        ("string", false) => Hex(0xA31515),
-        ("number", true) => Hex(0xB5CEA8),
-        ("number", false) => Hex(0x098658),
-        ("constant" or "keyword", true) => Hex(0x569CD6),
-        ("constant" or "keyword", false) => Hex(0x0000FF),
-        ("control", true) => Hex(0xC586C0),
-        ("control", false) => Hex(0xAF00DB),
-        ("property", true) => Hex(0x9CDCFE),
-        ("property", false) => Hex(0x001080),
-        ("function", true) => Hex(0xDCDCAA),
-        ("function", false) => Hex(0x795E26),
-        ("type", true) => Hex(0x4EC9B0),
-        ("type", false) => Hex(0x267F99),
-        ("heading", true) => Hex(0x4FC1FF),
-        ("heading", false) => Hex(0x0070C1),
-        ("preprocessor", true) => Hex(0x9B9B9B),
-        ("preprocessor", false) => Hex(0x808080),
-        ("added", true) => Hex(0x89D185),
-        ("added", false) => Hex(0x098658),
-        ("removed", true) => Hex(0xF48771),
-        ("removed", false) => Hex(0xA31515),
+        "comment" => Core.AppTheme.Color("Code.Comment"),
+        "string" => Core.AppTheme.Color("Code.String"),
+        "number" => Core.AppTheme.Color("Code.Number"),
+        "constant" => Core.AppTheme.Color("Code.Constant"),
+        "keyword" => Core.AppTheme.Color("Code.Keyword"),
+        "control" => Core.AppTheme.Color("Code.Control"),
+        "property" => Core.AppTheme.Color("Code.Property"),
+        "function" => Core.AppTheme.Color("Code.Function"),
+        "type" => Core.AppTheme.Color("Code.Type"),
+        "heading" => Core.AppTheme.Color("Code.Heading"),
+        "preprocessor" => Core.AppTheme.Color("Code.Preprocessor"),
+        "added" => Core.AppTheme.Color("Code.Added"),
+        "removed" => Core.AppTheme.Color("Code.Removed"),
         _ => null, // знаки препинания — цветом текста
     };
 
-    private static Color Hex(int rgb) => Color.FromRgb((byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
-
-    /// <summary>Тёмный цвет из светлой темы — посветлее, оттенок тот же.</summary>
-    private static Color Lighten(Color c)
+    /// <summary>Цвет описания, рассчитанный на белый фон, — посветлее на долю <paramref name="lift"/>, оттенок тот же.</summary>
+    private static Color Lighten(Color c, double lift)
     {
         var max = Math.Max(c.R, Math.Max(c.G, c.B));
 
-        if (max >= 170)
+        if (lift <= 0 || max >= 170)
         {
             return c;
         }
 
         // подтягиваем к белому, сохраняя соотношение каналов
-        static byte Up(byte v) => (byte)(v + (255 - v) * 0.55);
+        byte Up(byte v) => (byte)(v + (255 - v) * lift);
         return Color.FromRgb(Up(c.R), Up(c.G), Up(c.B));
     }
 }

@@ -37,6 +37,15 @@ internal sealed class DragGhost
         // число — кружком, как у проводника при нескольких файлах
         if (count > 1)
         {
+            var number = new TextBlock
+            {
+                Text = count.ToString(),
+                FontSize = 11,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            number.SetResourceReference(TextBlock.ForegroundProperty, "Accent.OnFill");
+
             var badge = new Border
             {
                 MinWidth = 18,
@@ -44,14 +53,7 @@ internal sealed class DragGhost
                 Margin = new Thickness(8, 0, 0, 0),
                 Padding = new Thickness(5, 0, 5, 0),
                 CornerRadius = new CornerRadius(9),
-                Child = new TextBlock
-                {
-                    Text = count.ToString(),
-                    FontSize = 11,
-                    Foreground = Brushes.White,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center,
-                },
+                Child = number,
             };
             badge.SetResourceReference(Border.BackgroundProperty, "AccentFillColorDefaultBrush");
             head.Children.Add(badge);
@@ -107,21 +109,12 @@ internal sealed class DragGhost
 
         if (refused)
         {
-            _action.Foreground = Refused;
+            _action.SetResourceReference(TextBlock.ForegroundProperty, "Pick.Text");
         }
         else
         {
             _action.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
         }
-    }
-
-    private static readonly Brush Refused = Frozen(Color.FromRgb(0xE0, 0x7A, 0x1F));
-
-    private static Brush Frozen(Color color)
-    {
-        var brush = new SolidColorBrush(color);
-        brush.Freeze();
-        return brush;
     }
 
     /// <summary>Правее и ниже курсора — чтобы не закрывать строку, на которую бросают.</summary>

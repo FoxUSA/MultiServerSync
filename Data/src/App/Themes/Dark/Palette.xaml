@@ -1,0 +1,174 @@
+﻿<!--
+  ТЁМНАЯ ТЕМА — основной набор. Значения выверены пользователем: менять только по его слову.
+  Светлая тема живёт отдельно, в Themes\Light, с теми же именами; правка здесь её не задевает.
+  Стандарт цветов — .dev\THEME-STANDARD.md. Новое имя заводится сразу в обеих папках (сборка это проверяет).
+-->
+<ResourceDictionary
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+
+  <!--  Pick — оранжевая плашка «выбрано / в фокусе / внимание»: сервер, номер окна, отмеченный сервер, плашки-подсказки  -->
+  <SolidColorBrush x:Key="Pick.Fill" Color="#26E07A1F" />
+  <SolidColorBrush x:Key="Pick.FillHover" Color="#38E07A1F" />
+  <SolidColorBrush x:Key="Pick.FillStrong" Color="#38E07A1F" />
+  <SolidColorBrush x:Key="Pick.FillPressed" Color="#4AE07A1F" />
+  <SolidColorBrush x:Key="Pick.FillFaint" Color="#14E07A1F" />
+  <SolidColorBrush x:Key="Pick.Stroke" Color="#80E07A1F" />
+  <SolidColorBrush x:Key="Pick.StrokeStrong" Color="#A0E07A1F" />
+  <SolidColorBrush x:Key="Pick.Ring" Color="#E07A1F" />
+  <SolidColorBrush x:Key="Pick.Text" Color="#E07A1F" />
+  <SolidColorBrush x:Key="Pick.Solid" Color="#E07A1F" />
+  <SolidColorBrush x:Key="Pick.SolidHover" Color="#EB8A33" />
+  <SolidColorBrush x:Key="Pick.SolidPressed" Color="#C96A14" />
+  <SolidColorBrush x:Key="Pick.OnSolid" Color="#241503" />
+  <!--  значок замка на плашке сервера  -->
+  <SolidColorBrush x:Key="Pick.Glyph" Color="#FFFFFFFF" />
+
+  <!--  рамки состояния: вкладка, окно, поле команды  -->
+  <SolidColorBrush x:Key="Ok.Ring" Color="#3FB950" />
+  <SolidColorBrush x:Key="Bad.Ring" Color="#E85C5C" />
+  <SolidColorBrush x:Key="Unsent.Ring" Color="#3DB85E" />
+
+  <!--  цветной текст и значки  -->
+  <SolidColorBrush x:Key="Bad.Text" Color="#E0574A" />
+  <SolidColorBrush x:Key="Ok.TextMuted" Color="#4E9A5B" />
+  <SolidColorBrush x:Key="Warn.Icon" Color="#E8B54A" />
+  <SolidColorBrush x:Key="Unsent.StaleText" Color="#C8645C" />
+
+  <!--  красная заливка под мышью: крестики «закрыть / удалить»  -->
+  <SolidColorBrush x:Key="Danger.Fill" Color="#C42B1C" />
+  <SolidColorBrush x:Key="Danger.FillPressed" Color="#A32417" />
+  <SolidColorBrush x:Key="Danger.OnFill" Color="#FFFFFFFF" />
+  <!--  подпись «×1» на красном свитче  -->
+  <SolidColorBrush x:Key="Danger.SwitchText" Color="#FFFFFFFF" />
+
+  <!--  значок на акцентной заливке под мышью: карандаш, замок, булавка  -->
+  <SolidColorBrush x:Key="Accent.OnFill" Color="#FFFFFFFF" />
+
+  <!--  синяя заливка кнопки-значка под мышью  -->
+  <SolidColorBrush x:Key="Blue.FillHover" Color="#2F7FD6" />
+  <SolidColorBrush x:Key="Blue.FillPressed" Color="#256BB8" />
+
+  <!--  метка «PS» на ярлыке вкладки  -->
+  <SolidColorBrush x:Key="Badge.Ps.Fill" Color="#E5483B" />
+  <SolidColorBrush x:Key="Badge.Ps.Text" Color="#FFFFFFFF" />
+
+  <!--  исключения: фиолетовый — глобальные, зелёный — свои у вкладки  -->
+  <SolidColorBrush x:Key="Exclude.Global" Color="#6B4FA8" />
+  <SolidColorBrush x:Key="Exclude.Own" Color="#2E7D3E" />
+  <SolidColorBrush x:Key="Exclude.OnBadge" Color="#FFFFFFFF" />
+
+  <!--  строки таблиц: выделение, под мышью, полоса через одну (в тёмной — заливка кнопки библиотеки)  -->
+  <SolidColorBrush x:Key="AppRowSelectedBrush" Color="#554CA6FF" />
+  <SolidColorBrush x:Key="AppRowHoverBrush" Color="#224CA6FF" />
+  <SolidColorBrush x:Key="AppRowAltBrush" Color="#0FFFFFFF" />
+
+  <!--  шапка таблиц и панелей вывода, полоса окна в общей таблице, строка состояния окна
+        (в тёмной — те же значения, что у заливок библиотеки: 6% и 3% белого)  -->
+  <SolidColorBrush x:Key="Table.Header.Fill" Color="#0FFFFFFF" />
+  <SolidColorBrush x:Key="Table.Header.FillHover" Color="#08FFFFFF" />
+  <SolidColorBrush x:Key="Table.Band.Fill" Color="#0FFFFFFF" />
+  <SolidColorBrush x:Key="Bar.Fill" Color="#0FFFFFFF" />
+
+  <!--  черта между заголовками таблиц (в тёмной — цвет фона окна)  -->
+  <SolidColorBrush x:Key="Table.Header.Divider" Color="#FF202020" />
+
+  <!--
+    АКЦЕНТ — свой, не из Windows (23.11: бирюзовый системный — «больничный», близок к зелёному «готово»).
+    Приглушённый стальной синий. Библиотека раскладывает четыре оттенка сама (AppTheme.Accent):
+    в тёмной заливка «Выполнить», свитчей, галочек и текст акцента — Secondary, текст на заливке тёмный.
+  -->
+  <Color x:Key="Accent.System">#4A6FA5</Color>
+  <Color x:Key="Accent.Primary">#6F8FC6</Color>
+  <Color x:Key="Accent.Secondary">#8AA9DB</Color>
+  <Color x:Key="Accent.Tertiary">#A9C1E8</Color>
+
+  <!--  полоса разделов (в тёмной — SubtleFillColorSecondary библиотеки)  -->
+  <SolidColorBrush x:Key="Sections.Bar.Fill" Color="#0FFFFFFF" />
+
+  <!--  тень подсказки  -->
+  <Color x:Key="Tooltip.Shadow.Color">#202020</Color>
+
+  <!--  свитч «Везде» и другие опасные: включён — красным. Тема та же, подменены только кисти включённой
+        заливки; обводки у включённого нет  -->
+  <Style
+    x:Key="DangerSwitchStyle"
+    BasedOn="{StaticResource {x:Type ui:ToggleSwitch}}"
+    TargetType="ui:ToggleSwitch">
+    <Style.Resources>
+      <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#E5483B" />
+      <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#EE5A4D" />
+      <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#C93A2F" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="Transparent" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="Transparent" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="Transparent" />
+    </Style.Resources>
+  </Style>
+
+  <!--  свитч «Незалитые»: включён — зелёным; галочки тронули руками — тускло-красным; незалитых нет — обычный  -->
+  <Style
+    x:Key="UnsentSwitchStyle"
+    BasedOn="{StaticResource {x:Type ui:ToggleSwitch}}"
+    TargetType="ui:ToggleSwitch">
+    <Style.Resources>
+      <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#2E9E4A" />
+      <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#36AE54" />
+      <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#278A40" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="Transparent" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="Transparent" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="Transparent" />
+    </Style.Resources>
+  </Style>
+
+  <Style
+    x:Key="UnsentStaleSwitchStyle"
+    BasedOn="{StaticResource {x:Type ui:ToggleSwitch}}"
+    TargetType="ui:ToggleSwitch">
+    <Style.Resources>
+      <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#A8463E" />
+      <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#B85048" />
+      <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#953C35" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="Transparent" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="Transparent" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="Transparent" />
+    </Style.Resources>
+  </Style>
+
+  <Style
+    x:Key="UnsentNoneSwitchStyle"
+    BasedOn="{StaticResource {x:Type ui:ToggleSwitch}}"
+    TargetType="ui:ToggleSwitch" />
+
+  <!--  свитч «Глобальный фильтр» в окне исключений: включён — фиолетовым, как плашка глобальных  -->
+  <Style
+    x:Key="GlobalSwitchStyle"
+    BasedOn="{StaticResource {x:Type ui:ToggleSwitch}}"
+    TargetType="ui:ToggleSwitch">
+    <Style.Resources>
+      <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#6B4FA8" />
+      <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#7B5FBA" />
+      <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#5E4496" />
+      <!--  своей обводки нет — только заливка  -->
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="Transparent" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="Transparent" />
+      <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="Transparent" />
+    </Style.Resources>
+  </Style>
+
+  <!--  Строку свитч «Отмечать незалитые» нашёл незалитой — квадрат как у пустой галочки, галочка и рамка зелёные.
+        Кисти — те, что шаблон галочки WPF UI берёт в отмеченном виде; ставит шаблон ячейки по IsUnsent строки  -->
+  <Style
+    x:Key="UnsentCheckStyle"
+    BasedOn="{StaticResource {x:Type CheckBox}}"
+    TargetType="CheckBox">
+    <Style.Resources>
+      <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillChecked" Color="{DynamicResource ControlAltFillColorSecondary}" />
+      <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillCheckedPointerOver" Color="{DynamicResource ControlAltFillColorTertiary}" />
+      <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillCheckedPressed" Color="{DynamicResource ControlAltFillColorQuarternary}" />
+      <SolidColorBrush x:Key="CheckBoxCheckBorderBrush" Color="#3DB85E" />
+      <SolidColorBrush x:Key="CheckBoxCheckGlyphForeground" Color="#3DB85E" />
+    </Style.Resources>
+  </Style>
+
+</ResourceDictionary>

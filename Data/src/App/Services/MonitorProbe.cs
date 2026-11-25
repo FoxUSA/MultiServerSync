@@ -4,7 +4,8 @@ using System.Text;
 namespace MultiServerSync.Services;
 
 /// <summary>Постоянное о сервере, что приходит с замером: ядра, интерфейс маршрута, сколько без перезагрузки.</summary>
-public sealed record MonitorInfo(int Cores, string Iface, long UptimeSec);
+/// <param name="Disks">Носители сервера для «Диска» (<see cref="MonitorDisk"/>); пусто — записываемых нет.</param>
+public sealed record MonitorInfo(int Cores, string Iface, long UptimeSec, IReadOnlyList<MonitorDisk> Disks);
 
 /// <summary>
 /// Откуда история: свой сборщик, rudog (Redis), sysstat — или её нет, и почему. Порядок выбора: свой → rudog → sysstat.
@@ -78,7 +79,7 @@ public static class MonitorProbe
         + (first ? "sleep 1\n" + Snapshot : string.Empty)
         // целые диски и их «major:minor» — старый sadf без -p зовёт диск dev8-0
         + "echo '@blk'; for b in /sys/block/*; do [ -e \"$b\" ] && echo \"${b##*/} $(cat \"$b/dev\" 2>/dev/null)\"; done\n"
-        + "echo '@df'; df -Pk / 2>/dev/null\n"
+        + "echo '@df'\n" + DiskCommand
         + "echo '@mon'\n"
         + Detect;
 
@@ -145,14 +146,73 @@ public static class MonitorProbe
         public double Uptime { get; set; }
     }
 
+    /// <summary>
+    /// Носители для «Диска» (разбор — <see cref="MonitorDisks.Parse"/>). Флеш-память роутера: «T размер смещение» по
+    /// разделам MTD (без смещения — весь чип). Диски из /sys/block без виртуальных: «D имя секторы usb тип» (usb — по пути
+    /// устройства или ссылке device; тип — SD/MMC у mmcblk). Подкачка разделом: «W диск КБ». Записываемые разделы из
+    /// mountinfo — без прошивки (squashfs), временных, служебных, слоёв Docker, сетевых (df по ним может зависнуть) и
+    /// спрятанных поздним монтированием, по разу на устройство: «M носитель тип устройство путь» и «S всего занято доступно».
+    /// Носитель — по номеру устройства через /sys/dev/block (раздел → его диск; dm/md — через slaves на физический;
+    /// mtdblock, ubiblock, тома UBI — flash). Только sh и awk busybox. Проверено 24.11 на двух роутерах ASUS.
+    /// </summary>
+    private const string DiskCommand = """
+        dk() {
+          p=$1; n=${p##*/}; r=${p%/*}
+          [ -e "$r/dev" ] && n=${r##*/}
+          s=$(ls "/sys/block/$n/slaves" 2>/dev/null | head -n 1)
+          if [ -n "$s" ]; then
+            q=$(cd "/sys/class/block/$s" 2>/dev/null && pwd -P)
+            [ -n "$q" ] && { dk "$q"; return; }
+          fi
+          case "$n" in mtdblock*|ubiblock*) n=flash ;; esac
+          echo "$n"
+        }
+        for m in /sys/class/mtd/mtd*; do
+          case "${m##*/}" in *ro) continue ;; esac
+          case "$(cat "$m/type" 2>/dev/null)" in nand|nor|mlc-nand|dataflash|rom) echo "T $(cat "$m/size") $(cat "$m/offset" 2>/dev/null)" ;; esac
+        done
+        for b in /sys/block/*; do
+          n=${b##*/}
+          case "$n" in loop*|ram*|zram*|dm-*|md*|mtdblock*|ubiblock*|sr*|fd*|nbd*) continue ;; esac
+          u=0; ls -l "$b" "$b/device" 2>/dev/null | grep -q /usb && u=1
+          echo "D $n $(cat "$b/size" 2>/dev/null) $u $(cat "$b/device/type" 2>/dev/null | grep -E '^(MMC|SD)$')"
+        done
+        awk 'NR > 1 && $2 == "partition" {print $1, $3}' /proc/swaps 2>/dev/null | while read d z; do
+          p=$(cd "/sys/class/block/${d##*/}" 2>/dev/null && pwd -P)
+          [ -n "$p" ] && echo "W $(dk "$p") $z"
+        done
+        awk '{for (i = 7; i <= NF; i++) if ($i == "-") break; n++; mm[n] = $3; m[n] = $5; o[n] = $6; t[n] = $(i + 1); d[n] = $(i + 2); if ($5 == "/overlay") ov = 1}
+        END {
+          for (i = 1; i <= n; i++) {
+            if (o[i] !~ /^rw(,|$)/ || t[i] ~ /^fuse/) continue
+            if (t[i] ~ /^(tmpfs|devtmpfs|proc|sysfs|debugfs|devpts|cgroup|cgroup2|squashfs|ramfs|securityfs|pstore|bpf|tracefs|configfs|fusectl|mqueue|hugetlbfs|autofs|binfmt_misc|efivarfs|nsfs|rpc_pipefs|nfsd|selinuxfs|iso9660|romfs|cramfs|nfs|nfs4|cifs|smb3|9p|ceph)$/) continue
+            if (t[i] == "overlay" && (m[i] != "/" || ov)) continue
+            s = 0
+            for (j = i + 1; j <= n; j++) if (m[j] == m[i] || (m[j] != "/" && index(m[i], m[j] "/") == 1)) { s = 1; break }
+            if (s || k[mm[i]]++) continue
+            print mm[i], t[i], d[i], m[i]
+          }
+        }' /proc/self/mountinfo 2>/dev/null | while read mm t d m; do
+          p=$(cd "/sys/dev/block/$mm" 2>/dev/null && pwd -P)
+          if [ -z "$p" ]; then
+            case "$d" in /dev/*) x=$(readlink "$d" 2>/dev/null); x=${x##*/}; [ -n "$x" ] || x=${d##*/}; p=$(cd "/sys/class/block/$x" 2>/dev/null && pwd -P) ;; esac
+          fi
+          if [ -n "$p" ]; then k=$(dk "$p")
+          else case "$t $d" in ubifs*|jffs2*|yaffs*|*ubi*|*mtd*) k=flash ;; *) k=- ;; esac
+          fi
+          echo "M $k $t $d $m"
+          df -Pk "$m" 2>/dev/null | awk 'NR > 1 {print "S", $2, $3, $4}' | tail -n 1
+        done
+
+        """;
+
     /// <summary>Разобранный ответ команды замера.</summary>
     public sealed class Reading
     {
         public List<Raw> Snapshots { get; } = new();
 
-        public long DiskUsed { get; set; }
-
-        public long DiskTotal { get; set; }
+        /// <summary>Носители для «Диска»: флеш-память роутера, диски, разделы без устройства.</summary>
+        public List<MonitorDisk> Disks { get; set; } = new();
 
         public long UptimeSec { get; set; }
 
@@ -424,20 +484,7 @@ public static class MonitorProbe
         }
     }
 
-    /// <summary>Занято и всего на корневой файловой системе, как df: всего минус свободно (запас root — занятое).</summary>
-    private static void ReadDf(Reading reading, List<string> lines)
-    {
-        foreach (var line in lines)
-        {
-            var f = Fields(line);
-
-            if (f.Length >= 4 && long.TryParse(f[1], out var total) && long.TryParse(f[2], out var used))
-            {
-                reading.DiskTotal = total * 1024;
-                reading.DiskUsed = used * 1024;
-            }
-        }
-    }
+    private static void ReadDf(Reading reading, List<string> lines) => reading.Disks = MonitorDisks.Parse(lines);
 
     private static double Sub(double b, double a) => b < a ? 0 : b - a;
 

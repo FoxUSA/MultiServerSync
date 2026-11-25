@@ -55,10 +55,16 @@ public partial class MonitorWindow : Wpf.Ui.Controls.FluentWindow
             Remember();
         };
 
-        LocationChanged += (_, _) => RememberLater();
+        LocationChanged += (_, _) =>
+        {
+            RememberLater();
+            MonitorAlerts.Touched();
+        };
         SizeChanged += (_, _) => RememberLater();
         StateChanged += (_, _) =>
         {
+            MonitorAlerts.Touched();
+
             // свёрнутое окно помнит, каким было до этого
             if (WindowState != WindowState.Minimized)
             {
@@ -94,7 +100,7 @@ public partial class MonitorWindow : Wpf.Ui.Controls.FluentWindow
 
     private const double DefaultHeight = 600;
 
-    public static void Open(ServerEntry? server, MonitorRange range, Window? from)
+    public static MonitorWindow Open(ServerEntry? server, MonitorRange range, Window? from)
     {
         var sample = from as MonitorWindow;
         var width = sample is not null ? NormalBounds(sample).Width : DefaultWidth;
@@ -114,8 +120,32 @@ public partial class MonitorWindow : Wpf.Ui.Controls.FluentWindow
         AppState.Current.Settings.MonitorWindows.Add(state);
         AppState.Current.SaveSettings();
 
-        ShowNew(server, state);
+        var window = ShowNew(server, state);
         AppLog.Hint(server is null ? "Окно мониторинга открыто — выберите сервер в его шапке." : $"Мониторинг «{server.PaneLabel}» — в отдельном окне.");
+        return window;
+    }
+
+    /// <summary>
+    /// Сработал сигнал: окно этого сервера вперёд (последнее открытое из его окон; свёрнутое — разворачивается),
+    /// нет окна — открывается новое; раздел в нём — в тускло-оранжевой рамке.
+    /// </summary>
+    public static void Alert(ServerEntry server, string key)
+    {
+        var window = Shown.LastOrDefault(w => ReferenceEquals(w._server, server)) ?? Open(server, MonitorRange.Live, null);
+
+        if (window.WindowState == WindowState.Minimized)
+        {
+            window.WindowState = window._maximized ? WindowState.Maximized : WindowState.Normal;
+        }
+
+        window.Show();
+        window.Activate();
+
+        // Windows не всегда отдаёт фокус фоновой программе — поверх всех на миг, и окно выше остальных
+        window.Topmost = true;
+        window.Topmost = false;
+
+        window.View.Light(key);
     }
 
     /// <summary>
@@ -146,7 +176,7 @@ public partial class MonitorWindow : Wpf.Ui.Controls.FluentWindow
         }
     }
 
-    private static void ShowNew(ServerEntry? server, MonitorWindowState state)
+    private static MonitorWindow ShowNew(ServerEntry? server, MonitorWindowState state)
     {
         var window = new MonitorWindow(server, state);
         var area = SystemParameters.WorkArea;
@@ -185,6 +215,7 @@ public partial class MonitorWindow : Wpf.Ui.Controls.FluentWindow
         }
 
         MarkServers();
+        return window;
     }
 
     /// <summary>Заголовок окна в этом месте попадает на какой-нибудь из мониторов — так же проверяет главное окно.</summary>
@@ -408,6 +439,7 @@ public partial class MonitorWindow : Wpf.Ui.Controls.FluentWindow
     private void OnClosing(object? sender, CancelEventArgs e)
     {
         _saveLater.Stop();
+        MonitorAlerts.Touched();
 
         // выход из программы — не возврат в главное окно: окно откроется при следующем запуске там же
         if (App.Quitting)

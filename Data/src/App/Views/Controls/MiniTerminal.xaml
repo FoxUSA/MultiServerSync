@@ -67,8 +67,8 @@
               <!--  мигает тусклым оранжевым, когда жмут кнопку, которой нечего делать  -->
               <Border
                 x:Name="Flash"
-                Background="#14E07A1F"
-                BorderBrush="#A0E07A1F"
+                Background="{DynamicResource Pick.FillFaint}"
+                BorderBrush="{DynamicResource Pick.StrokeStrong}"
                 BorderThickness="2"
                 CornerRadius="4"
                 IsHitTestVisible="False"
@@ -107,7 +107,7 @@
                     Visibility="{Binding DataContext.CommandBatch.IsRunning, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolToVis}}">
                     <ui:SymbolIcon
                       FontSize="{StaticResource IconGlyphSize}"
-                      Foreground="#E0574A"
+                      Foreground="{DynamicResource Bad.Text}"
                       Symbol="Stop24" />
                   </Button>
                   <Button
@@ -196,7 +196,7 @@
                     Click="OnAfterCopySwitch"
                     IsChecked="{Binding DataContext.AfterCopyEnabled, RelativeSource={RelativeSource AncestorType=UserControl}, Mode=TwoWay}"
                     MouseRightButtonUp="OnAfterCopySwitchRightClick"
-                    Style="{StaticResource DangerSwitchStyle}"
+                    Style="{DynamicResource DangerSwitchStyle}"
                     ToolTip="Выполнить личные команды вкладки на серверах, где копирование прошло. ПКМ — один раз выполнить команду из этого окна (×1)" />
                   <TextBlock
                     Margin="6,0,0,0"
@@ -204,7 +204,7 @@
                     VerticalAlignment="Center"
                     FontSize="10"
                     FontWeight="Bold"
-                    Foreground="White"
+                    Foreground="{DynamicResource Danger.SwitchText}"
                     IsHitTestVisible="False"
                     Text="×1">
                     <TextBlock.Style>

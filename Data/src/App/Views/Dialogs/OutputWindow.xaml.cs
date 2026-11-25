@@ -34,6 +34,9 @@ public partial class OutputWindow : FluentWindow
         // «Всем серверам» — по прогону, который показан в строке состояния
         Answer.BatchSource = () => StatusHost.DataContext as OperationBatch;
 
+        // тему сменили при открытом окне: цвет значка состояния у показанной строки — из новой темы
+        Core.AppTheme.Follow(this, () => (DataContext as OperationResult)?.RaiseTheme());
+
         Closing += OnClosing;
     }
 

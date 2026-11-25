@@ -1,7 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
-using System.Windows.Media;
 
 namespace MultiServerSync.Views.Controls;
 
@@ -17,10 +16,6 @@ namespace MultiServerSync.Views.Controls;
 /// </summary>
 public static class OutputColoring
 {
-    private static readonly SolidColorBrush Sent = Freeze(Color.FromRgb(0x2D, 0xB0, 0x55));
-    private static readonly SolidColorBrush Error = Freeze(Color.FromRgb(0xE8, 0x5C, 0x5C));
-    private static readonly SolidColorBrush Warning = Freeze(Color.FromRgb(0xE8, 0x9A, 0x3C));
-
     /// <summary>Начало строки-предупреждения: ничего не сломалось, но сделано не всё, что просили.</summary>
     public const string WarningMark = "— ВНИМАНИЕ: ";
 
@@ -41,6 +36,13 @@ public static class OutputColoring
 
     public static void SetText(DependencyObject d, string value) => d.SetValue(TextProperty, value);
 
+    /// <summary>Поле уже следит за сменой темы.</summary>
+    private static readonly DependencyProperty FollowsProperty = DependencyProperty.RegisterAttached(
+        "Follows",
+        typeof(bool),
+        typeof(OutputColoring),
+        new PropertyMetadata(false));
+
     private static void OnTextChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is not RichTextBox box)
@@ -48,7 +50,24 @@ public static class OutputColoring
             return;
         }
 
-        var text = e.NewValue as string ?? string.Empty;
+        if (!(bool)box.GetValue(FollowsProperty))
+        {
+            box.SetValue(FollowsProperty, true);
+
+            // Цветные строки берут кисть темы напрямую: тысячи строк на одной замороженной кисти, как и было.
+            // Тему сменили — документ собирается заново, уже с кистями новой темы.
+            Core.AppTheme.Follow(box, () =>
+            {
+                box.SetValue(ShownProperty, string.Empty);
+                Render(box, GetText(box));
+            });
+        }
+
+        Render(box, e.NewValue as string ?? string.Empty);
+    }
+
+    private static void Render(RichTextBox box, string text)
+    {
         var shown = (string)box.GetValue(ShownProperty);
         var paragraph = box.Document.Blocks.FirstBlock as Paragraph;
 
@@ -117,7 +136,7 @@ public static class OutputColoring
         // отправленный файл — и в ходе копирования, и в списке под итогом
         if (line.StartsWith("→ ", StringComparison.Ordinal))
         {
-            run.Foreground = Sent;
+            run.Foreground = Core.AppTheme.Brush("Output.Sent.Text");
             run.FontWeight = FontWeights.SemiBold;
         }
         else if (line.StartsWith("── ", StringComparison.Ordinal))
@@ -141,23 +160,16 @@ public static class OutputColoring
         }
         else if (line.StartsWith(WarningMark, StringComparison.Ordinal))
         {
-            run.Foreground = Warning;
+            run.Foreground = Core.AppTheme.Brush("Output.Warning.Text");
             run.FontWeight = FontWeights.SemiBold;
         }
         else if (line.StartsWith("ОШИБКА", StringComparison.Ordinal)
             || line.StartsWith("РАСХОЖДЕНИЕ", StringComparison.Ordinal)
             || line.StartsWith("НЕ СВЕРЕНО", StringComparison.Ordinal))
         {
-            run.Foreground = Error;
+            run.Foreground = Core.AppTheme.Brush("Output.Error.Text");
         }
 
         return run;
-    }
-
-    private static SolidColorBrush Freeze(Color color)
-    {
-        var brush = new SolidColorBrush(color);
-        brush.Freeze();
-        return brush;
     }
 }

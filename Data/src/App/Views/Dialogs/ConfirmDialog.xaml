@@ -43,7 +43,7 @@
         VerticalAlignment="Top"
         Filled="True"
         FontSize="32"
-        Foreground="#E8B54A"
+        Foreground="{DynamicResource Warn.Icon}"
         Symbol="Warning24" />
 
       <StackPanel Grid.Column="1" VerticalAlignment="Center">

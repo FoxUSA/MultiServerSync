@@ -51,6 +51,15 @@ public partial class ResultsView : UserControl
         Loaded += (_, _) => agoTimer.Start();
         Unloaded += (_, _) => agoTimer.Stop();
 
+        // цвет статуса строка берёт из темы — сменилась тема, показанные строки перечитывают его
+        Core.AppTheme.Follow(this, () =>
+        {
+            foreach (var row in _rows)
+            {
+                row.RaiseTheme();
+            }
+        });
+
         // окно команды в «Проводнике»: открыто ли оно — помнится между запусками, команда пошла — назад к выводу
         _commandOpen = AppState.Current.Settings.ExplorerCommandOpen;
         CommandFace.Launched += () => Flip(false);
@@ -166,8 +175,8 @@ public partial class ResultsView : UserControl
         {
             if (on)
             {
-                badge.Background = new SolidColorBrush(Color.FromRgb(0x2E, 0x7D, 0x3E));
-                glyph.Foreground = Brushes.White;
+                badge.SetResourceReference(Border.BackgroundProperty, "Exclude.Own");
+                glyph.SetResourceReference(IconElement.ForegroundProperty, "Exclude.OnBadge");
             }
             else
             {

@@ -126,6 +126,12 @@
               Width="Auto"
               Binding="{Binding Server.Host}"
               Header="IP / хост" />
+            <!--  страна и город по адресу (GeoLite2) — только показ  -->
+            <DataGridTextColumn
+              Width="Auto"
+              Binding="{Binding Server.Geo, Mode=OneWay}"
+              Header="Гео"
+              IsReadOnly="True" />
             <DataGridTextColumn
               Width="Auto"
               Binding="{Binding Server.Port}"
@@ -196,6 +202,12 @@
               Width="Auto"
               Binding="{Binding Server.Host}"
               Header="IP / хост" />
+            <!--  страна и город по адресу (GeoLite2) — только показ  -->
+            <DataGridTextColumn
+              Width="Auto"
+              Binding="{Binding Server.Geo, Mode=OneWay}"
+              Header="Гео"
+              IsReadOnly="True" />
             <DataGridTextColumn
               Width="Auto"
               Binding="{Binding Server.Port}"

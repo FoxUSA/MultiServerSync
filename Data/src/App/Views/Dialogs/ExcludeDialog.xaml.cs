@@ -489,13 +489,6 @@ public partial class ExcludeDialog : FluentWindow
         Note($"Добавлено масок: {added}.");
     }
 
-    private static System.Windows.Media.Brush Frozen(byte r, byte g, byte b)
-    {
-        var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(r, g, b));
-        brush.Freeze();
-        return brush;
-    }
-
     private static List<string> Lines(string text) =>
         text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
@@ -869,9 +862,9 @@ public partial class ExcludeDialog : FluentWindow
             var hits = row.Hits switch
             {
                 null => Cell("—", "TextFillColorTertiaryBrush", right: true),
-                > 0 => Cell(row.Hits.Value.ToString("N0"), OkBrush, right: true),
-                _ when include && row.Matched > 0 => Cell($"0 (и так едут: {row.Matched:N0})", WarnBrush, right: true),
-                _ => Cell(row.Hint is null ? "0" : $"0 ({row.Hint})", WarnBrush, right: true),
+                > 0 => Cell(row.Hits.Value.ToString("N0"), HitKey, right: true),
+                _ when include && row.Matched > 0 => Cell($"0 (и так едут: {row.Matched:N0})", MissKey, right: true),
+                _ => Cell(row.Hint is null ? "0" : $"0 ({row.Hint})", MissKey, right: true),
             };
 
             stripe = !stripe;
@@ -904,7 +897,7 @@ public partial class ExcludeDialog : FluentWindow
         }
     }
 
-    private static System.Windows.Controls.TextBlock Cell(string text, object brush, bool right = false)
+    private static System.Windows.Controls.TextBlock Cell(string text, string key, bool right = false)
     {
         var cell = new System.Windows.Controls.TextBlock
         {
@@ -912,29 +905,21 @@ public partial class ExcludeDialog : FluentWindow
             HorizontalAlignment = right ? HorizontalAlignment.Right : HorizontalAlignment.Left,
         };
 
-        cell.Inlines.Add(Paint(new System.Windows.Documents.Run(text), brush));
+        cell.Inlines.Add(Paint(new System.Windows.Documents.Run(text), key));
         return cell;
     }
 
-    /// <summary>Кисть темы — по ключу, чтобы следовать за темой; своя — как есть.</summary>
-    private static System.Windows.Documents.Run Paint(System.Windows.Documents.Run run, object brush)
+    /// <summary>Кисть темы — по имени, чтобы следовать за темой.</summary>
+    private static System.Windows.Documents.Run Paint(System.Windows.Documents.Run run, string key)
     {
-        if (brush is string key)
-        {
-            run.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, key);
-        }
-        else
-        {
-            run.Foreground = (System.Windows.Media.Brush)brush;
-        }
-
+        run.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, key);
         return run;
     }
 
     /// <summary>Маска сработала — зелёным, ничего не задела — оранжевым: так в программе отмечено «обратите внимание».</summary>
-    private static readonly System.Windows.Media.Brush OkBrush = Frozen(0x3F, 0xA3, 0x5A);
+    private const string HitKey = "Exclude.HitText";
 
-    private static readonly System.Windows.Media.Brush WarnBrush = Frozen(0xE0, 0x7A, 0x1F);
+    private const string MissKey = "Exclude.MissText";
 
     /// <summary>Вкладка под замком: окно только показывает исключения.</summary>
     private readonly bool _viewOnly;

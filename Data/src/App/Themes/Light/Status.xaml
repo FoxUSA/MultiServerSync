@@ -1,0 +1,33 @@
+﻿<!--  СВЕТЛАЯ ТЕМА — статусы, журнал, вывод, плашки-уведомления. Те же имена, что в соседней папке; значения свои.  -->
+<ResourceDictionary
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!--  статус строки прогона: значок и подпись в таблице результатов и в окне вывода (на белом от 4,5:1)  -->
+  <SolidColorBrush x:Key="Status.Idle.Text" Color="#59636E" />
+  <SolidColorBrush x:Key="Status.Running.Text" Color="#0969DA" />
+  <SolidColorBrush x:Key="Status.Ok.Text" Color="#1A7F37" />
+  <SolidColorBrush x:Key="Status.Failed.Text" Color="#CF222E" />
+  <!--  сделано с оговоркой или отменено  -->
+  <SolidColorBrush x:Key="Status.Warning.Text" Color="#9A6700" />
+
+  <!--  строка журнала по уровню  -->
+  <SolidColorBrush x:Key="Log.Info.Text" Color="#1F2328" />
+  <SolidColorBrush x:Key="Log.Success.Text" Color="#1A7F37" />
+  <SolidColorBrush x:Key="Log.Warning.Text" Color="#9A6700" />
+  <SolidColorBrush x:Key="Log.Error.Text" Color="#CF222E" />
+
+  <!--  вывод сервера: отправленный файл, «ВНИМАНИЕ», ошибка и расхождение  -->
+  <SolidColorBrush x:Key="Output.Sent.Text" Color="#1A7F37" />
+  <SolidColorBrush x:Key="Output.Warning.Text" Color="#9A6700" />
+  <SolidColorBrush x:Key="Output.Error.Text" Color="#CF222E" />
+
+  <!--  плашка-уведомление: рамка удачи, рамка и заливка ошибки (прочее — рамкой Pick.Stroke)  -->
+  <SolidColorBrush x:Key="Toast.Success.Stroke" Color="#2DA44E" />
+  <SolidColorBrush x:Key="Toast.Error.Stroke" Color="#D1242F" />
+  <SolidColorBrush x:Key="Toast.Error.Fill" Color="#FFEBE9" />
+
+  <!--  вспышка строк целевых серверов при запуске без отмеченных: цвет на пике, начало — он же прозрачный  -->
+  <Color x:Key="Flash.Peak">#40CF6A12</Color>
+
+</ResourceDictionary>

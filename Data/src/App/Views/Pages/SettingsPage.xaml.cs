@@ -21,22 +21,22 @@ public partial class SettingsPage : Page
         CommandTimeoutBox.Value = settings.CommandTimeoutSeconds;
         RepeatGuardSwitch.IsChecked = settings.RepeatGuard;
 
-        foreach (ComboBoxItem item in ThemeBox.Items)
-        {
-            if ((string)item.Tag == settings.Theme)
-            {
-                ThemeBox.SelectedItem = item;
-            }
-        }
-
-        ThemeBox.SelectedItem ??= ThemeBox.Items[0];
-
         // громкость не из списка (правили файл руками) — ближайшая из списка
         SoundBox.SelectedItem = SoundBox.Items.Cast<ComboBoxItem>()
             .MinBy(item => Math.Abs(int.Parse((string)item.Tag) - settings.FinishSoundVolume));
 
         VersionText.Text = AppVersion.Details;
         ManifestPathText.Text = "Берётся из " + AppPaths.ManifestFile;
+        ShowGeo();
+
+        // база обновилась — дата в строке следом; подписка только пока страница на экране
+        Loaded += (_, _) =>
+        {
+            GeoBase.Changed -= ShowGeo;
+            GeoBase.Changed += ShowGeo;
+            ShowGeo();
+        };
+        Unloaded += (_, _) => GeoBase.Changed -= ShowGeo;
 
         UserDataPathText.Text = AppPaths.UserDataDir;
         DataPathText.Text = AppPaths.DataDir;
@@ -131,19 +131,6 @@ public partial class SettingsPage : Page
             : "Защита от двойного запуска команды выключена.");
     }
 
-    private void OnThemeChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (!_ready || ThemeBox.SelectedItem is not ComboBoxItem { Tag: string theme })
-        {
-            return;
-        }
-
-        AppState.Current.Settings.Theme = theme;
-        AppState.Current.SaveSettings();
-        MainWindow.ApplyTheme(theme);
-        AppLog.Hint($"Тема переключена: {theme}.");
-    }
-
     private void OnSoundChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!_ready || SoundBox.SelectedItem is not ComboBoxItem { Tag: string tag })
@@ -156,7 +143,7 @@ public partial class SettingsPage : Page
         AppState.Current.Settings.FinishSoundVolume = volume;
         AppState.Current.SaveSettings();
         FinishSound.Preview();
-        AppLog.Hint(volume == 0 ? "Звук окончания команды выключен." : $"Громкость звука окончания: {volume}%.");
+        AppLog.Hint(volume == 0 ? "Звук уведомлений выключен." : $"Громкость звука уведомлений: {volume}%.");
     }
 
     private void OnNumbersChanged(object sender, RoutedEventArgs e)
@@ -186,6 +173,54 @@ public partial class SettingsPage : Page
 
     // ── обновление ───────────────────────────────────────────────────────────
 
-    private void OnUpdateClick(object sender, RoutedEventArgs e) =>
-        Dialogs.UpdateWindow.Open(Window.GetWindow(this));
+    /// <summary>Строка о гео-базе: чьи данные (условие GeoLite2 — указать MaxMind) и от какого числа.</summary>
+    private void ShowGeo() =>
+        GeoText.Text = "Гео серверов — данные GeoLite2 от MaxMind, https://www.maxmind.com"
+            + (GeoBase.DateText is { } date ? $" · база от {date}" : " · база ещё не скачана");
+
+    /// <summary>
+    /// «Обновить»: сначала гео-база (новая есть — качается, ход на кнопке), потом программа: есть свежая на
+    /// byfox.dev — сразу окно с ходом обновления (программа и лаунчер); нечего ставить — плашка.
+    /// </summary>
+    private async void OnUpdateClick(object sender, RoutedEventArgs e)
+    {
+        UpdateButton.IsEnabled = false;
+        UpdateButton.Content = "Проверка…";
+
+        try
+        {
+            var geo = await GeoBase.UpdateAsync(force: true, new Progress<int>(pct => UpdateButton.Content = $"Гео-база {pct}%"));
+            ShowGeo();
+
+            if (geo.Updated)
+            {
+                AppLog.Hint($"Гео-база обновлена: GeoLite2 от {GeoBase.DateText}.");
+            }
+            else if (geo.Error is { } why)
+            {
+                AppLog.Hint("Гео-базу обновить не удалось: " + why, LogLevel.Warning);
+            }
+
+            UpdateButton.Content = "Проверка…";
+
+            if (await UpdateService.CheckAsync() is not null)
+            {
+                Dialogs.UpdateWindow.Open(Window.GetWindow(this), start: true);
+            }
+            else if (!geo.Updated)
+            {
+                AppLog.Hint($"Обновлений нет: программа {AppVersion.Version} последняя"
+                    + (GeoBase.DateText is { } date ? $", гео-база от {date} свежая." : "."));
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Hint("Проверить обновления не удалось: " + ex.Message, LogLevel.Warning);
+        }
+        finally
+        {
+            UpdateButton.IsEnabled = true;
+            UpdateButton.Content = "Обновить";
+        }
+    }
 }

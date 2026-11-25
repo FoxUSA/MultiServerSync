@@ -1,0 +1,16 @@
+﻿<!--  СВЕТЛАЯ ТЕМА — панели, проводник, меню серверов, окно исключений. Те же имена, что в соседней папке; значения свои.  -->
+<ResourceDictionary
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!--  «Проводник», вкладка-фильтр: рамка выбранного режима — рамка без заливки, поэтому плотный оранжевый (3:1)  -->
+  <SolidColorBrush x:Key="Explorer.FilterRing" Color="#CF6A12" />
+
+  <!--  окно исключений, разбор масок: тёмные оттенки, текст не меньше 4.5:1 на белом  -->
+  <SolidColorBrush x:Key="Exclude.HitText" Color="#1A7F37" />
+  <SolidColorBrush x:Key="Exclude.MissText" Color="#B4560B" />
+
+  <!--  значки у адреса в «Проводнике» — спокойный серый фон, не подсветка  -->
+  <SolidColorBrush x:Key="Explorer.PathGroup.Fill" Color="#EDF0F3" />
+
+</ResourceDictionary>

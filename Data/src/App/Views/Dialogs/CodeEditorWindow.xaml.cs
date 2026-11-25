@@ -9,7 +9,6 @@ using ICSharpCode.AvalonEdit.Document;
 using ICSharpCode.AvalonEdit.Rendering;
 using MultiServerSync.Services;
 using MultiServerSync.Views.Controls;
-using Wpf.Ui.Appearance;
 using Wpf.Ui.Controls;
 
 namespace MultiServerSync.Views.Dialogs;
@@ -108,9 +107,6 @@ public partial class CodeEditorWindow : FluentWindow
 
     private void SetupEditor()
     {
-        var dark = ApplicationThemeManager.GetAppTheme() == ApplicationTheme.Dark;
-        CodeHighlighting.ApplyTheme(dark);
-
         var options = Editor.Options;
         options.ConvertTabsToSpaces = false;
         options.EnableHyperlinks = false;
@@ -118,21 +114,43 @@ public partial class CodeEditorWindow : FluentWindow
         options.HighlightCurrentLine = true;
 
         var area = Editor.TextArea;
-        var accent = TryFindResource("SystemAccentColor") is Color a ? a : Color.FromRgb(0x00, 0x78, 0xD4);
-        area.SelectionBrush = new SolidColorBrush(Color.FromArgb(0x70, accent.R, accent.G, accent.B));
         area.SelectionForeground = null;
         area.SelectionBorder = null;
         area.SelectionCornerRadius = 2;
-        area.Caret.CaretBrush = TryFindResource("TextFillColorPrimaryBrush") as Brush;
-        area.TextView.CurrentLineBackground = new SolidColorBrush(dark ? Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF) : Color.FromArgb(0x0C, 0, 0, 0));
         area.TextView.CurrentLineBorder = null;
         area.TextView.BackgroundRenderers.Add(_marker);
-        _marker.Brush = new SolidColorBrush(dark ? Color.FromArgb(0x60, 0xD1, 0x8B, 0x16) : Color.FromArgb(0x60, 0xF5, 0xC5, 0x18));
+        ApplyColors();
+
+        // тема сменилась при открытом редакторе — подсветка и свои цвета заново
+        Core.AppTheme.Follow(this, () =>
+        {
+            ApplyColors();
+            var syntax = Editor.SyntaxHighlighting;
+            Editor.SyntaxHighlighting = null;
+            Editor.SyntaxHighlighting = syntax;
+            area.TextView.Redraw();
+        });
 
         area.Caret.PositionChanged += (_, _) => UpdateInfo();
         Editor.TextChanged += (_, _) => UpdateTitle();
         Editor.PreviewKeyDown += OnEditorKeyDown;
         PreviewKeyDown += OnWindowKeyDown;
+    }
+
+    /// <summary>Цвета редактора из темы: подсветка, выделение (акцент системы), каретка, строка с кареткой, совпадения поиска.</summary>
+    private void ApplyColors()
+    {
+        CodeHighlighting.ApplyTheme();
+
+        var area = Editor.TextArea;
+        var accent = TryFindResource("SystemAccentColor") is Color a ? a : Color.FromRgb(0x00, 0x78, 0xD4);
+        var alpha = TryFindResource("Editor.SelectionAlpha") is byte b ? b : (byte)0x70;
+        var selection = new SolidColorBrush(Color.FromArgb(alpha, accent.R, accent.G, accent.B));
+        selection.Freeze();
+        area.SelectionBrush = selection;
+        area.Caret.CaretBrush = TryFindResource("TextFillColorPrimaryBrush") as Brush;
+        area.TextView.CurrentLineBackground = Core.AppTheme.Brush("Editor.CurrentLine");
+        _marker.Brush = Core.AppTheme.Brush("Editor.FindMarker");
     }
 
     // ── чтение ───────────────────────────────────────────────────────────────
@@ -595,9 +613,7 @@ public partial class CodeEditorWindow : FluentWindow
     private void Status(string text, bool error = false)
     {
         StatusText.Text = text;
-        StatusText.Foreground = error
-            ? TryFindResource("SystemFillColorCriticalBrush") as Brush
-            : TryFindResource("TextFillColorPrimaryBrush") as Brush;
+        StatusText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, error ? "SystemFillColorCriticalBrush" : "TextFillColorPrimaryBrush");
     }
 
     private static string Sha(byte[] data) => Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();

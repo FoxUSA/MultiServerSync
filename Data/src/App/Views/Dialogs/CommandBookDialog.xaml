@@ -155,8 +155,8 @@
                     <!--  сюда тащат запись: отпустишь — она переедет в эту вкладку  -->
                     <Border
                       x:Name="DropRing"
-                      Background="#26E07A1F"
-                      BorderBrush="#E07A1F"
+                      Background="{DynamicResource Pick.Fill}"
+                      BorderBrush="{DynamicResource Pick.Ring}"
                       BorderThickness="2"
                       CornerRadius="6"
                       IsHitTestVisible="False"

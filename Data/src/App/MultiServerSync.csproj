@@ -39,6 +39,11 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
+    <!--  сигнал «Мониторинга»: раздел сервера покраснел  -->
+    <Content Include="Assets\signal.mp3">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 
   <!--  WinForms подключён не целиком: его Application, Button, MessageBox спорили бы с WPF  -->
@@ -52,6 +57,8 @@
     <PackageReference Include="SSH.NET" Version="2026.0.0" />
     <!--  редактор «Править»: номера строк, подсветка, поиск  -->
     <PackageReference Include="AvalonEdit" Version="6.3.1.120" />
+    <!--  гео серверов: чтение GeoLite2-City (UserData\geo), Apache-2.0  -->
+    <PackageReference Include="MaxMind.GeoIP2" Version="6.0.0" />
   </ItemGroup>
 
 </Project>

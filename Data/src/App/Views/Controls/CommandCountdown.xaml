@@ -12,8 +12,8 @@
   -->
   <Border
     Padding="7,1,7,2"
-    Background="#38E07A1F"
-    BorderBrush="#80E07A1F"
+    Background="{DynamicResource Pick.FillStrong}"
+    BorderBrush="{DynamicResource Pick.Stroke}"
     BorderThickness="1"
     CornerRadius="4">
     <Border.Style>

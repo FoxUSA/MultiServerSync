@@ -20,12 +20,6 @@ public enum OperationStatus
 /// <summary>Строка результата по одному серверу.</summary>
 public sealed class OperationResult : ObservableObject
 {
-    private static readonly SolidColorBrush Grey = Freeze(Color.FromRgb(0x8A, 0x8A, 0x8A));
-    private static readonly SolidColorBrush Blue = Freeze(Color.FromRgb(0x4C, 0xA6, 0xFF));
-    private static readonly SolidColorBrush Green = Freeze(Color.FromRgb(0x4C, 0xC2, 0x6A));
-    private static readonly SolidColorBrush Red = Freeze(Color.FromRgb(0xE8, 0x5C, 0x5C));
-    private static readonly SolidColorBrush Orange = Freeze(Color.FromRgb(0xE8, 0xA5, 0x3C));
-
     private readonly StringBuilder _output = new();
     private readonly Lock _sync = new();
 
@@ -604,7 +598,7 @@ public sealed class OperationResult : ObservableObject
     private DateTime? _finishedUtc;
 
     /// <summary>
-    /// Столбец «Прошло»: сколько времени назад сервер закончил, чч:мм:сс. Тикает раз в секунду
+    /// Столбец «Прошло»: сколько времени назад сервер закончил — чч:мм:сс, с суток «2д 05:14», с десяти суток «18д 16ч». Тикает раз в секунду
     /// по таймеру таблицы (<see cref="RaiseAgo"/>), пока операция идёт — пусто.
     /// </summary>
     public string AgoText
@@ -616,8 +610,11 @@ public sealed class OperationResult : ObservableObject
                 return string.Empty;
             }
 
+            // в часах не больше двух цифр: с суток — дни, с десяти суток — без минут, чтобы влезало в столбец
             var ago = DateTime.UtcNow - finished;
-            return $"{(int)ago.TotalHours:00}:{ago.Minutes:00}:{ago.Seconds:00}";
+            return ago.TotalDays < 1 ? $"{ago.Hours:00}:{ago.Minutes:00}:{ago.Seconds:00}"
+                : ago.TotalDays < 10 ? $"{ago.Days}д {ago.Hours:00}:{ago.Minutes:00}"
+                : $"{(int)ago.TotalDays}д {ago.Hours:00}ч";
         }
     }
 
@@ -628,6 +625,9 @@ public sealed class OperationResult : ObservableObject
             Raise(nameof(AgoText));
         }
     }
+
+    /// <summary>Сменилась тема — цвет статуса перечитать.</summary>
+    public void RaiseTheme() => Raise(nameof(StatusBrush));
 
     /// <summary>
     /// Время в углу заголовка вывода: «идёт 1:23», пока команда работает, и «за 1:23»
@@ -826,18 +826,19 @@ public sealed class OperationResult : ObservableObject
         _ => SymbolRegular.Circle24,
     };
 
-    public Brush StatusBrush => Status switch
+    /// <summary>Кисть темы по статусу; после смены темы строку извещает таблица (<see cref="RaiseTheme"/>).</summary>
+    public Brush StatusBrush => AppTheme.Brush(Status switch
     {
-        OperationStatus.Cancelled when Skipped => Grey,
+        OperationStatus.Cancelled when Skipped => "Status.Idle.Text",
 
         // сделано, но с оговоркой (сравнение «не сошлось»): не ошибка программы — не красным
-        OperationStatus.Success when Warning => Orange,
-        OperationStatus.Success => Green,
-        OperationStatus.Failed => Red,
-        OperationStatus.Running => Blue,
-        OperationStatus.Cancelled => Orange,
-        _ => Grey,
-    };
+        OperationStatus.Success when Warning => "Status.Warning.Text",
+        OperationStatus.Success => "Status.Ok.Text",
+        OperationStatus.Failed => "Status.Failed.Text",
+        OperationStatus.Running => "Status.Running.Text",
+        OperationStatus.Cancelled => "Status.Warning.Text",
+        _ => "Status.Idle.Text",
+    });
 
     public string StatusText
     {
@@ -1058,12 +1059,5 @@ public sealed class OperationResult : ObservableObject
         }
 
         return row;
-    }
-
-    private static SolidColorBrush Freeze(Color color)
-    {
-        var brush = new SolidColorBrush(color);
-        brush.Freeze();
-        return brush;
     }
 }

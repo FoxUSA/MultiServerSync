@@ -73,6 +73,9 @@ public partial class App : Application
 
         base.OnStartup(e);
 
+        // цвета темы — до первого окна; пока тёмные, как и тема библиотеки в App.xaml
+        Core.AppTheme.Preload();
+
         // колесо мыши во всех окнах листает то, что под курсором
         WheelScroll.Register();
 
@@ -95,6 +98,9 @@ public partial class App : Application
         startup.Mark("подготовка");
         AppState.Current.Load();
         startup.Mark("загрузка серверов и вкладок");
+
+        // светлая тема — уже для окна мастер-пароля; в тёмной здесь ничего не происходит
+        Core.AppTheme.ApplyEarly(AppState.Current.Settings.Theme);
 
         // пароли серверов зашифрованы; с мастер-паролем — спросить его до главного окна
         PasswordVault.Init();

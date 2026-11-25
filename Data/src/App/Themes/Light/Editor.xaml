@@ -1,0 +1,30 @@
+﻿<!--  СВЕТЛАЯ ТЕМА — редактор кода и подсветка. Те же имена, что в соседней папке; значения свои.  -->
+<ResourceDictionary
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+  xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+
+  <!--  редактор «Править»: строка с кареткой, совпадения поиска  -->
+  <SolidColorBrush x:Key="Editor.CurrentLine" Color="#0C000000" />
+  <SolidColorBrush x:Key="Editor.FindMarker" Color="#60F5C518" />
+  <!--  выделение — цвет акцента системы с этой прозрачностью (0–255); на белом — бледнее, как в Light+  -->
+  <sys:Byte x:Key="Editor.SelectionAlpha">85</sys:Byte>
+
+  <!--  подсветка — как Light+ в VS Code; серый препроцессора темнее (#808080 на белом — меньше 4.5:1)  -->
+  <Color x:Key="Code.Comment">#FF008000</Color>
+  <Color x:Key="Code.String">#FFA31515</Color>
+  <Color x:Key="Code.Number">#FF098658</Color>
+  <Color x:Key="Code.Constant">#FF0000FF</Color>
+  <Color x:Key="Code.Keyword">#FF0000FF</Color>
+  <Color x:Key="Code.Control">#FFAF00DB</Color>
+  <Color x:Key="Code.Property">#FF001080</Color>
+  <Color x:Key="Code.Function">#FF795E26</Color>
+  <Color x:Key="Code.Type">#FF267F99</Color>
+  <Color x:Key="Code.Heading">#FF0070C1</Color>
+  <Color x:Key="Code.Preprocessor">#FF59636E</Color>
+  <Color x:Key="Code.Added">#FF098658</Color>
+  <Color x:Key="Code.Removed">#FFA31515</Color>
+  <!--  безымянные цвета описаний рассчитаны на белый фон — как есть  -->
+  <sys:Double x:Key="Code.UnnamedLift">0</sys:Double>
+
+</ResourceDictionary>

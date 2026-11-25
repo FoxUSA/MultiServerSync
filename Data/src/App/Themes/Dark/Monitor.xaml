@@ -1,0 +1,20 @@
+﻿<!--  ТЁМНАЯ ТЕМА — мониторинг. Те же имена, что в соседней папке; значения свои.  -->
+<ResourceDictionary
+  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!--  линии графиков: синяя и оранжевая; заливка под линией — тот же цвет, тающий к нулю  -->
+  <SolidColorBrush x:Key="Monitor.Series1" Color="#FF5B8DEF" />
+  <SolidColorBrush x:Key="Monitor.Series2" Color="#FFE0A040" />
+
+  <!--  стрелки сдвига: рост — жёлтая, спад — зелёная  -->
+  <SolidColorBrush x:Key="Monitor.Up" Color="#FFE0A43C" />
+  <SolidColorBrush x:Key="Monitor.Down" Color="#FF4FC06A" />
+
+  <!--  огонёк статуса карточки; у «высоко» и «перегрузки» — ещё слово статуса и шкала  -->
+  <SolidColorBrush x:Key="Monitor.Ok" Color="#FF1FA33F" />
+  <SolidColorBrush x:Key="Monitor.Warn" Color="#FFE0A43C" />
+  <SolidColorBrush x:Key="Monitor.Bad" Color="#FFE5483B" />
+  <SolidColorBrush x:Key="Monitor.Unknown" Color="#FF8A8A8A" />
+
+</ResourceDictionary>

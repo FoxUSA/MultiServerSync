@@ -81,16 +81,13 @@ public partial class CommandPage : Page
         StepsScroll.SizeChanged += (_, _) => FitSteps();
         ((INotifyCollectionChanged)StepsList.Items).CollectionChanged += (_, _) => FitSteps();
 
-        Wpf.Ui.Appearance.ApplicationThemeManager.Changed += OnThemeChanged;
+        // фон окон — после того, как тема загрузила свой набор: раньше он ещё прежний. Отписку держит Follow
+        Core.AppTheme.Follow(this, PaintBoxes);
 
         // страница в своём окне живёт, пока окно открыто: подписки на общее не держат её после закрытия
         if (_fixed)
         {
-            Unloaded += (_, _) =>
-            {
-                ClipboardWatch.Changed -= OnClipboardChanged;
-                Wpf.Ui.Appearance.ApplicationThemeManager.Changed -= OnThemeChanged;
-            };
+            Unloaded += (_, _) => ClipboardWatch.Changed -= OnClipboardChanged;
         }
 
         _clock.Tick += (_, _) =>
@@ -142,8 +139,6 @@ public partial class CommandPage : Page
     }
 
     private void OnClipboardChanged() => HasClipboardText = ClipboardWatch.HasText;
-
-    private void OnThemeChanged(Wpf.Ui.Appearance.ApplicationTheme theme, System.Windows.Media.Color accent) => PaintBoxes();
 
     /// <summary>Окно, куда подставлять: окно в фокусе.</summary>
     private CommandStep? ActiveStep => Workspace?.Steps.FirstOrDefault(s => s.IsFocused);

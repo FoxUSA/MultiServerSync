@@ -1,4 +1,6 @@
-﻿using System.Windows;
+﻿using System.Diagnostics;
+using System.IO;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
@@ -304,6 +306,60 @@ public partial class FilesPage : Page
         if (Workspace is { } workspace)
         {
             ExcludeDialog.Edit(Window.GetWindow(this), workspace, "копировании", viewOnly: workspace.IsPaneLocked);
+        }
+    }
+
+    /// <summary>ПКМ по локальному пути строки: меню «Открыть в проводнике».</summary>
+    private void OnItemPathMenu(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: TransferItem item } cell)
+        {
+            return;
+        }
+
+        e.Handled = true;
+
+        var open = new MenuItem
+        {
+            Header = "Открыть в проводнике",
+            Icon = new Wpf.Ui.Controls.SymbolIcon { Symbol = Wpf.Ui.Controls.SymbolRegular.FolderOpen24, FontSize = 16 },
+        };
+        open.Click += (_, _) => OpenInExplorer(item.FullPath);
+
+        var menu = new ContextMenu { PlacementTarget = cell, Placement = PlacementMode.MousePoint };
+        menu.Items.Add(open);
+        menu.IsOpen = true;
+    }
+
+    /// <summary>
+    /// Проводник Windows с выделенным файлом или папкой строки. Пути сейчас нет на диске —
+    /// открывается ближайшая существующая папка над ним.
+    /// </summary>
+    private static void OpenInExplorer(string path)
+    {
+        try
+        {
+            if (File.Exists(path) || Directory.Exists(path))
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+                return;
+            }
+
+            var folder = Path.GetDirectoryName(path.TrimEnd(Path.DirectorySeparatorChar));
+
+            while (!string.IsNullOrEmpty(folder) && !Directory.Exists(folder))
+            {
+                folder = Path.GetDirectoryName(folder);
+            }
+
+            if (!string.IsNullOrEmpty(folder))
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true });
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Debug("Не открылся проводник: " + ex.Message);
         }
     }
 

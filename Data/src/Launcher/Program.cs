@@ -120,10 +120,10 @@ internal static class Program
         return 0;
     }
 
-    /// <summary>Тема как в программе: Light | Dark | System из UserData\settings.json, по умолчанию тёмная.</summary>
+    /// <summary>Тема как в программе: Light | Dark | System из UserData\settings.json, по умолчанию как в Windows.</summary>
     private static void ApplyTheme(string root)
     {
-        var theme = "Dark";
+        var theme = "System";
 
         try
         {
@@ -136,14 +136,15 @@ internal static class Program
         }
         catch
         {
-            // настроек ещё нет или не читаются — остаётся тёмная, как у программы по умолчанию
+            // настроек ещё нет или не читаются — как в Windows, как у программы по умолчанию
         }
 
         // без подложки, как у программы: WPF-UI без явного указания включает Mica
         var target = theme switch
         {
             "Light" => Wpf.Ui.Appearance.ApplicationTheme.Light,
-            "System" => Wpf.Ui.Appearance.ApplicationThemeManager.GetSystemTheme() switch
+            "Dark" => Wpf.Ui.Appearance.ApplicationTheme.Dark,
+            _ => Wpf.Ui.Appearance.ApplicationThemeManager.GetSystemTheme() switch
             {
                 Wpf.Ui.Appearance.SystemTheme.Dark or Wpf.Ui.Appearance.SystemTheme.Glow
                     or Wpf.Ui.Appearance.SystemTheme.CapturedMotion => Wpf.Ui.Appearance.ApplicationTheme.Dark,
@@ -152,7 +153,6 @@ internal static class Program
                     => Wpf.Ui.Appearance.ApplicationTheme.HighContrast,
                 _ => Wpf.Ui.Appearance.ApplicationTheme.Light,
             },
-            _ => Wpf.Ui.Appearance.ApplicationTheme.Dark,
         };
         Wpf.Ui.Appearance.ApplicationThemeManager.Apply(target, Wpf.Ui.Controls.WindowBackdropType.None);
     }
